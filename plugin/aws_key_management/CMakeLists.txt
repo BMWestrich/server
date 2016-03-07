@@ -79,6 +79,7 @@ ENDIF()
 ExternalProject_Add(
   aws_sdk_cpp
   GIT_REPOSITORY "https://github.com/awslabs/aws-sdk-cpp.git"
+  GIT_TAG "0.9.6" # the only tag so far
   UPDATE_COMMAND ""
   ${AWS_SDK_PATCH_COMMAND}
   SOURCE_DIR "${CMAKE_BINARY_DIR}/aws-sdk-cpp"
