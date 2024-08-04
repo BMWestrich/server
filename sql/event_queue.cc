@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software Foundation,
-   51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA */
+   51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 #include <my_global.h>
 #include "sql_priv.h"
@@ -135,7 +135,7 @@ bool
 Event_queue::init_queue(THD *thd)
 {
   DBUG_ENTER("Event_queue::init_queue");
-  DBUG_PRINT("enter", ("this: 0x%lx", (long) this));
+  DBUG_PRINT("enter", ("this: %p", this));
 
   LOCK_QUEUE_DATA();
 
@@ -191,7 +191,7 @@ Event_queue::deinit_queue()
   @param[out] created  set to TRUE if no error and the element is
                        added to the queue, FALSE otherwise
 
-  @retval TRUE  an error occured. The value of created is undefined,
+  @retval TRUE  an error occurred. The value of created is undefined,
                 the element was not deleted.
   @retval FALSE success
 */
@@ -201,7 +201,7 @@ Event_queue::create_event(THD *thd, Event_queue_element *new_element,
                           bool *created)
 {
   DBUG_ENTER("Event_queue::create_event");
-  DBUG_PRINT("enter", ("thd: 0x%lx et=%s.%s", (long) thd,
+  DBUG_PRINT("enter", ("thd: %p et=%s.%s", thd,
              new_element->dbname.str, new_element->name.str));
 
   /* Will do nothing if the event is disabled */
@@ -213,7 +213,7 @@ Event_queue::create_event(THD *thd, Event_queue_element *new_element,
     DBUG_RETURN(FALSE);
   }
 
-  DBUG_PRINT("info", ("new event in the queue: 0x%lx", (long) new_element));
+  DBUG_PRINT("info", ("new event in the queue: %p", new_element));
 
   LOCK_QUEUE_DATA();
   *created= (queue_insert_safe(&queue, (uchar *) new_element) == FALSE);
@@ -242,7 +242,7 @@ Event_queue::update_event(THD *thd, LEX_STRING dbname, LEX_STRING name,
                           Event_queue_element *new_element)
 {
   DBUG_ENTER("Event_queue::update_event");
-  DBUG_PRINT("enter", ("thd: 0x%lx  et=[%s.%s]", (long) thd, dbname.str, name.str));
+  DBUG_PRINT("enter", ("thd: %p  et=[%s.%s]", thd, dbname.str, name.str));
 
   if ((new_element->status == Event_parse_data::DISABLED) ||
       (new_element->status == Event_parse_data::SLAVESIDE_DISABLED))
@@ -264,7 +264,7 @@ Event_queue::update_event(THD *thd, LEX_STRING dbname, LEX_STRING name,
   /* If not disabled event */
   if (new_element)
   {
-    DBUG_PRINT("info", ("new event in the queue: 0x%lx", (long) new_element));
+    DBUG_PRINT("info", ("new event in the queue: %p", new_element));
     queue_insert_safe(&queue, (uchar *) new_element);
     mysql_cond_broadcast(&COND_queue_state);
   }
@@ -290,7 +290,7 @@ void
 Event_queue::drop_event(THD *thd, LEX_STRING dbname, LEX_STRING name)
 {
   DBUG_ENTER("Event_queue::drop_event");
-  DBUG_PRINT("enter", ("thd: 0x%lx  db :%s  name: %s", (long) thd,
+  DBUG_PRINT("enter", ("thd: %p  db :%s  name: %s", thd,
                        dbname.str, name.str));
 
   LOCK_QUEUE_DATA();
@@ -357,7 +357,7 @@ Event_queue::drop_matching_events(THD *thd, LEX_STRING pattern,
     We don't call mysql_cond_broadcast(&COND_queue_state);
     If we remove the top event:
     1. The queue is empty. The scheduler will wake up at some time and
-       realize that the queue is empty. If create_event() comes inbetween
+       realize that the queue is empty. If create_event() comes in between
        it will signal the scheduler
     2. The queue is not empty, but the next event after the previous top,
        won't be executed any time sooner than the element we removed. Hence,
@@ -545,7 +545,7 @@ Event_queue::dbug_dump_queue(my_time_t when)
        i++)
   {
     et= ((Event_queue_element*)queue_element(&queue, i));
-    DBUG_PRINT("info", ("et: 0x%lx  name: %s.%s", (long) et,
+    DBUG_PRINT("info", ("et: %p  name: %s.%s", et,
                         et->dbname.str, et->name.str));
     DBUG_PRINT("info", ("exec_at: %lu  starts: %lu  ends: %lu  execs_so_far: %u  "
                         "expr: %ld  et.exec_at: %ld  now: %ld  "
@@ -635,6 +635,7 @@ Event_queue::get_top_for_execution_if_time(THD *thd,
     if (!(*event_name= new Event_queue_element_for_exec()) ||
         (*event_name)->init(top->dbname, top->name))
     {
+      delete *event_name;
       ret= TRUE;
       break;
     }
@@ -673,8 +674,8 @@ Event_queue::get_top_for_execution_if_time(THD *thd,
 end:
   UNLOCK_QUEUE_DATA();
 
-  DBUG_PRINT("info", ("returning %d  et_new: 0x%lx ",
-                      ret, (long) *event_name));
+  DBUG_PRINT("info", ("returning %d  et_new: %p ",
+                      ret, *event_name));
 
   if (*event_name)
   {

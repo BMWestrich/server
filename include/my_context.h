@@ -52,6 +52,9 @@ struct my_context {
 
 
 #ifdef MY_CONTEXT_USE_UCONTEXT
+#if defined(__APPLE__) && !defined(_XOPEN_SOURCE)
+#define _XOPEN_SOURCE
+#endif
 #include <ucontext.h>
 
 struct my_context {
@@ -178,7 +181,7 @@ struct mysql_async_context {
     resumed, eg. whether we woke up due to connection completed or timeout
     in mysql_real_connect_cont().
   */
-  unsigned int events_occured;
+  unsigned int events_occurred;
   /*
     This is set to the result of the whole asynchronous operation when it
     completes. It uses a union, as different calls have different return

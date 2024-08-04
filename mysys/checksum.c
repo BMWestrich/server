@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 
 #include <my_global.h>
@@ -30,7 +30,13 @@
 
 ha_checksum my_checksum(ha_checksum crc, const uchar *pos, size_t length)
 {
+#ifdef HAVE_CRC32_VPMSUM
+  extern unsigned int crc32ieee_vpmsum(unsigned int crc, const unsigned char *p,
+                                    unsigned long len);
+  crc= (ha_checksum) crc32ieee_vpmsum((uint) crc, pos, (uint) length);
+#else
   crc= (ha_checksum) crc32((uint)crc, pos, (uint) length);
+#endif
   DBUG_PRINT("info", ("crc: %lu", (ulong) crc));
   return crc;
 }

@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 
 /**
@@ -329,12 +329,26 @@ PROFILING::PROFILING()
 
 PROFILING::~PROFILING()
 {
+  restart();
+}
+
+/*
+  Restart profiling from scratch
+*/
+
+void PROFILING::restart()
+{
   while (! history.is_empty())
     delete history.pop();
 
   if (current != NULL)
     delete current;
+  /* Ensure that profiling object can be reused */
+  profile_id_counter= 1;
+  current= NULL;
+  last= NULL;
 }
+
 
 /**
   Throw away the current profile, because it's useless or unwanted
@@ -675,6 +689,6 @@ int PROFILING::fill_statistics_info(THD *thd_arg, TABLE_LIST *tables, Item *cond
 
 void PROFILING::reset()
 {
-  enabled= thd->variables.option_bits & OPTION_PROFILING;
+  enabled= (thd->variables.option_bits & OPTION_PROFILING) != 0;
 }
 #endif /* ENABLED_PROFILING */

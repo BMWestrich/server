@@ -13,12 +13,33 @@ CCCCCCCCCC	3
 CCCCCCCCCC	4
 set debug_sync='myisam_before_repair_by_sort wait_for go';
 optimize table t1;
+connect  con1,localhost,root,,;
 select a, left(b,10) from t1 order by a;
+connect  con2,localhost,root,,;
 set debug_sync='now signal go';
+connection default;
 Table	Op	Msg_type	Msg_text
 test.t1	optimize	status	OK
+connection con1;
 a	left(b,10)
 3	CCCCCCCCCC
 4	CCCCCCCCCC
+disconnect con1;
+disconnect con2;
+connection default;
 drop table t1;
 set debug_sync='reset';
+# End of 5.5 tests
+CREATE TABLE t1 (i INT) ENGINE=MyISAM;
+INSERT t1 VALUES (1);
+LOCK TABLE t1 WRITE;
+OPTIMIZE TABLE t1;
+Table	Op	Msg_type	Msg_text
+test.t1	optimize	status	OK
+SELECT * FROM INFORMATION_SCHEMA.TABLES;
+SELECT * FROM t1;
+i
+1
+UNLOCK TABLES;
+DROP TABLE t1;
+# End of 10.0 tests

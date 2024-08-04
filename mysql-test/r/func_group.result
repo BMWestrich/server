@@ -1409,7 +1409,7 @@ EXPLAIN EXTENDED SELECT y FROM v1 GROUP BY v1.y;
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	ALL	NULL	NULL	NULL	NULL	4	100.00	Using temporary; Using filesort
 Warnings:
-Note	1003	select (`test`.`t1`.`a` + 1) AS `y` from `test`.`t1` group by (`test`.`t1`.`a` + 1)
+Note	1003	select `test`.`t1`.`a` + 1 AS `y` from `test`.`t1` group by `test`.`t1`.`a` + 1
 DROP VIEW v1;
 DROP TABLE t1;
 SET SQL_MODE=DEFAULT;
@@ -1519,7 +1519,7 @@ SELECT MAX(pk) as max, i
 FROM t1
 ORDER BY max;
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	Extra
-1	SIMPLE	t1	ALL	NULL	NULL	NULL	NULL	3	Using temporary
+1	SIMPLE	t1	ALL	NULL	NULL	NULL	NULL	3	
 
 # Only 11 is correct for collumn i in this result
 SELECT MAX(pk) as max, i
@@ -1860,7 +1860,7 @@ id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	PRIMARY	t1	range	a	a	4	NULL	4	100.00	Using where; Using index; Using join buffer (flat, BNL join)
 2	MATERIALIZED	t2	ALL	NULL	NULL	NULL	NULL	5	100.00	Using where
 Warnings:
-Note	1003	select max(`test`.`t1`.`a`) AS `MAX(a)` from `test`.`t1` semi join (`test`.`t2`) where ((`test`.`t2`.`a` = 1) and (`test`.`t2`.`b` = 2) and (`test`.`t1`.`a` < 10))
+Note	1003	select max(`test`.`t1`.`a`) AS `MAX(a)` from `test`.`t1` semi join (`test`.`t2`) where `test`.`t2`.`a` = 1 and `test`.`t2`.`b` = 2 and `test`.`t1`.`a` < 10
 SELECT MAX(a) FROM t1 WHERE (1,2) IN (SELECT a,b FROM t2 WHERE b<5) and a<10;
 MAX(a)
 NULL
@@ -1869,7 +1869,7 @@ SELECT MAX(a) FROM t1 WHERE RAND()*0<>0 AND a<10;
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	range	a	a	4	NULL	4	100.00	Using where; Using index
 Warnings:
-Note	1003	select max(`test`.`t1`.`a`) AS `MAX(a)` from `test`.`t1` where (((rand() * 0) <> 0) and (`test`.`t1`.`a` < 10))
+Note	1003	select max(`test`.`t1`.`a`) AS `MAX(a)` from `test`.`t1` where rand() * 0 <> 0 and `test`.`t1`.`a` < 10
 SELECT MAX(a) FROM t1 WHERE RAND()*0<>0 AND a<10;
 MAX(a)
 NULL
@@ -1891,7 +1891,7 @@ id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 2	DEPENDENT SUBQUERY	t2	system	NULL	NULL	NULL	NULL	1	100.00	
 Warnings:
 Note	1276	Field or reference 'test.t3.b' of SELECT #2 was resolved in SELECT #1
-Note	1003	select <expr_cache><`test`.`t3`.`b`>((select min(1) from dual where (10 = `test`.`t3`.`b`))) AS `(SELECT MIN(t1.a) FROM t1,t2 WHERE t2.a = t3.b)` from `test`.`t3`
+Note	1003	select <expr_cache><`test`.`t3`.`b`>((select min(1) from dual where 10 = `test`.`t3`.`b`)) AS `(SELECT MIN(t1.a) FROM t1,t2 WHERE t2.a = t3.b)` from `test`.`t3`
 SELECT (SELECT MIN(t1.a) FROM t1,t2 WHERE t2.a = t3.b) FROM t3;
 (SELECT MIN(t1.a) FROM t1,t2 WHERE t2.a = t3.b)
 NULL
@@ -1979,8 +1979,9 @@ FROM t2);
 MIN(t2.pk)
 NULL
 Warnings:
-Warning	1292	Truncated incorrect INTEGER value: 'j'
-Warning	1292	Truncated incorrect INTEGER value: 'j'
+Warning	1292	Truncated incorrect DOUBLE value: 'j'
+Warning	1292	Truncated incorrect DOUBLE value: 'j'
+Warning	1292	Truncated incorrect DOUBLE value: 'j'
 
 EXPLAIN
 SELECT MIN(t2.pk)
@@ -1993,8 +1994,9 @@ id	select_type	table	type	possible_keys	key	key_len	ref	rows	Extra
 1	PRIMARY	NULL	NULL	NULL	NULL	NULL	NULL	NULL	Impossible WHERE
 2	MATERIALIZED	t2	ALL	NULL	NULL	NULL	NULL	2	
 Warnings:
-Warning	1292	Truncated incorrect INTEGER value: 'j'
-Warning	1292	Truncated incorrect INTEGER value: 'j'
+Warning	1292	Truncated incorrect DOUBLE value: 'j'
+Warning	1292	Truncated incorrect DOUBLE value: 'j'
+Warning	1292	Truncated incorrect DOUBLE value: 'j'
 
 #
 # 2) Test that subquery materialization is setup for query with
@@ -2108,8 +2110,8 @@ avg(export_set( 3, 'y', sha(i)))	group_concat(d)
 0	2008-10-02
 0	2010-12-12
 Warnings:
-Warning	1292	Truncated incorrect DOUBLE value: 'y,y,356a192b7913b04c54574d18c28d46e6395428ab,356a192b7913b04c54574d18c28d46e6395428ab,356a192b7913b04c54574d18c28d46e6395428ab,3'
-Warning	1292	Truncated incorrect DOUBLE value: 'y,y,da4b9237bacccdf19c0760cab7aec4a8359010b0,da4b9237bacccdf19c0760cab7aec4a8359010b0,da4b9237bacccdf19c0760cab7aec4a8359010b0,d'
+Warning	1292	Truncated incorrect DOUBLE value: 'y,y,356a192b7913b04c54574d18c28d46e6395428ab,356a192b7913b04c54574d18c28d46e6395428ab,356a192b7913b04c54574d18c28d46e6395428a...'
+Warning	1292	Truncated incorrect DOUBLE value: 'y,y,da4b9237bacccdf19c0760cab7aec4a8359010b0,da4b9237bacccdf19c0760cab7aec4a8359010b0,da4b9237bacccdf19c0760cab7aec4a8359010b...'
 drop table t1;
 #
 # MDEV-4290: crash in st_select_lex::mark_as_dependent
@@ -2220,11 +2222,15 @@ INSERT INTO `t1` (b) VALUES ('2013-07-06 23:59:59');
 EXPLAIN SELECT MIN(b) FROM t1 WHERE b <= '2013-11-06 23:59:59';
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	Extra
 1	SIMPLE	NULL	NULL	NULL	NULL	NULL	NULL	NULL	Select tables optimized away
+connect  con1,localhost,root,,;
+connection con1;
 set names utf8;
 # Should be the same as above:
 EXPLAIN SELECT MIN(b) FROM t1 WHERE b <= '2013-11-06 23:59:59';
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	Extra
 1	SIMPLE	NULL	NULL	NULL	NULL	NULL	NULL	NULL	Select tables optimized away
+connection default;
+disconnect con1;
 DROP TABLE t1;
 CREATE TABLE `t1` (
 `a` int(11) NOT NULL AUTO_INCREMENT,
@@ -2274,6 +2280,45 @@ EXECUTE stmt;
 t2_id	GROUP_CONCAT(IF (t6.b, t6.f, t5.f) ORDER BY 1)
 DROP TABLE t1,t2,t3,t4,t5,t6;
 #
+# MDEV-10500 CASE/IF Statement returns multiple values and shifts further result values to the next column
+#
+CREATE TABLE t1 (
+id int not null AUTO_INCREMENT,
+active bool not null,
+data1 bigint,
+data2 bigint,
+data3 bigint,
+primary key (id)
+);
+INSERT INTO t1 (active,data1,data2,data3) VALUES (1,null,100,200);
+SELECT
+CASE WHEN active THEN SUM(data1) END AS C_1,
+SUM(data2) AS C_2,
+SUM(data3) AS C_3
+FROM t1;
+C_1	C_2	C_3
+NULL	100	200
+SELECT
+IF(active, SUM(data1), 5) AS C_1,
+SUM(data2) AS C_2,
+SUM(data3) AS C_3
+FROM t1;
+C_1	C_2	C_3
+NULL	100	200
+DROP TABLE t1;
+#
+# MDEV-10468 Assertion `nr >= 0.0' failed in Item_sum_std::val_real()
+#
+SELECT STDDEV_POP(f) FROM (SELECT "1e+309" AS f UNION SELECT "-1e+309" AS f) tbl;
+STDDEV_POP(f)
+1.7976931348623157e308
+Warnings:
+Warning	1292	Truncated incorrect DOUBLE value: '1e+309'
+Warning	1292	Truncated incorrect DOUBLE value: '-1e+309'
+SELECT STDDEV(f) FROM (SELECT 1.7976931348623157e+308 AS f UNION SELECT -1.7976931348623157e+308 AS f) tbl;
+STDDEV(f)
+1.7976931348623157e308
+#
 # MDEV-8852 Implicit or explicit CAST from MAX(string) to INT,DOUBLE,DECIMAL does not produce warnings
 #
 SELECT MAX('x') << 1, CAST(MAX('x') AS DOUBLE), CAST(MAX('x') AS DECIMAL);
@@ -2296,6 +2341,15 @@ SELECT id, AVG(a) AS avg, CAST(AVG(a) AS SIGNED) AS cast_avg FROM t1 GROUP BY id
 id	avg	cast_avg
 1	9223372036854775807.0000	9223372036854775807
 2	9223372036854775807.0000	9223372036854775807
+DROP TABLE t1;
+#
+# MDEV-9656 Assertion `0' failed in Item_sum_field::get_tmp_table_field()
+#
+CREATE TABLE t1 (i INT);
+INSERT INTO t1 VALUES (1),(2);
+SELECT DISTINCT VAR_POP(1) FROM t1 GROUP BY @a := 's';
+VAR_POP(1)
+0.0000
 DROP TABLE t1;
 #
 # MDEV-8921 Wrong result for CAST(AVG(double_column) AS SIGNED)
@@ -2331,5 +2385,135 @@ companynr	AVG(fld1)	avg1	avg2
 37	9223372036854775805.0000	9223372036854775805	9223372036854775805
 DROP TABLE t1;
 #
+# case where aggregate resolved in the local SELECT
+# but outer ones are checked
+#
+create table t10 (a int , b int, c int);
+insert into t10 values (0,0,0),(1,1,1);
+create table t11 as select * from t10;
+create table t12 as select * from t10;
+explain extended select a from t10 where c<3 or a in (select c from t12 union select max(t10.b) from t11 group by t11.c);
+id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
+1	PRIMARY	t10	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
+2	DEPENDENT SUBQUERY	t12	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
+3	DEPENDENT UNION	t11	ALL	NULL	NULL	NULL	NULL	2	100.00	Using temporary
+NULL	UNION RESULT	<union2,3>	ALL	NULL	NULL	NULL	NULL	NULL	NULL	
+Warnings:
+Note	1276	Field or reference 'test.t10.b' of SELECT #3 was resolved in SELECT #1
+Note	1003	select `test`.`t10`.`a` AS `a` from `test`.`t10` where `test`.`t10`.`c` < 3 or <expr_cache><`test`.`t10`.`a`,`test`.`t10`.`b`>(<in_optimizer>(`test`.`t10`.`a`,<exists>(select `test`.`t12`.`c` from `test`.`t12` where <cache>(`test`.`t10`.`a`) = `test`.`t12`.`c` union select max(`test`.`t10`.`b`) from `test`.`t11` group by `test`.`t11`.`c` having <cache>(`test`.`t10`.`a`) = <ref_null_helper>(max(`test`.`t10`.`b`)))))
+drop table t10,t11,t12;
+#
+# MDEV-10017: Get unexpected `Empty Set` for correlated subquery
+# with aggregate functions
+#
+create table t1(c1 int, c2 int, c3 int);
+insert into t1 values(1,1,1),(2,2,2),(3,3,3);
+select * from t1;
+c1	c2	c3
+1	1	1
+2	2	2
+3	3	3
+create table t2(c1 int, c2 int);
+insert into t2 values(2,2);
+select * from t2;
+c1	c2
+2	2
+explain extended
+select c1 from t1 having c1 >= (select t.c1 as c from t2 t order by (select min(t1.c1+c) from t2 tt));
+ERROR HY000: Invalid use of group function
+select c1 from t1 having c1 >= (select t.c1 as c from t2 t order by (select min(t1.c1+c) from t2 tt));
+ERROR HY000: Invalid use of group function
+explain extended
+select c1 from t1 having c1 >= (select t.c1 as c from t2 t order by (select min(t1.c1+tt.c1) from t2 tt));
+id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
+1	PRIMARY	t1	ALL	NULL	NULL	NULL	NULL	3	100.00	
+2	DEPENDENT SUBQUERY	t	system	NULL	NULL	NULL	NULL	1	100.00	
+3	DEPENDENT SUBQUERY	tt	system	NULL	NULL	NULL	NULL	1	100.00	
+Warnings:
+Note	1276	Field or reference 'test.t1.c1' of SELECT #3 was resolved in SELECT #1
+Note	1003	select `test`.`t1`.`c1` AS `c1` from `test`.`t1` having `test`.`t1`.`c1` >= <expr_cache><`test`.`t1`.`c1`>((select 2 AS `c` from dual order by (select min(`test`.`t1`.`c1` + 2) from dual)))
+select c1 from t1 having c1 >= (select t.c1 as c from t2 t order by (select min(t1.c1+tt.c1) from t2 tt));
+c1
+2
+3
+drop table t1,t2;
+#
+# MDEV-10556 Assertion `0' failed in virtual void Item_sum_field::set_result_field(Field*)
+#
+CREATE TABLE t1 (i INT, KEY(i)) ENGINE=MyISAM;
+INSERT INTO t1 VALUES (10),(20),(30);
+SELECT DISTINCT STDDEV(1) FROM t1 GROUP BY i ORDER BY BENCHMARK(0, BIT_XOR(i));
+STDDEV(1)
+0.0000
+DROP TABLE t1;
+#
 # End of 10.1 tests
+#
+#
+# MDEV-13064: assertion `n < m_size' fails in Item::split_sum_func2()
+#
+create table t1 (i int) engine=MyISAM;
+insert into t1 value (1),(2);
+select count(*)+sleep(0) from t1;
+count(*)+sleep(0)
+2
+drop table t1;
+#
+# MDEV-25112: MIN/MAX optimization for query containing BETWEEN in WHERE
+#
+create table t1 (a int) engine=myisam;
+insert into t1 values (267), (273),  (287), (303), (308);
+select max(a) from t1 where a < 303 and (a between 267 AND 287);
+max(a)
+287
+explain select max(a) from t1 where a < 303 and (a between 267 AND 287);
+id	select_type	table	type	possible_keys	key	key_len	ref	rows	Extra
+1	SIMPLE	t1	ALL	NULL	NULL	NULL	NULL	5	Using where
+select min(a) from t1 where a > 267 and (a between 273 AND 303);
+min(a)
+273
+explain select min(a) from t1 where a > 267 and (a between 273 AND 303);
+id	select_type	table	type	possible_keys	key	key_len	ref	rows	Extra
+1	SIMPLE	t1	ALL	NULL	NULL	NULL	NULL	5	Using where
+create index idx on t1(a);
+select max(a) from t1 where a < 303 and (a between 267 AND 287);
+max(a)
+287
+explain select max(a) from t1 where a < 303 and (a between 267 AND 287);
+id	select_type	table	type	possible_keys	key	key_len	ref	rows	Extra
+1	SIMPLE	NULL	NULL	NULL	NULL	NULL	NULL	NULL	Select tables optimized away
+select min(a) from t1 where a > 267 and (a between 273 AND 303);
+min(a)
+273
+explain select min(a) from t1 where a > 267 and (a between 273 AND 303);
+id	select_type	table	type	possible_keys	key	key_len	ref	rows	Extra
+1	SIMPLE	NULL	NULL	NULL	NULL	NULL	NULL	NULL	Select tables optimized away
+drop table t1;
+#
+# MDEV-23809: Server crash in JOIN_CACHE::free or ...
+#
+CREATE TABLE t1 (a INT);
+INSERT INTO t1 VALUES (1),(2);
+SELECT DISTINCT CASE CONVERT(EXPORT_SET(0, COLLATION(BENCHMARK(1, BIT_OR(0))),0),TIME) WHEN a THEN 1 END AS f FROM t1;
+f
+NULL
+Warnings:
+Warning	1292	Truncated incorrect time value: '0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0'
+DROP TABLE t1;
+CREATE TABLE t1 (a VARCHAR(8) NULL, b BIGINT);
+INSERT INTO t1 (a,b) VALUES (NULL,NULL),('foo',NULL);
+SELECT DISTINCT STRCMP((b > COLLATION(STDDEV_SAMP(15750))), a) AS f FROM t1;
+f
+NULL
+DROP TABLE t1;
+CREATE TABLE t1 (a BIGINT) AS SELECT 1 AS v3 UNION SELECT FALSE ;
+SELECT DISTINCT a IN ( COLLATION (AVG ('x'))) FROM t1 ;
+a IN ( COLLATION (AVG ('x')))
+NULL
+Warnings:
+Warning	1292	Truncated incorrect DOUBLE value: 'x'
+Warning	1292	Truncated incorrect DOUBLE value: 'x'
+DROP TABLE t1;
+#
+# End of 10.2 tests
 #

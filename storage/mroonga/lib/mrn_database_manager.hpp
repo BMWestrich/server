@@ -16,11 +16,13 @@
 
   You should have received a copy of the GNU Lesser General Public
   License along with this library; if not, write to the Free Software
-  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA
 */
 
 #ifndef MRN_DATABASE_MANAGER_HPP_
 #define MRN_DATABASE_MANAGER_HPP_
+
+#include "mrn_database.hpp"
 
 #include <groonga.h>
 
@@ -30,10 +32,11 @@ namespace mrn {
     DatabaseManager(grn_ctx *ctx, mysql_mutex_t *mutex);
     ~DatabaseManager(void);
     bool init(void);
-    int open(const char *path, grn_obj **db);
+    int open(const char *path, Database **db);
     void close(const char *path);
     bool drop(const char *path);
     int clear(void);
+    const char *error_message();
 
   private:
     grn_ctx *ctx_;

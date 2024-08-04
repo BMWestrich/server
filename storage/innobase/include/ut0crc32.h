@@ -1,6 +1,7 @@
 /*****************************************************************************
 
-Copyright (c) 2011, 2011, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2011, 2015, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2016, 2018, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +13,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -29,24 +30,29 @@ Created Aug 10, 2011 Vasil Dimov
 #include "univ.i"
 
 /********************************************************************//**
-Initializes the data structures used by ut_crc32(). Does not do any
+Initializes the data structures used by ut_crc32*(). Does not do any
 allocations, would not hurt if called twice, but would be pointless. */
-UNIV_INTERN
 void
 ut_crc32_init();
 /*===========*/
 
 /********************************************************************//**
 Calculates CRC32.
-@param ptr	- data over which to calculate CRC32.
-@param len	- data length in bytes.
+@param ptr - data over which to calculate CRC32.
+@param len - data length in bytes.
 @return CRC32 (CRC-32C, using the GF(2) primitive polynomial 0x11EDC6F41,
 or 0x1EDC6F41 without the high-order bit) */
-typedef ib_uint32_t (*ib_ut_crc32_t)(const byte* ptr, ulint len);
+typedef uint32_t	(*ut_crc32_func_t)(const byte* ptr, ulint len);
 
-extern ib_ut_crc32_t	ut_crc32;
+/** Pointer to CRC32 calculation function. */
+extern ut_crc32_func_t	ut_crc32;
 
-extern bool	ut_crc32_sse2_enabled;
-extern bool	ut_crc32_power8_enabled;
+#ifdef INNODB_BUG_ENDIAN_CRC32
+/** Pointer to CRC32 calculation function, which uses big-endian byte order
+when converting byte strings to integers internally. */
+extern ut_crc32_func_t	ut_crc32_legacy_big_endian;
+#endif /* INNODB_BUG_ENDIAN_CRC32 */
+
+extern const char*	ut_crc32_implementation;
 
 #endif /* ut0crc32_h */

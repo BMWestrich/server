@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA 
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA 
  */
 
 /*
@@ -97,7 +97,7 @@ static void print_cs(CHARSET_INFO *cs)
     {
       /* 
        Control characters 0x0080..0x009F are dysplayed by some
-       browers as if they were letters. Don't print them to
+       browsers as if they were letters. Don't print them to
        avoid confusion.
       */
       printf("<TD>ctrl<TD>ctrl<TD>ctrl");

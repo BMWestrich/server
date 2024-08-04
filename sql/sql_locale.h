@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335  USA */
 
 #ifndef SQL_LOCALE_INCLUDED
 #define SQL_LOCALE_INCLUDED
@@ -19,7 +19,7 @@
 typedef struct my_locale_errmsgs
 {
   const char *language;
-  const char **errmsgs;
+  const char ***errmsgs;
 } MY_LOCALE_ERRMSGS;
 
 #include "my_global.h"                          /* uint */
@@ -61,6 +61,8 @@ public:
     grouping(grouping_par),
     errmsgs(errmsgs_par)
   {}
+  uint repertoire() const
+  { return is_ascii ? MY_REPERTOIRE_ASCII : MY_REPERTOIRE_EXTENDED; }
 };
 /* Exported variables */
 

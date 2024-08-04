@@ -13,7 +13,7 @@
 
  You should have received a copy of the GNU General Public License
  along with this program; if not, write to the Free Software
- Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #include "my_global.h"
 #include "compat56.h"
@@ -65,7 +65,7 @@ void TIME_from_longlong_time_packed(MYSQL_TIME *ltime, longlong tmp)
   long hms;
   if ((ltime->neg= (tmp < 0)))
     tmp= -tmp;
-  hms= MY_PACKED_TIME_GET_INT_PART(tmp);
+  hms= (long) MY_PACKED_TIME_GET_INT_PART(tmp);
   ltime->year=   (uint) 0;
   ltime->month=  (uint) 0;
   ltime->day=    (uint) 0;
@@ -252,6 +252,9 @@ void TIME_from_longlong_datetime_packed(MYSQL_TIME *ltime, longlong tmp)
 {
   longlong ymd, hms;
   longlong ymdhms, ym;
+
+  DBUG_ASSERT(tmp != LONGLONG_MIN);
+
   if ((ltime->neg= (tmp < 0)))
     tmp= -tmp;
 
@@ -264,11 +267,11 @@ void TIME_from_longlong_datetime_packed(MYSQL_TIME *ltime, longlong tmp)
 
   ltime->day= ymd % (1 << 5);
   ltime->month= ym % 13;
-  ltime->year= ym / 13;
+  ltime->year= (uint) (ym / 13);
 
   ltime->second= hms % (1 << 6);
   ltime->minute= (hms >> 6) % (1 << 6);
-  ltime->hour= (hms >> 12);
+  ltime->hour= (uint) (hms >> 12);
   
   ltime->time_type= MYSQL_TIMESTAMP_DATETIME;
 }
@@ -287,7 +290,7 @@ uint my_datetime_binary_length(uint dec)
 
 /*
   On disk we store as unsigned number with DATETIMEF_INT_OFS offset,
-  for HA_KETYPE_BINARY compatibilty purposes.
+  for HA_KETYPE_BINARY compatibility purposes.
 */
 #define DATETIMEF_INT_OFS 0x8000000000LL
 

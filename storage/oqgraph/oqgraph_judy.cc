@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 /* ======================================================================
    Open Query Graph Computation Engine, based on a concept by Arjen Lentz
@@ -23,6 +23,28 @@
 */
 
 #include "oqgraph_judy.h"
+
+/*
+  Currently the only active code that can return error is:
+    judy_bitset::reset()/J1U()
+    judy_bitset::setbit()/J1S()
+
+  In most cases errors are either about wrong parameters passed to Judy
+  functions or internal structures corruption. These definitely deserve
+  abnormal process termination instead of exit() as it is done by original
+  JUDYERROR.
+
+  TODO: there's one exception that should be handled properly though: OOM.
+*/
+#include <stdio.h>
+#define JUDYERROR(CallerFile, CallerLine, JudyFunc, JudyErrno, JudyErrID) \
+    {                                                                     \
+        (void) fprintf(stderr, "File '%s', line %d: %s(), "               \
+           "JU_ERRNO_* == %d, ID == %d\n",                                \
+           CallerFile, CallerLine,                                        \
+           JudyFunc, JudyErrno, JudyErrID);                               \
+        abort();                                                          \
+    }
 #include <Judy.h>
 
 void open_query::judy_bitset::clear()

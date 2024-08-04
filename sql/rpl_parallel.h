@@ -240,6 +240,8 @@ struct rpl_parallel_thread_pool {
   rpl_parallel_thread_pool();
   int init(uint32 size);
   void destroy();
+  void deactivate();
+  void destroy_cond_mutex();
   struct rpl_parallel_thread *get_thread(rpl_parallel_thread **owner,
                                          rpl_parallel_entry *entry);
   void release_thread(rpl_parallel_thread *rpt);
@@ -319,7 +321,7 @@ struct rpl_parallel_entry {
     group here. Then later event groups (with higher sub_id) can know not to
     try to start (event groups that already started will be rolled back when
     wait_for_prior_commit() returns error).
-    The value is ULONGLONG_MAX when no error occured.
+    The value is ULONGLONG_MAX when no error occurred.
   */
   uint64 stop_on_error_sub_id;
   /*
@@ -365,6 +367,7 @@ struct rpl_parallel {
 extern struct rpl_parallel_thread_pool global_rpl_thread_pool;
 
 
+extern int rpl_parallel_resize_pool_if_no_slaves(void);
 extern int rpl_parallel_activate_pool(rpl_parallel_thread_pool *pool);
 extern int rpl_parallel_inactivate_pool(rpl_parallel_thread_pool *pool);
 extern bool process_gtid_for_restart_pos(Relay_log_info *rli, rpl_gtid *gtid);

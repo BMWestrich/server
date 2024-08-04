@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 /* Functions to handle keys */
 
@@ -279,7 +279,6 @@ MARIA_KEY *_ma_make_key(MARIA_HA *info, MARIA_KEY *int_key, uint keynr,
     }
     else if (keyseg->flag & HA_SWAP_KEY)
     {						/* Numerical column */
-#ifdef HAVE_ISNAN
       if (type == HA_KEYTYPE_FLOAT)
       {
 	float nr;
@@ -303,7 +302,6 @@ MARIA_KEY *_ma_make_key(MARIA_HA *info, MARIA_KEY *int_key, uint keynr,
 	  continue;
 	}
       }
-#endif
       pos+=length;
       while (length--)
       {
@@ -318,7 +316,7 @@ MARIA_KEY *_ma_make_key(MARIA_HA *info, MARIA_KEY *int_key, uint keynr,
     key+= length;
   }
   _ma_dpointer(info->s, key, filepos);
-  int_key->data_length= (key - int_key->data);
+  int_key->data_length= (uint)(key - int_key->data);
   int_key->ref_length= info->s->rec_reflength;
   int_key->flag= 0;
   if (_ma_have_versioning(info) && trid)
@@ -449,7 +447,7 @@ MARIA_KEY *_ma_pack_key(register MARIA_HA *info, MARIA_KEY *int_key,
   /* set flag to SEARCH_PART_KEY if we are not using all key parts */
   int_key->flag= keyseg->type ? SEARCH_PART_KEY : 0;
   int_key->ref_length= 0;
-  int_key->data_length= (key - int_key->data);
+  int_key->data_length= (uint)(key - int_key->data);
 
   DBUG_PRINT("exit", ("length: %u", int_key->data_length));
   DBUG_RETURN(int_key);
@@ -728,7 +726,7 @@ ulonglong ma_retrieve_auto_increment(const uchar *key, uint8 key_type)
 
   switch (key_type) {
   case HA_KEYTYPE_INT8:
-    s_value= (longlong) *(const char*)key;
+    s_value= (longlong) *(const signed char*) key;
     break;
   case HA_KEYTYPE_BINARY:
     value=(ulonglong)  *key;

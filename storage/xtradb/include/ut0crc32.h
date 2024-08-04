@@ -12,7 +12,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -46,7 +46,6 @@ typedef ib_uint32_t (*ib_ut_crc32_t)(const byte* ptr, ulint len);
 
 extern ib_ut_crc32_t	ut_crc32;
 
-extern bool	ut_crc32_sse2_enabled;
-extern bool     ut_crc32_power8_enabled;
+extern const char *ut_crc32_implementation;
 
 #endif /* ut0crc32_h */

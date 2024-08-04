@@ -14,7 +14,7 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335  USA
 
 package My::SafeProcess;
 
@@ -34,7 +34,7 @@ package My::SafeProcess;
 #    will zap the "monitored process" and exit
 #  - the "monitored process" to exit, in which case it will exit
 #    itself with same exit code as the "monitored process"
-#  - the parent process to send the "shutdown" signal in wich case
+#  - the parent process to send the "shutdown" signal in which case
 #    monitor will kill the "monitored process" hard and exit
 #
 #
@@ -84,7 +84,7 @@ sub is_child {
 }
 
 
-my @safe_process_cmd;
+our @safe_process_cmd;
 my $safe_kill;
 my $bindir;
 
@@ -99,6 +99,8 @@ else
   use Cwd;
   $bindir = getcwd();
 }
+
+our $wsrep_check_version;
 
 # Find the safe process binary or script
 sub find_bin {
@@ -119,6 +121,10 @@ sub find_bin {
 			 "my_safe_process");
     push(@safe_process_cmd, $exe);
   }
+  # Wsrep version check utility:
+  $wsrep_check_version=
+    my_find_bin($bindir, ["lib/My/SafeProcess", "My/SafeProcess"],
+                "wsrep_check_version", NOT_REQUIRED);
 }
 
 
@@ -336,9 +342,14 @@ sub start_kill {
 
 sub dump_core {
   my ($self)= @_;
-  return if IS_WINDOWS;
   my $pid= $self->{SAFE_PID};
-  die "Can't cet core from not started process" unless defined $pid;
+  die "Can't get core from not started process" unless defined $pid;
+
+  if (IS_WINDOWS) {
+    system("$safe_kill $pid dump");
+    return 1;
+  }
+
   _verbose("Sending ABRT to $self");
   kill ("ABRT", $pid);
   return 1;
@@ -384,10 +395,10 @@ sub _collect {
 #  1 Still running
 #
 sub wait_one {
-  my ($self, $timeout)= @_;
-  croak "usage: \$safe_proc->wait_one([timeout])" unless ref $self;
+  my ($self, $timeout, $keep)= @_;
+  croak "usage: \$safe_proc->wait_one([timeout] [, keep])" unless ref $self;
 
-  _verbose("wait_one $self, $timeout");
+  _verbose("wait_one $self, $timeout, $keep");
 
   if ( ! defined($self->{SAFE_PID}) ) {
     # No pid => not running
@@ -461,16 +472,16 @@ sub wait_one {
     return 1;
   }
 
-  if ( not $blocking and $retpid == -1 ) {
-    # still running
-    _verbose("still running");
-    return 1;
-  }
+  #if ( not $blocking and $retpid == -1 ) {
+  #  # still running
+  #  _verbose("still running");
+  #  return 1;
+  #}
 
   #warn "wait_one: expected pid $pid but got $retpid"
   #  unless( $retpid == $pid );
 
-  $self->_collect($exit_code);
+  $self->_collect($exit_code) unless $keep;
   return 0;
 }
 
@@ -617,7 +628,7 @@ sub self2str {
 
 sub _verbose {
   return unless $_verbose;
-  print STDERR " ## ". @_. "\n";
+  print STDERR " ## @_\n";
 }
 
 

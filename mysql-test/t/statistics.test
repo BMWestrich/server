@@ -5,9 +5,13 @@ drop table if exists t1,t2;
 --enable_warnings
 
 set @save_use_stat_tables=@@use_stat_tables;
+set @save_histogram_size=@@global.histogram_size;
+set @@global.histogram_size=0,@@local.histogram_size=0;
 
 DELETE FROM mysql.table_stats;
+--sorted_result
 DELETE FROM mysql.column_stats;
+--sorted_result
 DELETE FROM mysql.index_stats;  
    
 set use_stat_tables='preferably';
@@ -171,6 +175,7 @@ DELETE FROM mysql.column_stats;
 set histogram_size=4;
 ANALYZE TABLE t1;
 
+--sorted_result
 SELECT db_name, table_name, column_name,
        min_value, max_value,
        nulls_ratio, avg_frequency,
@@ -183,6 +188,7 @@ set histogram_size=8;
 set histogram_type='DOUBLE_PREC_HB';
 ANALYZE TABLE t1;
 
+--sorted_result
 SELECT db_name, table_name, column_name,
        min_value, max_value,
        nulls_ratio, avg_frequency,
@@ -224,23 +230,34 @@ INSERT INTO t3 VALUES
 
 ANALYZE TABLE t3;
 
+--sorted_result
 SELECT * FROM mysql.table_stats;
+--sorted_result
 SELECT * FROM mysql.column_stats;
+--sorted_result
 SELECT * FROM mysql.index_stats;
 
 ALTER TABLE t1 RENAME TO s1;
+--sorted_result
 SELECT * FROM mysql.table_stats;
+--sorted_result
 SELECT * FROM mysql.column_stats;
+--sorted_result
 SELECT * FROM mysql.index_stats;
 
 RENAME TABLE s1 TO t1;
+--sorted_result
 SELECT * FROM mysql.table_stats;
+--sorted_result
 SELECT * FROM mysql.column_stats;
+--sorted_result
 SELECT * FROM mysql.index_stats;
 
 DROP TABLE t3;
 SELECT * FROM mysql.table_stats;
+--sorted_result
 SELECT * FROM mysql.column_stats;
+--sorted_result
 SELECT * FROM mysql.index_stats;
 
 
@@ -253,37 +270,49 @@ INSERT INTO t0 SELECT a,b FROM t1;
 ALTER TABLE t1 CHANGE COLUMN b x varchar(32), 
                CHANGE COLUMN e y double;
 SHOW CREATE TABLE t1;
+--sorted_result
 SELECT * FROM mysql.column_stats;
 
 ALTER TABLE t1 CHANGE COLUMN x b varchar(32), 
                CHANGE COLUMN y e double;
 SHOW CREATE TABLE t1;
+--sorted_result
 SELECT * FROM mysql.column_stats;
 
 ALTER TABLE t1 RENAME TO s1, CHANGE COLUMN b x varchar(32);
 SHOW CREATE TABLE s1;
 SELECT * FROM mysql.table_stats;
+--sorted_result
 SELECT * FROM mysql.column_stats;
+--sorted_result
 SELECT * FROM mysql.index_stats;
  
 ALTER TABLE s1 RENAME TO t1, CHANGE COLUMN x b varchar(32);
 SHOW CREATE TABLE t1;
 SELECT * FROM mysql.table_stats;
+--sorted_result
 SELECT * FROM mysql.column_stats;
+--sorted_result
 SELECT * FROM mysql.index_stats;
 
 ALTER TABLE t1 CHANGE COLUMN b x varchar(30);
 SHOW CREATE TABLE t1;
+--sorted_result
 SELECT * FROM mysql.column_stats;
+--sorted_result
 SELECT * FROM mysql.index_stats;
 
 ALTER TABLE t1 CHANGE COLUMN x b varchar(32);
 SHOW CREATE TABLE t1;
+--sorted_result
 SELECT * FROM mysql.column_stats;
+--sorted_result
 SELECT * FROM mysql.index_stats;
 
 ANALYZE TABLE t1 PERSISTENT FOR COLUMNS(b) INDEXES(idx1, idx4);
+--sorted_result
 SELECT * FROM mysql.column_stats;
+--sorted_result
 SELECT * FROM mysql.index_stats;
 
 --replace_result $MYSQLTEST_VARDIR MYSQLTEST_VARDIR
@@ -299,12 +328,16 @@ SELECT * INTO OUTFILE '$MYSQLTEST_VARDIR/tmp/save_index_stats'
 
 ALTER TABLE t1 CHANGE COLUMN b x varchar(30);
 SHOW CREATE TABLE t1;
+--sorted_result
 SELECT * FROM mysql.column_stats;
+--sorted_result
 SELECT * FROM mysql.index_stats;
 
 ALTER TABLE t1 CHANGE COLUMN x b varchar(32);
 SHOW CREATE TABLE t1;
+--sorted_result
 SELECT * FROM mysql.column_stats;
+--sorted_result
 SELECT * FROM mysql.index_stats;
 
 --replace_result $MYSQLTEST_VARDIR MYSQLTEST_VARDIR
@@ -317,7 +350,9 @@ eval
 LOAD DATA INFILE '$MYSQLTEST_VARDIR/tmp/save_index_stats'
   INTO TABLE mysql.index_stats
   FIELDS TERMINATED BY ',' OPTIONALLY ENCLOSED BY '"' LINES TERMINATED BY '\n';
+--sorted_result
 SELECT * FROM mysql.column_stats;
+--sorted_result
 SELECT * FROM mysql.index_stats;
 remove_file $MYSQLTEST_VARDIR/tmp/save_column_stats;
 remove_file $MYSQLTEST_VARDIR/tmp/save_index_stats;
@@ -325,11 +360,14 @@ remove_file $MYSQLTEST_VARDIR/tmp/save_index_stats;
 
 ALTER TABLE t1 DROP COLUMN b;
 SHOW CREATE TABLE t1;
+--sorted_result
 SELECT * FROM mysql.column_stats;
+--sorted_result
 SELECT * FROM mysql.index_stats;
 
 DROP INDEX idx2 ON t1;
 SHOW CREATE TABLE t1;
+--sorted_result
 SELECT * FROM mysql.index_stats;
 
 DROP INDEX idx1 ON t1;
@@ -341,22 +379,30 @@ CREATE INDEX idx1 ON t1(b, e);
 CREATE INDEX idx2 ON t1(c, d);
 CREATE INDEX idx4 ON t1(e, b, d);
 SHOW CREATE TABLE t1;
+--sorted_result
 SELECT * FROM mysql.column_stats;
+--sorted_result
 SELECT * FROM mysql.index_stats;
 
 ANALYZE TABLE t1 PERSISTENT FOR COLUMNS(b) INDEXES(idx1, idx2, idx4);
+--sorted_result
 SELECT * FROM mysql.column_stats;
+--sorted_result
 SELECT * FROM mysql.index_stats;
 
 UPDATE t1 SET b=(SELECT b FROM t0 WHERE t0.a= t1.a);
 ANALYZE TABLE t1 PERSISTENT FOR COLUMNS(b) INDEXES(idx1, idx2, idx4);
+--sorted_result
 SELECT * FROM mysql.column_stats;
+--sorted_result
 SELECT * FROM mysql.index_stats;
 
 ALTER TABLE t1 DROP COLUMN b,
                DROP INDEX idx1, DROP INDEX idx2, DROP INDEX idx4;
 SHOW CREATE TABLE t1;
+--sorted_result
 SELECT * FROM mysql.column_stats;
+--sorted_result
 SELECT * FROM mysql.index_stats;
 
 ALTER TABLE t1 ADD COLUMN b varchar(32);
@@ -364,10 +410,14 @@ ALTER TABLE t1
   ADD INDEX idx1 (b, e), ADD INDEX idx2 (c, d), ADD INDEX idx4 (e, b, d);
 UPDATE t1 SET b=(SELECT b FROM t0 WHERE t0.a= t1.a);
 SHOW CREATE TABLE t1;
+--sorted_result
 SELECT * FROM mysql.column_stats;
+--sorted_result
 SELECT * FROM mysql.index_stats;
 ANALYZE TABLE t1 PERSISTENT FOR COLUMNS(b) INDEXES(idx1, idx2, idx4);
+--sorted_result
 SELECT * FROM mysql.column_stats;
+--sorted_result
 SELECT * FROM mysql.index_stats;
 
 DELETE FROM mysql.table_stats;
@@ -381,12 +431,16 @@ SELECT * FROM mysql.index_stats;
 
 ANALYZE TABLE t1 PERSISTENT FOR COLUMNS(c,e,b) INDEXES(idx2,idx4);
 SELECT * FROM mysql.table_stats;
+--sorted_result
 SELECT * FROM mysql.column_stats;
+--sorted_result
 SELECT * FROM mysql.index_stats;
 
 DELETE FROM mysql.index_stats WHERE table_name='t1' AND index_name='primary';
+--sorted_result
 SELECT * FROM mysql.index_stats;
 ANALYZE TABLE t1 PERSISTENT FOR COLUMNS() INDEXES(primary);
+--sorted_result
 SELECT * FROM mysql.index_stats;
 
 DELETE FROM mysql.table_stats;
@@ -396,7 +450,9 @@ DELETE FROM mysql.index_stats;
 ANALYZE TABLE t1 PERSISTENT FOR COLUMNS ALL INDEXES ALL;
 
 SELECT * FROM mysql.table_stats;
+--sorted_result
 SELECT * FROM mysql.column_stats;
+--sorted_result
 SELECT * FROM mysql.index_stats;
 
 CREATE TABLE t2 LIKE t1;
@@ -407,8 +463,9 @@ set optimizer_switch='extended_keys=off';
 
 ANALYZE TABLE t2;
 
+--sorted_result
 SELECT * FROM mysql.table_stats;
-SELECT * FROM mysql.column_stats ORDER BY column_name;
+SELECT * FROM mysql.column_stats ORDER BY column_name, table_name;
 SELECT * FROM mysql.index_stats ORDER BY index_name, prefix_arity, table_name;
 
 DELETE FROM mysql.table_stats;
@@ -445,7 +502,7 @@ SELECT * FROM mysql.index_stats ORDER BY index_name, prefix_arity, table_name;
 ANALYZE TABLE t2 PERSISTENT FOR COLUMNS ALL INDEXES ALL;
 SELECT * FROM mysql.index_stats ORDER BY index_name, prefix_arity, table_name;
 
-ALTER TABLE t2 DROP COLUMN b;
+ALTER TABLE t2 DROP COLUMN b, DROP PRIMARY KEY, ADD PRIMARY KEY(a);
 SELECT * FROM mysql.index_stats ORDER BY index_name, prefix_arity, table_name;
 
 ANALYZE TABLE t2 PERSISTENT FOR COLUMNS() INDEXES ALL;
@@ -461,12 +518,16 @@ ALTER TABLE t1
   ADD INDEX idx1 (b(4), e), 
   ADD INDEX idx4 (e, b(4), d);
   
+--sorted_result
 SELECT * FROM mysql.column_stats;
+--sorted_result
 SELECT * FROM mysql.index_stats;
 
 ANALYZE TABLE t1;
 
+--sorted_result
 SELECT * FROM mysql.column_stats;
+--sorted_result
 SELECT * FROM mysql.index_stats;
 
 DELETE FROM mysql.table_stats;
@@ -486,7 +547,9 @@ set use_stat_tables='never';
 ANALYZE TABLE t1 PERSISTENT FOR ALL;
 
 SELECT * FROM mysql.table_stats;
+--sorted_result
 SELECT * FROM mysql.column_stats;
+--sorted_result
 SELECT * FROM mysql.index_stats;
 
 
@@ -529,11 +592,14 @@ set use_stat_tables='preferably';
 ANALYZE TABLE Country, City, CountryLanguage;
 --enable_result_log
 
+--sorted_result
 SELECT UPPER(db_name), UPPER(table_name), cardinality
   FROM mysql.table_stats;
+--sorted_result
 SELECT UPPER(db_name), UPPER(table_name), 
        column_name, min_value, max_value, nulls_ratio, avg_length, avg_frequency
   FROM mysql.column_stats;
+--sorted_result
 SELECT UPPER(db_name), UPPER(table_name),
        index_name, prefix_arity, avg_frequency
   FROM mysql.index_stats;
@@ -566,11 +632,14 @@ set use_stat_tables='preferably';
 ANALYZE TABLE Country, City, CountryLanguage;
 --enable_result_log
 
+--sorted_result
 SELECT UPPER(db_name), UPPER(table_name), cardinality
   FROM mysql.table_stats;
+--sorted_result
 SELECT UPPER(db_name), UPPER(table_name), 
        column_name, min_value, max_value, nulls_ratio, avg_length, avg_frequency
   FROM mysql.column_stats;
+--sorted_result
 SELECT UPPER(db_name), UPPER(table_name),
        index_name, prefix_arity, avg_frequency
   FROM mysql.index_stats;
@@ -596,11 +665,14 @@ set histogram_size=default;
 use test;
 DROP DATABASE world;
 
+--sorted_result
 SELECT UPPER(db_name), UPPER(table_name), cardinality
   FROM mysql.table_stats;
+--sorted_result
 SELECT UPPER(db_name), UPPER(table_name), 
        column_name, min_value, max_value, nulls_ratio, avg_length, avg_frequency
   FROM mysql.column_stats;
+--sorted_result
 SELECT UPPER(db_name), UPPER(table_name),
        index_name, prefix_arity, avg_frequency
   FROM mysql.index_stats;
@@ -728,3 +800,120 @@ select db_name, table_name, column_name,
   FROM mysql.column_stats;
 
 drop table t1;
+
+--echo #
+--echo # MDEB-9744: session optimizer_use_condition_selectivity=5 causing SQL Error (1918):
+--echo # Encountered illegal value '' when converting to DECIMAL
+--echo #
+
+set @save_optimizer_use_condition_selectivity= @@optimizer_use_condition_selectivity;
+set optimizer_use_condition_selectivity=3, use_stat_tables=preferably;
+
+create table t1 (id int(10),cost decimal(9,2)) engine=innodb;
+ANALYZE TABLE t1 PERSISTENT FOR ALL;
+
+create temporary table t2  (id int);
+insert into t2 (id) select id from t1 where cost > 0;
+select * from t2;
+
+set use_stat_tables=@save_use_stat_tables;
+set optimizer_use_condition_selectivity= @save_optimizer_use_condition_selectivity;
+drop table t1,t2;
+
+--echo #
+--echo # MDEV-16507: statistics for temporary tables should not be used
+--echo #
+
+SET
+@save_optimizer_use_condition_selectivity= @@optimizer_use_condition_selectivity;
+SET @@use_stat_tables = preferably ;
+SET @@optimizer_use_condition_selectivity = 4;
+
+CREATE TABLE t1 (
+  TIMESTAMP TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  ON UPDATE CURRENT_TIMESTAMP
+);
+
+SET @had_t1_table= @@warning_count != 0;
+CREATE TEMPORARY TABLE tmp_t1 LIKE t1;
+INSERT INTO tmp_t1 VALUES (now());
+INSERT INTO t1 SELECT * FROM tmp_t1 WHERE @had_t1_table=0;
+DROP TABLE t1;
+
+SET
+use_stat_tables=@save_use_stat_tables;
+SET
+optimizer_use_condition_selectivity= @save_optimizer_use_condition_selectivity;
+--echo # End of 10.0 tests
+
+--echo #
+--echo # MDEV-9590: Always print "Engine-independent statistic" warnings and
+--echo # might be filtering columns unintentionally from engines
+--echo #
+
+set use_stat_tables='NEVER';
+create table t1 (test blob);
+show variables like 'use_stat_tables';
+analyze table t1;
+drop table t1;
+
+--echo #
+--echo # MDEV-10435 crash with bad stat tables
+--echo #
+
+set use_stat_tables='preferably';
+call mtr.add_suppression("Column count of mysql.table_stats is wrong. Expected 3, found 1. The table is probably corrupted");
+
+rename table mysql.table_stats to test.table_stats;
+flush tables;
+create table t1 (a int);
+--error ER_NO_SUCH_TABLE
+rename table t1 to t2, t3 to t4;
+drop table t1;
+rename table test.table_stats to mysql.table_stats;
+
+rename table mysql.table_stats to test.table_stats;
+create table mysql.table_stats (a int);
+flush tables;
+create table t1 (a int);
+--error ER_NO_SUCH_TABLE
+rename table t1 to t2, t3 to t4;
+drop table t1, mysql.table_stats;
+rename table test.table_stats to mysql.table_stats;
+
+--echo #
+--echo # MDEV-19334: bool is_eits_usable(Field*): Assertion `field->table->stats_is_read' failed.
+--echo #
+
+create temporary table t1(a int);
+insert into t1 values (1),(2),(3);
+ 
+set use_stat_tables=preferably;
+set @optimizer_use_condition_selectivity= @@optimizer_use_condition_selectivity;
+set optimizer_use_condition_selectivity=4;
+ 
+select * from t1 where a >= 2;
+drop table t1;
+set @@optimizer_use_condition_selectivity= @save_optimizer_use_condition_selectivity;
+
+set use_stat_tables=@save_use_stat_tables;
+
+--echo #
+--echo # Start of 10.2 tests
+--echo #
+
+--echo #
+--echo # MDEV-10134 Add full support for DEFAULT
+--echo #
+
+CREATE TABLE t1 (a BLOB, b TEXT DEFAULT DECODE_HISTOGRAM('SINGLE_PREC_HB',a));
+SHOW CREATE TABLE t1;
+INSERT INTO t1 (a) VALUES (0x0000000000000000000000000101010101010101010202020303030304040404050505050606070707080809090A0A0B0C0D0D0E0E0F10111213131415161718191B1C1E202224292A2E33373B4850575F6A76818C9AA7B9C4CFDADFE5EBF0F4F8FAFCFF);
+SELECT b FROM t1;
+DROP TABLE t1;
+
+--echo #
+--echo # End of 10.2 tests
+--echo #
+
+set @@global.histogram_size=@save_histogram_size;

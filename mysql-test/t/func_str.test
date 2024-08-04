@@ -6,6 +6,7 @@
 drop table if exists t1,t2;
 --enable_warnings
 
+set @save_max_allowed_packet=@@global.max_allowed_packet;
 set global max_allowed_packet=1048576;
 connect (conn1,localhost,root,,);
 connection conn1;
@@ -551,8 +552,8 @@ drop table t1, t2;
 #
 
 create table t1 (c1 INT, c2 INT UNSIGNED);
-insert into t1 values ('21474836461','21474836461');
-insert into t1 values ('-21474836461','-21474836461');
+insert ignore into t1 values ('21474836461','21474836461');
+insert ignore into t1 values ('-21474836461','-21474836461');
 show warnings;
 select * from t1;
 drop table t1;
@@ -1611,6 +1612,51 @@ drop table t1,t2;
 select md5(_filename "a"), sha(_filename "a");
 
 --echo #
+--echo # MDEV-18881 Assertion `0' failed in make_sortkey upon SELECT with GROUP BY after LOAD DATA
+--echo #
+
+CREATE TABLE t1 (a BIT(22), b CHAR(8) NOT NULL, c CHAR(8));
+INSERT INTO t1 VALUES (0xA4B,'foo','qux');
+INSERT INTO t1 VALUES (0x8F5,'bar','foobar');
+INSERT INTO t1 VALUES (0x0, '', NULL);
+INSERT INTO t1 VALUES (0x4B, 'foo','qux');
+INSERT INTO t1 VALUES (0x8F5, 'bar', 'foobar');
+SET SESSION SQL_MODE= '';
+SELECT GROUP_CONCAT(c) AS f FROM t1 GROUP BY LPAD('foo', 20, b);
+DROP TABLE t1;
+SET SESSION SQL_MODE=DEFAULT;
+
+CREATE TABLE t1 AS SELECT
+  LPAD('a',10,' '),
+  RPAD('a',10,' '),
+  LPAD('a',10,'  '),
+  RPAD('a',10,'  '),
+  LPAD('a',10,NULL),
+  RPAD('a',10,NULL),
+  LPAD('a',10,''),
+  RPAD('a',10,''),
+  LPAD('a',10,RAND()),
+  RPAD('a',10,RAND());
+SHOW CREATE TABLE t1;
+DROP TABLE t1;
+SET SESSION SQL_MODE= '';
+CREATE TABLE t1 AS SELECT
+  LPAD('a',10,' '),
+  RPAD('a',10,' '),
+  LPAD('a',10,'  '),
+  RPAD('a',10,'  '),
+  LPAD('a',10,NULL),
+  RPAD('a',10,NULL),
+  LPAD('a',10,''),
+  RPAD('a',10,''),
+  LPAD('a',10,RAND()),
+  RPAD('a',10,RAND());
+SHOW CREATE TABLE t1;
+DROP TABLE t1;
+SET SESSION SQL_MODE=DEFAULT;
+
+
+--echo #
 --echo # End of 5.5 tests
 --echo #
 
@@ -1750,11 +1796,58 @@ EXECUTE stmt;
 
 disconnect conn1;
 connection default;
-set global max_allowed_packet=default;
+set global max_allowed_packet=@save_max_allowed_packet;
 
 --echo #
 --echo # End of 5.6 tests
 --echo #
+
+--echo #
+--echo # Start of 10.0 tests
+--echo #
+
+--echo #
+--echo # MDEV-12681 Wrong VIEW results for CHAR(0xDF USING latin1)
+--echo #
+
+EXPLAIN EXTENDED SELECT CHAR(0xDF USING latin1);
+EXPLAIN EXTENDED SELECT CHAR(0xDF USING `binary`);
+EXPLAIN EXTENDED SELECT CHAR(0xDF);
+
+--echo #
+--echo # MDEV-15619 using CONVERT() inside AES_ENCRYPT() in an UPDATE corrupts data
+--echo #
+
+CREATE TABLE t1 (
+  id int(11) NOT NULL,
+  session_id varchar(255) DEFAULT NULL,
+  directory mediumtext,
+  checksum int(10) DEFAULT NULL,
+  last_update datetime DEFAULT NULL,
+  PRIMARY KEY (id),
+  KEY lastupdate (last_update)
+) DEFAULT CHARSET=latin1;
+INSERT INTO t1 VALUES (1,'',NULL,38391,'2017-06-24 07:35:28');
+UPDATE t1 SET directory = AES_ENCRYPT(CONVERT('test stringrererejrjerjehrjekhrjkehrjkehrkjehrjkerhkjehrjekrhkjehrkjerhjkehrkjehrkjehrjkehrjkehrjkehrjkerjkehrjkehrjkehrjke rekjhrejrejhrjehgrehjgrhjerjhegrjherejhgrjhegrjehgrjhegrejhrgjehgrjhegrjhegrjhergjhegrjhegrhjegrjerhthkjjkdhjkgdfjkgjkdgdjkfjkhgjkfdhjgjkfdghkjdfghkjfdghfjkdghkdjfghdkjfghfjkdghfkjdghkjfdghfkjdghfkdjghfkjdghfdjkghjkdfhgdfjkghfjkdghfjkdghfjdkghfjkdghkfjdghfkjdghfkjdghkjdfghfjdkghjkfdghkjdfhgjkdfhgjkfdhgkjfdghkfjdhgkjfdgdjkejktjherjthkjrethkjrethjkerthjkerhtjkerhtkjerhtjkerhtjkerhtjkrehtkjerhtkjrehtjkrehtkjrehtkjerhtkjerhtjkrehtkjrehtjkrehtkjrethjkrethkjrehtkjethjkerhtjkrehtjkretkjerhtkjrehtjkerhtjkrehtjrehtkjrekjtrfgdsfgdhjsghjgfdhjsfhjdfgdhjshjdshjfghjdsfgjhsfgjhsdfgjhdsfgjdhsfgsjhfgjhsdfgsdjhfgjdhsfdjshfgdsjhfgjsdhfdjshfgdjhsfgdjshfgjdhsfgjhsdfgjhsdgfjhsdgfjhdsgfjhsgfjhsdgfjhdsgfhjsdehkjthrkjethjkre' USING latin1), '95F5A1F52A554'), last_update= NOW();
+SELECT directory IS NULL FROM t1;
+DROP TABLE t1;
+
+CREATE TABLE t1 (
+  id int(11) NOT NULL PRIMARY KEY,
+  directory mediumtext
+) DEFAULT CHARSET=latin1;
+INSERT INTO t1 VALUES (1,AES_ENCRYPT(CONVERT(REPEAT('a',800) USING latin1),'95F5A1F52A554'));
+SELECT AES_DECRYPT(directory,'95F5A1F52A554') FROM t1;
+DROP TABLE t1;
+
+SET @enc=AES_ENCRYPT(REPEAT(_latin1'a',800),'95F5A1F52A554');
+CREATE TABLE t1 (
+  id int(11) NOT NULL PRIMARY KEY,
+  directory mediumtext
+) DEFAULT CHARSET=latin1;
+INSERT INTO t1 VALUES (1,AES_DECRYPT(CONVERT(@enc USING binary),'95F5A1F52A554'));
+SELECT * FROM t1;
+DROP TABLE t1;
 
 --echo #
 --echo # Start of 10.1 tests
@@ -1783,6 +1876,111 @@ INSERT INTO t1 VALUES (0),(0),(1),(0),(0);
 SELECT COUNT(*) FROM t1, t1 t2 GROUP BY INSERT('', t2.a, t1.a, @@global.max_binlog_size);
 DROP TABLE t1;
 
+--let func=hex
+--source include/func_str_ascii_checksum.inc
+
+--let func=to_base64
+--source include/func_str_ascii_checksum.inc
+
+--echo #
+--echo # MDEV-10864 Wrong result for WHERE .. (f2=COMPRESS('test') OR f2=COMPRESS('TEST'))
+--echo #
+
+CREATE TABLE t1 (f1 VARCHAR(4), f2 VARCHAR(128), UNIQUE KEY k1 (f1,f2));
+INSERT INTO t1 VALUES ('YQ==',from_base64('YQ==')), ('Yq==', from_base64('Yq=='));
+SELECT f1,HEX(f2) FROM t1 ignore index(k1) WHERE f1='YQ==' AND (f2= from_base64("YQ==") OR f2= from_base64("Yq=="));
+SELECT f1,HEX(f2) FROM t1                  WHERE f1='YQ==' AND (f2= from_base64("YQ==") OR f2= from_base64("Yq=="));
+SELECT f1,HEX(f2) FROM t1                  WHERE f1='YQ==' AND (f2= from_base64("Yq==") OR f2= from_base64("YQ=="));
+DROP TABLE t1;
+
+
+--echo #
+--echo # MDEV-18738 ASAN heap-use-after-free in copy_if_not_alloced / copy_fields
+--echo #
+
+CREATE TABLE t1 (a INT);
+INSERT INTO t1 VALUES (1),(2);
+SELECT REPLACE( CAST( CURDATE() AS BINARY ), CURDATE(), REPEAT('a',32) ) AS f FROM t1 GROUP BY f;
+DROP TABLE t1;
+
+CREATE TABLE t1 (a INT);
+INSERT INTO t1 VALUES (1),(2);
+SELECT REPLACE( LEFT( CURDATE(), 4), LEFT(CURDATE(),4), REPEAT('a',32) ) AS f FROM t1 GROUP BY f;
+DROP TABLE t1;
+
+CREATE TABLE t1 (a INT);
+INSERT INTO t1 VALUES (1),(2);
+SELECT REPLACE(RIGHT(CURDATE(), 4), RIGHT(CURDATE(),4), REPEAT('a',32)) AS f FROM t1 GROUP BY f;
+DROP TABLE t1;
+
+CREATE TABLE t1 (a INT);
+INSERT INTO t1 VALUES (1),(2);
+SELECT REPLACE(SUBSTR(CURDATE(),2,3), SUBSTR(CURDATE(),2,3), REPEAT('a',32)) AS f FROM t1 GROUP BY f;
+DROP TABLE t1;
+
+
+--echo #
+--echo # MDEV-19359 ASAN heap-use-after-free in copy_if_not_alloced / make_sortkey
+--echo #
+
+CREATE TABLE t1 (a INT, b TIME, c TIME);
+INSERT INTO t1 VALUES (NULL,'22:56:45','22:56:45'),(4,'12:51:42','12:51:42');
+SELECT REPLACE( BINARY c, a, b ) f FROM t1 GROUP BY f WITH ROLLUP;
+DROP TABLE t1;
+
+
 --echo #
 --echo # End of 10.1 tests
+--echo #
+
+
+--echo #
+--echo # Start of 10.2 tests
+--echo #
+
+--echo #
+--echo # MDEV-24742 Server crashes in Charset::numchars / String::numchars
+--echo #
+
+SELECT NULL IN (RIGHT(AES_ENCRYPT('foo','bar'), LAST_INSERT_ID()), 'qux');
+
+--echo #
+--echo # Bug#31374305 - FORMAT() NOT DISPLAYING WHOLE NUMBER SIDE CORRECTLY
+--echo #                FOR ES_MX AND ES_ES LOCALES
+--echo #
+
+DELIMITER |;
+CREATE PROCEDURE load_locale_format_table()
+BEGIN
+  DECLARE locale_list VARCHAR(1000) DEFAULT '
+  es_AR,es_BO,es_CL,es_CO,es_CR,es_DO,es_EC,es_ES,es_GT,es_HN,
+  es_MX,es_NI,es_PA,es_PE,es_PR,es_PY,es_SV,es_US,es_UY,es_VE';
+  SET @fmt_stmt = 'INSERT INTO locale_format VALUES
+                   (?, FORMAT(12131254123412541,2,?));';
+  PREPARE stmt FROM @fmt_stmt;
+  WHILE locale_list != '' DO
+    /* get the first locale from the list */
+    SET @locale =
+          TRIM(REPLACE((SUBSTRING_INDEX(locale_list, ',', 1)), '\n',''));
+    EXECUTE stmt USING @locale, @locale;
+    /* remove the first locale from the list */
+    IF LOCATE(',', locale_list) > 0 THEN
+      SET locale_list =
+      SUBSTRING(locale_list, LOCATE(',', locale_list) + 1);
+    ELSE
+      SET locale_list = '';
+    END IF;
+  END WHILE;
+  DEALLOCATE PREPARE stmt;
+END|
+DELIMITER ;|
+
+CREATE TABLE locale_format(locale VARCHAR(10), formatted_string VARCHAR(100));
+CALL load_locale_format_table();
+SELECT * FROM locale_format;
+DROP PROCEDURE load_locale_format_table;
+DROP TABLE locale_format;
+
+--echo #
+--echo # End of 10.2 tests
 --echo #

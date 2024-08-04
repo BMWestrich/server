@@ -28,7 +28,7 @@ load data infile '<MYSQLTEST_VARDIR>/std_data/funcs_1/t4.txt' into table t6;
 USE db_storedproc;
 create table t7 (f1 char(20), f2 char(25), f3 date, f4 int)
 engine = <engine_to_be_tested>;
-load data infile '<MYSQLTEST_VARDIR>/std_data/funcs_1/t7.txt' into table t7;
+load data infile '<MYSQLTEST_VARDIR>/std_data/funcs_1/t7.txt' ignore into table t7;
 Warnings:
 Warning	1265	Data truncated for column 'f3' at row 1
 Warning	1265	Data truncated for column 'f3' at row 2
@@ -42,7 +42,7 @@ Warning	1265	Data truncated for column 'f3' at row 9
 Warning	1265	Data truncated for column 'f3' at row 10
 create table t8 (f1 char(20), f2 char(25), f3 date, f4 int)
 engine = <engine_to_be_tested>;
-load data infile '<MYSQLTEST_VARDIR>/std_data/funcs_1/t7.txt' into table t8;
+load data infile '<MYSQLTEST_VARDIR>/std_data/funcs_1/t7.txt' ignore into table t8;
 Warnings:
 Warning	1265	Data truncated for column 'f3' at row 1
 Warning	1265	Data truncated for column 'f3' at row 2
@@ -143,7 +143,7 @@ BEGIN
 SET @v1 = f1;
 SELECT @v1;
 END//
-ERROR 42000: Too big precision 256 specified for 'f1'. Maximum is 65.
+ERROR 42000: Too big precision 256 specified for 'f1'. Maximum is 65
 DROP PROCEDURE IF EXISTS sp1//
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -153,7 +153,7 @@ BEGIN
 SET @v1 = f1;
 SELECT @v1;
 END//
-ERROR 42000: Too big precision 66 specified for 'f1'. Maximum is 65.
+ERROR 42000: Too big precision 66 specified for 'f1'. Maximum is 65
 DROP PROCEDURE IF EXISTS sp1//
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -1543,13 +1543,13 @@ SHOW FUNCTION STATUS LIKE 'fn1';
 Db	Name	Type	Definer	Modified	Created	Security_type	Comment	character_set_client	collation_connection	Database Collation
 db_storedproc	fn1	FUNCTION	root@localhost	<modified>	<created>	INVOKER	this is simple	latin1	latin1_swedish_ci	latin1_swedish_ci
 DROP FUNCTION IF EXISTS fn1;
-CREATE FUNCTION fn1( f1 DECIMAL(63, 31) ) RETURNS DECIMAL(63, 31)
+CREATE FUNCTION fn1( f1 DECIMAL(63, 61) ) RETURNS DECIMAL(63, 61)
 LANGUAGE SQL NOT DETERMINISTIC SQL SECURITY INVOKER COMMENT 'this is simple'
 BEGIN
 SET f1 = 1000000 + f1;
 RETURN f1;
 END//
-ERROR 42000: Too big scale 31 specified for 'f1'. Maximum is 30.
+ERROR 42000: Too big scale 61 specified for 'f1'. Maximum is 38
 SELECT fn1( 1.3326e+8 );
 ERROR 42000: FUNCTION db_storedproc.fn1 does not exist
 CREATE FUNCTION fn1( f1 DECIMAL(63, 30) ) RETURNS DECIMAL(63, 30)
@@ -1832,9 +1832,11 @@ CREATE PROCEDURE sp11() insert into mysql.t1 values('a');
 SELECT security_type from mysql.proc where specific_name='sp11';
 security_type
 DEFINER
+connect  u_1, localhost, user_1, , db_storedproc;
 	
 user_1@localhost	db_storedproc
 CALL sp11();
+connection default;
 USE db_storedproc;
 	
 root@localhost	db_storedproc
@@ -1842,12 +1844,15 @@ alter procedure sp11 sql security invoker;
 SELECT security_type from mysql.proc where specific_name='sp11';
 security_type
 INVOKER
+connection u_1;
 	
 user_1@localhost	db_storedproc
 USE db_storedproc;
 CALL sp11();
 ERROR 42000: INSERT command denied to user 'user_1'@'localhost' for table 't1'
 commit work;
+disconnect u_1;
+connection default;
 	
 root@localhost	db_storedproc
 alter procedure sp11 sql security DEFINER;
@@ -2802,7 +2807,7 @@ ERROR 42000: You have an error in your SQL syntax; check the manual that corresp
 SELECT * from t1 where f2=f1' at line 1
 CREATE PROCEDURE with()
 SELECT * from t1 where f2=f1;
-ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near '()
+ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'with()
 SELECT * from t1 where f2=f1' at line 1
 CREATE PROCEDURE write()
 SELECT * from t1 where f2=f1;
@@ -2849,11 +2854,11 @@ return f1' at line 1
 CREATE FUNCTION char binary not null(f1 char binary not null) returns char binary not null
 return f1;
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'char binary not null(f1 char binary not null) returns char binary not null
-retur' at line 1
+re...' at line 1
 CREATE FUNCTION char ascii not null(f1 char ascii not null) returns char ascii not null
 return f1;
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'char ascii not null(f1 char ascii not null) returns char ascii not null
-return f' at line 1
+retur...' at line 1
 CREATE FUNCTION tinytext(f1 tinytext) returns tinytext
 return f1;
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'tinytext(f1 tinytext) returns tinytext
@@ -2880,7 +2885,7 @@ return f1' at line 1
 CREATE FUNCTION mediumtext not null(f1 mediumtext not null) returns mediumtext not null
 return f1;
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'mediumtext not null(f1 mediumtext not null) returns mediumtext not null
-return f' at line 1
+retur...' at line 1
 CREATE FUNCTION longtext not null(f1 longtext not null) returns longtext not null
 return f1;
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'longtext not null(f1 longtext not null) returns longtext not null
@@ -2912,7 +2917,7 @@ return f1' at line 1
 CREATE FUNCTION mediumblob not null(f1 mediumblob not null) returns mediumblob not null
 return f1;
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'mediumblob not null(f1 mediumblob not null) returns mediumblob not null
-return f' at line 1
+retur...' at line 1
 CREATE FUNCTION longblob not null(f1 longblob not null) returns longblob not null
 return f1;
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'longblob not null(f1 longblob not null) returns longblob not null
@@ -2939,7 +2944,7 @@ ERROR 42000: You have an error in your SQL syntax; check the manual that corresp
 return f1' at line 1
 CREATE FUNCTION tinyint unsigned zerofill(f1 tinyint unsigned zerofill) returns tinyint unsigned zerofill
 return f1;
-ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'tinyint unsigned zerofill(f1 tinyint unsigned zerofill) returns tinyint unsigned' at line 1
+ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'tinyint unsigned zerofill(f1 tinyint unsigned zerofill) returns tinyint unsig...' at line 1
 CREATE FUNCTION smallint(f1 smallint) returns smallint
 return f1;
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'smallint(f1 smallint) returns smallint
@@ -2954,7 +2959,7 @@ ERROR 42000: You have an error in your SQL syntax; check the manual that corresp
 return f1' at line 1
 CREATE FUNCTION smallint unsigned zerofill(f1 smallint unsigned zerofill) returns smallint unsigned zerofill
 return f1;
-ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'smallint unsigned zerofill(f1 smallint unsigned zerofill) returns smallint unsig' at line 1
+ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'smallint unsigned zerofill(f1 smallint unsigned zerofill) returns smallint un...' at line 1
 CREATE FUNCTION mediumint(f1 mediumint) returns mediumint
 return f1;
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'mediumint(f1 mediumint) returns mediumint
@@ -2969,7 +2974,7 @@ ERROR 42000: You have an error in your SQL syntax; check the manual that corresp
 return f1' at line 1
 CREATE FUNCTION mediumint unsigned zerofill(f1 mediumint unsigned zerofill) returns mediumint unsigned zerofill
 return f1;
-ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'mediumint unsigned zerofill(f1 mediumint unsigned zerofill) returns mediumint un' at line 1
+ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'mediumint unsigned zerofill(f1 mediumint unsigned zerofill) returns mediumint...' at line 1
 CREATE FUNCTION int(f1 int) returns int
 return f1;
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'int(f1 int) returns int
@@ -3004,8 +3009,7 @@ ERROR 42000: You have an error in your SQL syntax; check the manual that corresp
 return f1' at line 1
 CREATE FUNCTION int unsigned zerofill(f1 int unsigned zerofill) returns int unsigned zerofill
 return f1;
-ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'int unsigned zerofill(f1 int unsigned zerofill) returns int unsigned zerofill
-re' at line 1
+ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'int unsigned zerofill(f1 int unsigned zerofill) returns int unsigned zerofill...' at line 1
 CREATE FUNCTION bigint(f1 bigint) returns bigint
 return f1;
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'bigint(f1 bigint) returns bigint
@@ -3020,7 +3024,7 @@ ERROR 42000: You have an error in your SQL syntax; check the manual that corresp
 return f1' at line 1
 CREATE FUNCTION bigint unsigned zerofill(f1 bigint unsigned zerofill) returns bigint unsigned zerofill
 return f1;
-ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'bigint unsigned zerofill(f1 bigint unsigned zerofill) returns bigint unsigned ze' at line 1
+ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'bigint unsigned zerofill(f1 bigint unsigned zerofill) returns bigint unsigned...' at line 1
 CREATE FUNCTION decimal(f1 decimal) returns decimal
 return f1;
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'decimal(f1 decimal) returns decimal
@@ -3035,7 +3039,7 @@ ERROR 42000: You have an error in your SQL syntax; check the manual that corresp
 return f1' at line 1
 CREATE FUNCTION decimal unsigned zerofill(f1 decimal unsigned zerofill) returns decimal unsigned zerofill
 return f1;
-ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'decimal unsigned zerofill(f1 decimal unsigned zerofill) returns decimal unsigned' at line 1
+ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'decimal unsigned zerofill(f1 decimal unsigned zerofill) returns decimal unsig...' at line 1
 CREATE FUNCTION numeric(f1 numeric) returns numeric
 return f1;
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'numeric(f1 numeric) returns numeric
@@ -3050,7 +3054,7 @@ ERROR 42000: You have an error in your SQL syntax; check the manual that corresp
 return f1' at line 1
 CREATE FUNCTION numeric unsigned zerofill(f1 numeric unsigned zerofill) returns numeric unsigned zerofill
 return f1;
-ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'numeric unsigned zerofill(f1 numeric unsigned zerofill) returns numeric unsigned' at line 1
+ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'numeric unsigned zerofill(f1 numeric unsigned zerofill) returns numeric unsig...' at line 1
 CREATE FUNCTION real(f1 real) returns real
 return f1;
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'real(f1 real) returns real
@@ -3065,7 +3069,7 @@ ERROR 42000: You have an error in your SQL syntax; check the manual that corresp
 return f1' at line 1
 CREATE FUNCTION real unsigned zerofill(f1 real unsigned zerofill) returns real unsigned zerofill
 return f1;
-ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'real unsigned zerofill(f1 real unsigned zerofill) returns real unsigned zerofill' at line 1
+ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'real unsigned zerofill(f1 real unsigned zerofill) returns real unsigned zerof...' at line 1
 CREATE FUNCTION float(f1 float) returns float
 return f1;
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'float(f1 float) returns float
@@ -3080,7 +3084,7 @@ ERROR 42000: You have an error in your SQL syntax; check the manual that corresp
 return f1' at line 1
 CREATE FUNCTION float unsigned zerofill(f1 float unsigned zerofill) returns float unsigned zerofill
 return f1;
-ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'float unsigned zerofill(f1 float unsigned zerofill) returns float unsigned zerof' at line 1
+ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'float unsigned zerofill(f1 float unsigned zerofill) returns float unsigned ze...' at line 1
 CREATE FUNCTION date(f1 date) returns date
 return f1;
 DROP FUNCTION date;
@@ -3107,11 +3111,11 @@ return f1' at line 1
 CREATE FUNCTION enum("1enum", "2enum")(f1 enum("1enum", "2enum")) returns enum("1enum", "2enum")
 return f1;
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near '"1enum", "2enum")(f1 enum("1enum", "2enum")) returns enum("1enum", "2enum")
-retu' at line 1
+r...' at line 1
 CREATE FUNCTION set("1set", "2set")(f1 set("1set", "2set")) returns set("1set", "2set")
 return f1;
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'set("1set", "2set")(f1 set("1set", "2set")) returns set("1set", "2set")
-return f' at line 1
+retur...' at line 1
 DROP FUNCTION IF EXISTS fn1;
 Warnings:
 Note	1305	FUNCTION db_storedproc.fn1 does not exist
@@ -3796,7 +3800,7 @@ END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near '!_fn1( f1 char(20) ) returns int
 BEGIN
 SELECT * from t1 where f2 = f1;
-return 1;' at line 1
+return...' at line 1
 CREATE FUNCTION fn1( f1 char(20) ) return int
 BEGIN
 SELECT * from t1 where f2 = f1;
@@ -5785,8 +5789,7 @@ END begin_label//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'BEGIN
 declare x char;
 declare y char;
-SELECT f1, f2 into x, y from t2 limit 1;
-E' at line 2
+SELECT f1, f2 into x, y from t2 limit 1...' at line 2
 
 Testcase 4.2.11:
 ----------------
@@ -5834,7 +5837,7 @@ fetch cur1 into e;
 SELECT x, y, z, a, b, c, d, e;
 close cur1;
 END//
-ERROR 42000: Too big scale 255 specified for 'b'. Maximum is 30.
+ERROR 42000: Too big scale 255 specified for 'b'. Maximum is 38
 CALL sp6();
 ERROR 42000: PROCEDURE db_storedproc.sp6 does not exist
 DROP PROCEDURE IF EXISTS sp6;
@@ -5900,7 +5903,7 @@ SELECT f1, f2 into x, y from t2 limit 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'char x, y1 integer default 0;
 declare char y;
-SELECT f1, f2 into x, y from t2 li' at line 3
+SELECT f1, f2 into x, y from t2...' at line 3
 DROP PROCEDURE IF EXISTS sp6;
 CREATE PROCEDURE sp6( )
 BEGIN
@@ -6300,7 +6303,7 @@ declare decimal unsigned zerofill not null  x;
 SELECT f36 into x from tb1 limit 9998, 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'decimal unsigned zerofill not null  x;
-SELECT f36 into x from tb1 limit 9998, 1;' at line 3
+SELECT f36 into x from tb1 limit 9998,...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 CREATE PROCEDURE sp1( )
 BEGIN
@@ -6362,7 +6365,7 @@ declare decimal (0) unsigned zerofill not null  x;
 SELECT f43 into x from tb1 limit 9998, 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'decimal (0) unsigned zerofill not null  x;
-SELECT f43 into x from tb1 limit 9998' at line 3
+SELECT f43 into x from tb1 limit 9...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 CREATE PROCEDURE sp1( )
 BEGIN
@@ -6370,7 +6373,7 @@ declare decimal (64) unsigned zerofill not null  x;
 SELECT f44 into x from tb1 limit 9998, 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'decimal (64) unsigned zerofill not null  x;
-SELECT f44 into x from tb1 limit 999' at line 3
+SELECT f44 into x from tb1 limit ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 CREATE PROCEDURE sp1( )
 BEGIN
@@ -6405,7 +6408,7 @@ declare decimal (63, 30) unsigned not null  x;
 SELECT f48 into x from tb1 limit 9998, 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'decimal (63, 30) unsigned not null  x;
-SELECT f48 into x from tb1 limit 9998, 1;' at line 3
+SELECT f48 into x from tb1 limit 9998,...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 CREATE PROCEDURE sp1( )
 BEGIN
@@ -6422,7 +6425,7 @@ declare decimal (63, 30) zerofill not null  x;
 SELECT f50 into x from tb1 limit 9998, 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'decimal (63, 30) zerofill not null  x;
-SELECT f50 into x from tb1 limit 9998, 1;' at line 3
+SELECT f50 into x from tb1 limit 9998,...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 CREATE PROCEDURE sp1( )
 BEGIN
@@ -6430,7 +6433,7 @@ declare decimal (00) unsigned zerofill not null  x;
 SELECT f51 into x from tb1 limit 9998, 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'decimal (00) unsigned zerofill not null  x;
-SELECT f51 into x from tb1 limit 999' at line 3
+SELECT f51 into x from tb1 limit ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 CREATE PROCEDURE sp1( )
 BEGIN
@@ -6438,7 +6441,7 @@ declare decimal (63, 30) unsigned zerofill not null  x;
 SELECT f52 into x from tb1 limit 9998, 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'decimal (63, 30) unsigned zerofill not null  x;
-SELECT f52 into x from tb1 limit' at line 3
+SELECT f52 into x from tb1 li...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 CREATE PROCEDURE sp1( )
 BEGIN
@@ -6473,7 +6476,7 @@ declare numeric unsigned zerofill not null  x;
 SELECT f56 into x from tb1 limit 9998, 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'numeric unsigned zerofill not null  x;
-SELECT f56 into x from tb1 limit 9998, 1;' at line 3
+SELECT f56 into x from tb1 limit 9998,...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 CREATE PROCEDURE sp1( )
 BEGIN
@@ -6616,7 +6619,7 @@ declare numeric (63, 30) unsigned zerofill  x;
 SELECT f72 into x from tb2 limit 9998, 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'numeric (63, 30) unsigned zerofill  x;
-SELECT f72 into x from tb2 limit 9998, 1;' at line 3
+SELECT f72 into x from tb2 limit 9998,...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 CREATE PROCEDURE sp1( )
 BEGIN
@@ -6723,8 +6726,7 @@ declare float unsigned zerofill not null  x;
 SELECT f84 into x from tb2 limit 9998, 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'float unsigned zerofill not null  x;
-SELECT f84 into x from tb2 limit 9998, 1;
-E' at line 3
+SELECT f84 into x from tb2 limit 9998, 1...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 CREATE PROCEDURE sp1( )
 BEGIN
@@ -6786,7 +6788,7 @@ declare float(0) unsigned zerofill not null  x;
 SELECT f91 into x from tb2 limit 9998, 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'float(0) unsigned zerofill not null  x;
-SELECT f91 into x from tb2 limit 9998, 1' at line 3
+SELECT f91 into x from tb2 limit 9998...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 CREATE PROCEDURE sp1( )
 BEGIN
@@ -6794,7 +6796,7 @@ declare float(23) unsigned zerofill not null  x;
 SELECT f92 into x from tb2 limit 9998, 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'float(23) unsigned zerofill not null  x;
-SELECT f92 into x from tb2 limit 9998, ' at line 3
+SELECT f92 into x from tb2 limit 999...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 CREATE PROCEDURE sp1( )
 BEGIN
@@ -6856,7 +6858,7 @@ declare float(24) unsigned zerofill not null  x;
 SELECT f99 into x from tb2 limit 9998, 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'float(24) unsigned zerofill not null  x;
-SELECT f99 into x from tb2 limit 9998, ' at line 3
+SELECT f99 into x from tb2 limit 999...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 CREATE PROCEDURE sp1( )
 BEGIN
@@ -6864,7 +6866,7 @@ declare float(53) unsigned zerofill not null  x;
 SELECT f100 into x from tb2 limit 9998, 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'float(53) unsigned zerofill not null  x;
-SELECT f100 into x from tb2 limit 9998,' at line 3
+SELECT f100 into x from tb2 limit 99...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 CREATE PROCEDURE sp1( )
 BEGIN
@@ -7123,7 +7125,7 @@ CALL sp1();
 x	y	z
 000	000	000
 Warnings:
-Warning	1264	Out of range value for column 'z' at row 1
+Warning	1264	Out of range value for column 'x' at row 1
 DROP PROCEDURE IF EXISTS sp1;
 CREATE PROCEDURE sp1( )
 BEGIN
@@ -7161,7 +7163,7 @@ CALL sp1();
 x	y	z
 00000	00000	00000
 Warnings:
-Warning	1264	Out of range value for column 'z' at row 1
+Warning	1264	Out of range value for column 'x' at row 1
 DROP PROCEDURE IF EXISTS sp1;
 CREATE PROCEDURE sp1( )
 BEGIN
@@ -7199,7 +7201,7 @@ CALL sp1();
 x	y	z
 00000000	00000000	00000000
 Warnings:
-Warning	1264	Out of range value for column 'z' at row 1
+Warning	1264	Out of range value for column 'x' at row 1
 DROP PROCEDURE IF EXISTS sp1;
 CREATE PROCEDURE sp1( )
 BEGIN
@@ -7237,7 +7239,7 @@ CALL sp1();
 x	y	z
 0000000000	0000000000	0000000000
 Warnings:
-Warning	1264	Out of range value for column 'z' at row 1
+Warning	1264	Out of range value for column 'x' at row 1
 DROP PROCEDURE IF EXISTS sp1;
 CREATE PROCEDURE sp1( )
 BEGIN
@@ -7275,7 +7277,7 @@ CALL sp1();
 x	y	z
 00000000000000000000	00000000000000000000	00000000000000000000
 Warnings:
-Warning	1264	Out of range value for column 'z' at row 1
+Warning	1264	Out of range value for column 'x' at row 1
 DROP PROCEDURE IF EXISTS sp1;
 CREATE PROCEDURE sp1( )
 BEGIN
@@ -7295,7 +7297,7 @@ CALL sp1();
 x	y	z
 -9999999999	-9999999999	-9999999999
 Warnings:
-Warning	1264	Out of range value for column 'z' at row 1
+Warning	1264	Out of range value for column 'x' at row 1
 DROP PROCEDURE IF EXISTS sp1;
 CREATE PROCEDURE sp1( )
 BEGIN
@@ -7306,7 +7308,7 @@ CALL sp1();
 x	y	z
 0	0	0
 Warnings:
-Note	1265	Data truncated for column 'z' at row 1
+Note	1265	Data truncated for column 'x' at row 1
 DROP PROCEDURE IF EXISTS sp1;
 CREATE PROCEDURE sp1( )
 BEGIN
@@ -7317,7 +7319,7 @@ CALL sp1();
 x	y	z
 0000000000	0000000000	0000000000
 Warnings:
-Warning	1264	Out of range value for column 'z' at row 1
+Warning	1264	Out of range value for column 'x' at row 1
 DROP PROCEDURE IF EXISTS sp1;
 CREATE PROCEDURE sp1( )
 BEGIN
@@ -7328,7 +7330,7 @@ CALL sp1();
 x	y	z
 0000000000	0000000000	0000000000
 Warnings:
-Note	1265	Data truncated for column 'z' at row 1
+Note	1265	Data truncated for column 'x' at row 1
 DROP PROCEDURE IF EXISTS sp1;
 CREATE PROCEDURE sp1( )
 BEGIN
@@ -7339,7 +7341,7 @@ CALL sp1();
 x	y	z
 0	0	0
 Warnings:
-Note	1265	Data truncated for column 'z' at row 1
+Note	1265	Data truncated for column 'x' at row 1
 DROP PROCEDURE IF EXISTS sp1;
 CREATE PROCEDURE sp1( )
 BEGIN
@@ -7350,7 +7352,7 @@ CALL sp1();
 x	y	z
 0	0	0
 Warnings:
-Note	1265	Data truncated for column 'z' at row 1
+Note	1265	Data truncated for column 'x' at row 1
 DROP PROCEDURE IF EXISTS sp1;
 CREATE PROCEDURE sp1( )
 BEGIN
@@ -7361,7 +7363,7 @@ CALL sp1();
 x	y	z
 0000000000	0000000000	0000000000
 Warnings:
-Note	1265	Data truncated for column 'z' at row 1
+Note	1265	Data truncated for column 'x' at row 1
 DROP PROCEDURE IF EXISTS sp1;
 CREATE PROCEDURE sp1( )
 BEGIN
@@ -7372,7 +7374,7 @@ CALL sp1();
 x	y	z
 0000000000	0000000000	0000000000
 Warnings:
-Note	1265	Data truncated for column 'z' at row 1
+Note	1265	Data truncated for column 'x' at row 1
 DROP PROCEDURE IF EXISTS sp1;
 CREATE PROCEDURE sp1( )
 BEGIN
@@ -9217,7 +9219,7 @@ CREATE PROCEDURE sp1()
 BEGIN
 declare with char;
 END//
-ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'char;
+ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'with char;
 END' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
@@ -9353,7 +9355,7 @@ declare accessible condition for sqlstate '02000';
 declare exit handler for add set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'accessible condition for sqlstate '02000';
-declare exit handler for add set @var' at line 3
+declare exit handler for add set @...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9363,8 +9365,7 @@ declare add condition for sqlstate '02000';
 declare exit handler for add set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'add condition for sqlstate '02000';
-declare exit handler for add set @var2 = 1;
-' at line 3
+declare exit handler for add set @var2 = ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9374,8 +9375,7 @@ declare all condition for sqlstate '02000';
 declare exit handler for all set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'all condition for sqlstate '02000';
-declare exit handler for all set @var2 = 1;
-' at line 3
+declare exit handler for all set @var2 = ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9385,7 +9385,7 @@ declare alter condition for sqlstate '02000';
 declare exit handler for alter set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'alter condition for sqlstate '02000';
-declare exit handler for alter set @var2 =' at line 3
+declare exit handler for alter set @var...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9395,7 +9395,7 @@ declare analyze condition for sqlstate '02000';
 declare exit handler for analyze set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'analyze condition for sqlstate '02000';
-declare exit handler for analyze set @va' at line 3
+declare exit handler for analyze set ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9405,8 +9405,7 @@ declare and condition for sqlstate '02000';
 declare exit handler for and set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'and condition for sqlstate '02000';
-declare exit handler for and set @var2 = 1;
-' at line 3
+declare exit handler for and set @var2 = ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9416,8 +9415,7 @@ declare as condition for sqlstate '02000';
 declare exit handler for as set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'as condition for sqlstate '02000';
-declare exit handler for as set @var2 = 1;
-EN' at line 3
+declare exit handler for as set @var2 = 1;...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9427,8 +9425,7 @@ declare asc condition for sqlstate '02000';
 declare exit handler for asc set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'asc condition for sqlstate '02000';
-declare exit handler for asc set @var2 = 1;
-' at line 3
+declare exit handler for asc set @var2 = ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9438,7 +9435,7 @@ declare asensitive condition for sqlstate '02000';
 declare exit handler for asensitive set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'asensitive condition for sqlstate '02000';
-declare exit handler for asensitive s' at line 3
+declare exit handler for asensitiv...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9448,7 +9445,7 @@ declare before condition for sqlstate '02000';
 declare exit handler for before set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'before condition for sqlstate '02000';
-declare exit handler for before set @var2' at line 3
+declare exit handler for before set @v...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9458,7 +9455,7 @@ declare between condition for sqlstate '02000';
 declare exit handler for between set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'between condition for sqlstate '02000';
-declare exit handler for between set @va' at line 3
+declare exit handler for between set ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9468,7 +9465,7 @@ declare bigint condition for sqlstate '02000';
 declare exit handler for bigint set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'bigint condition for sqlstate '02000';
-declare exit handler for bigint set @var2' at line 3
+declare exit handler for bigint set @v...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9478,7 +9475,7 @@ declare binary condition for sqlstate '02000';
 declare exit handler for binary set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'binary condition for sqlstate '02000';
-declare exit handler for binary set @var2' at line 3
+declare exit handler for binary set @v...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9488,7 +9485,7 @@ declare blob condition for sqlstate '02000';
 declare exit handler for blob set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'blob condition for sqlstate '02000';
-declare exit handler for blob set @var2 = 1' at line 3
+declare exit handler for blob set @var2 ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9498,7 +9495,7 @@ declare both condition for sqlstate '02000';
 declare exit handler for both set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'both condition for sqlstate '02000';
-declare exit handler for both set @var2 = 1' at line 3
+declare exit handler for both set @var2 ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9508,8 +9505,7 @@ declare by condition for sqlstate '02000';
 declare exit handler for by set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'by condition for sqlstate '02000';
-declare exit handler for by set @var2 = 1;
-EN' at line 3
+declare exit handler for by set @var2 = 1;...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9519,7 +9515,7 @@ declare call condition for sqlstate '02000';
 declare exit handler for CALL set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'call condition for sqlstate '02000';
-declare exit handler for CALL set @var2 = 1' at line 3
+declare exit handler for CALL set @var2 ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9529,7 +9525,7 @@ declare cascade condition for sqlstate '02000';
 declare exit handler for cascade set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'cascade condition for sqlstate '02000';
-declare exit handler for cascade set @va' at line 3
+declare exit handler for cascade set ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9539,7 +9535,7 @@ declare case condition for sqlstate '02000';
 declare exit handler for case set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'case condition for sqlstate '02000';
-declare exit handler for case set @var2 = 1' at line 3
+declare exit handler for case set @var2 ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9549,7 +9545,7 @@ declare change condition for sqlstate '02000';
 declare exit handler for change set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'change condition for sqlstate '02000';
-declare exit handler for change set @var2' at line 3
+declare exit handler for change set @v...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9559,7 +9555,7 @@ declare char condition for sqlstate '02000';
 declare exit handler for char set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'char condition for sqlstate '02000';
-declare exit handler for char set @var2 = 1' at line 3
+declare exit handler for char set @var2 ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9569,7 +9565,7 @@ declare character condition for sqlstate '02000';
 declare exit handler for character set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'character condition for sqlstate '02000';
-declare exit handler for character set' at line 3
+declare exit handler for character ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9579,7 +9575,7 @@ declare check condition for sqlstate '02000';
 declare exit handler for check set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'check condition for sqlstate '02000';
-declare exit handler for check set @var2 =' at line 3
+declare exit handler for check set @var...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9589,7 +9585,7 @@ declare collate condition for sqlstate '02000';
 declare exit handler for collate set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'collate condition for sqlstate '02000';
-declare exit handler for collate set @va' at line 3
+declare exit handler for collate set ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9599,7 +9595,7 @@ declare column condition for sqlstate '02000';
 declare exit handler for column set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'column condition for sqlstate '02000';
-declare exit handler for column set @var2' at line 3
+declare exit handler for column set @v...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9609,7 +9605,7 @@ declare condition condition for sqlstate '02000';
 declare exit handler for condition set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'condition condition for sqlstate '02000';
-declare exit handler for condition set' at line 3
+declare exit handler for condition ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9625,7 +9621,7 @@ declare constraint condition for sqlstate '02000';
 declare exit handler for constraint set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'constraint condition for sqlstate '02000';
-declare exit handler for constraint s' at line 3
+declare exit handler for constrain...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9635,7 +9631,7 @@ declare continue condition for sqlstate '02000';
 declare exit handler for continue set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'condition for sqlstate '02000';
-declare exit handler for continue set @var2 = 1;' at line 3
+declare exit handler for continue set @var2 =...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9645,7 +9641,7 @@ declare convert condition for sqlstate '02000';
 declare exit handler for convert set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'convert condition for sqlstate '02000';
-declare exit handler for convert set @va' at line 3
+declare exit handler for convert set ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9655,7 +9651,7 @@ declare create condition for sqlstate '02000';
 declare exit handler for create set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'create condition for sqlstate '02000';
-declare exit handler for create set @var2' at line 3
+declare exit handler for create set @v...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9665,7 +9661,7 @@ declare cross condition for sqlstate '02000';
 declare exit handler for cross set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'cross condition for sqlstate '02000';
-declare exit handler for cross set @var2 =' at line 3
+declare exit handler for cross set @var...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9675,7 +9671,7 @@ declare current_date condition for sqlstate '02000';
 declare exit handler for current_date set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'current_date condition for sqlstate '02000';
-declare exit handler for current_da' at line 3
+declare exit handler for current...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9685,7 +9681,7 @@ declare current_time condition for sqlstate '02000';
 declare exit handler for current_time set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'current_time condition for sqlstate '02000';
-declare exit handler for current_ti' at line 3
+declare exit handler for current...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9695,7 +9691,7 @@ declare current_timestamp condition for sqlstate '02000';
 declare exit handler for current_timestamp set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'current_timestamp condition for sqlstate '02000';
-declare exit handler for curre' at line 3
+declare exit handler for cu...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9705,7 +9701,7 @@ declare current_user condition for sqlstate '02000';
 declare exit handler for current_user set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'current_user condition for sqlstate '02000';
-declare exit handler for current_us' at line 3
+declare exit handler for current...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9715,7 +9711,7 @@ declare cursor condition for sqlstate '02000';
 declare exit handler for cursor set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'cursor condition for sqlstate '02000';
-declare exit handler for cursor set @var2' at line 3
+declare exit handler for cursor set @v...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9725,7 +9721,7 @@ declare database condition for sqlstate '02000';
 declare exit handler for database set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'database condition for sqlstate '02000';
-declare exit handler for database set @' at line 3
+declare exit handler for database se...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9735,7 +9731,7 @@ declare databases condition for sqlstate '02000';
 declare exit handler for databases set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'databases condition for sqlstate '02000';
-declare exit handler for databases set' at line 3
+declare exit handler for databases ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9745,7 +9741,7 @@ declare day_hour condition for sqlstate '02000';
 declare exit handler for day_hour set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'day_hour condition for sqlstate '02000';
-declare exit handler for day_hour set @' at line 3
+declare exit handler for day_hour se...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9755,7 +9751,7 @@ declare day_microsecond condition for sqlstate '02000';
 declare exit handler for day_microsecond set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'day_microsecond condition for sqlstate '02000';
-declare exit handler for day_mic' at line 3
+declare exit handler for day_...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9765,7 +9761,7 @@ declare day_minute condition for sqlstate '02000';
 declare exit handler for day_minute set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'day_minute condition for sqlstate '02000';
-declare exit handler for day_minute s' at line 3
+declare exit handler for day_minut...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9775,7 +9771,7 @@ declare day_second condition for sqlstate '02000';
 declare exit handler for day_second set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'day_second condition for sqlstate '02000';
-declare exit handler for day_second s' at line 3
+declare exit handler for day_secon...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9785,8 +9781,7 @@ declare dec condition for sqlstate '02000';
 declare exit handler for dec set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'dec condition for sqlstate '02000';
-declare exit handler for dec set @var2 = 1;
-' at line 3
+declare exit handler for dec set @var2 = ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9796,7 +9791,7 @@ declare decimal condition for sqlstate '02000';
 declare exit handler for decimal set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'decimal condition for sqlstate '02000';
-declare exit handler for decimal set @va' at line 3
+declare exit handler for decimal set ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9806,7 +9801,7 @@ declare declare condition for sqlstate '02000';
 declare exit handler for declare set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'declare condition for sqlstate '02000';
-declare exit handler for declare set @va' at line 3
+declare exit handler for declare set ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9816,7 +9811,7 @@ declare default condition for sqlstate '02000';
 declare exit handler for default set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'default condition for sqlstate '02000';
-declare exit handler for default set @va' at line 3
+declare exit handler for default set ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9826,7 +9821,7 @@ declare delayed condition for sqlstate '02000';
 declare exit handler for delayed set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'delayed condition for sqlstate '02000';
-declare exit handler for delayed set @va' at line 3
+declare exit handler for delayed set ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9836,7 +9831,7 @@ declare delete condition for sqlstate '02000';
 declare exit handler for delete set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'delete condition for sqlstate '02000';
-declare exit handler for delete set @var2' at line 3
+declare exit handler for delete set @v...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9846,7 +9841,7 @@ declare desc condition for sqlstate '02000';
 declare exit handler for desc set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'desc condition for sqlstate '02000';
-declare exit handler for desc set @var2 = 1' at line 3
+declare exit handler for desc set @var2 ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9856,7 +9851,7 @@ declare describe condition for sqlstate '02000';
 declare exit handler for describe set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'describe condition for sqlstate '02000';
-declare exit handler for describe set @' at line 3
+declare exit handler for describe se...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9866,7 +9861,7 @@ declare deterministic condition for sqlstate '02000';
 declare exit handler for deterministic set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'deterministic condition for sqlstate '02000';
-declare exit handler for determini' at line 3
+declare exit handler for determ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9876,7 +9871,7 @@ declare distinct condition for sqlstate '02000';
 declare exit handler for distinct set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'distinct condition for sqlstate '02000';
-declare exit handler for distinct set @' at line 3
+declare exit handler for distinct se...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9886,7 +9881,7 @@ declare distinctrow condition for sqlstate '02000';
 declare exit handler for distinctrow set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'distinctrow condition for sqlstate '02000';
-declare exit handler for distinctrow' at line 3
+declare exit handler for distinct...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9896,8 +9891,7 @@ declare div condition for sqlstate '02000';
 declare exit handler for div set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'div condition for sqlstate '02000';
-declare exit handler for div set @var2 = 1;
-' at line 3
+declare exit handler for div set @var2 = ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9907,7 +9901,7 @@ declare double condition for sqlstate '02000';
 declare exit handler for double set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'double condition for sqlstate '02000';
-declare exit handler for double set @var2' at line 3
+declare exit handler for double set @v...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9917,7 +9911,7 @@ declare drop condition for sqlstate '02000';
 declare exit handler for drop set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'drop condition for sqlstate '02000';
-declare exit handler for drop set @var2 = 1' at line 3
+declare exit handler for drop set @var2 ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9927,7 +9921,7 @@ declare dual condition for sqlstate '02000';
 declare exit handler for dual set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'dual condition for sqlstate '02000';
-declare exit handler for dual set @var2 = 1' at line 3
+declare exit handler for dual set @var2 ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9937,7 +9931,7 @@ declare each condition for sqlstate '02000';
 declare exit handler for each set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'each condition for sqlstate '02000';
-declare exit handler for each set @var2 = 1' at line 3
+declare exit handler for each set @var2 ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9947,7 +9941,7 @@ declare else condition for sqlstate '02000';
 declare exit handler for else set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'else condition for sqlstate '02000';
-declare exit handler for else set @var2 = 1' at line 3
+declare exit handler for else set @var2 ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9957,7 +9951,7 @@ declare elseif condition for sqlstate '02000';
 declare exit handler for elseif set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'elseif condition for sqlstate '02000';
-declare exit handler for elseif set @var2' at line 3
+declare exit handler for elseif set @v...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9967,7 +9961,7 @@ declare enclosed condition for sqlstate '02000';
 declare exit handler for enclosed set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'enclosed condition for sqlstate '02000';
-declare exit handler for enclosed set @' at line 3
+declare exit handler for enclosed se...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9977,7 +9971,7 @@ declare escaped condition for sqlstate '02000';
 declare exit handler for escaped set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'escaped condition for sqlstate '02000';
-declare exit handler for escaped set @va' at line 3
+declare exit handler for escaped set ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -9987,7 +9981,7 @@ declare exists condition for sqlstate '02000';
 declare exit handler for exists set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'exists condition for sqlstate '02000';
-declare exit handler for exists set @var2' at line 3
+declare exit handler for exists set @v...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10008,7 +10002,7 @@ declare explain condition for sqlstate '02000';
 declare exit handler for explain set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'explain condition for sqlstate '02000';
-declare exit handler for explain set @va' at line 3
+declare exit handler for explain set ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10018,7 +10012,7 @@ declare false condition for sqlstate '02000';
 declare exit handler for false set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'false condition for sqlstate '02000';
-declare exit handler for false set @var2 =' at line 3
+declare exit handler for false set @var...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10028,7 +10022,7 @@ declare fetch condition for sqlstate '02000';
 declare exit handler for fetch set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'fetch condition for sqlstate '02000';
-declare exit handler for fetch set @var2 =' at line 3
+declare exit handler for fetch set @var...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10038,7 +10032,7 @@ declare float condition for sqlstate '02000';
 declare exit handler for float set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'float condition for sqlstate '02000';
-declare exit handler for float set @var2 =' at line 3
+declare exit handler for float set @var...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10048,7 +10042,7 @@ declare float4 condition for sqlstate '02000';
 declare exit handler for add set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'float4 condition for sqlstate '02000';
-declare exit handler for add set @var2 = ' at line 3
+declare exit handler for add set @var2...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10058,7 +10052,7 @@ declare float8 condition for sqlstate '02000';
 declare exit handler for add set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'float8 condition for sqlstate '02000';
-declare exit handler for add set @var2 = ' at line 3
+declare exit handler for add set @var2...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10068,8 +10062,7 @@ declare for condition for sqlstate '02000';
 declare exit handler for for set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'for condition for sqlstate '02000';
-declare exit handler for for set @var2 = 1;
-' at line 3
+declare exit handler for for set @var2 = ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10079,7 +10072,7 @@ declare force condition for sqlstate '02000';
 declare exit handler for force set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'force condition for sqlstate '02000';
-declare exit handler for force set @var2 =' at line 3
+declare exit handler for force set @var...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10089,7 +10082,7 @@ declare foreign condition for sqlstate '02000';
 declare exit handler for foreign set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'foreign condition for sqlstate '02000';
-declare exit handler for foreign set @va' at line 3
+declare exit handler for foreign set ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10099,7 +10092,7 @@ declare from condition for sqlstate '02000';
 declare exit handler for from set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'from condition for sqlstate '02000';
-declare exit handler for from set @var2 = 1' at line 3
+declare exit handler for from set @var2 ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10109,7 +10102,7 @@ declare fulltext condition for sqlstate '02000';
 declare exit handler for fulltext set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'fulltext condition for sqlstate '02000';
-declare exit handler for fulltext set @' at line 3
+declare exit handler for fulltext se...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10119,7 +10112,7 @@ declare grant condition for sqlstate '02000';
 declare exit handler for grant set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'grant condition for sqlstate '02000';
-declare exit handler for grant set @var2 =' at line 3
+declare exit handler for grant set @var...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10129,7 +10122,7 @@ declare group condition for sqlstate '02000';
 declare exit handler for group set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'group condition for sqlstate '02000';
-declare exit handler for group set @var2 =' at line 3
+declare exit handler for group set @var...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10139,7 +10132,7 @@ declare having condition for sqlstate '02000';
 declare exit handler for having set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'having condition for sqlstate '02000';
-declare exit handler for having set @var2' at line 3
+declare exit handler for having set @v...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10149,7 +10142,7 @@ declare high_priority condition for sqlstate '02000';
 declare exit handler for high_priority set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'high_priority condition for sqlstate '02000';
-declare exit handler for high_prio' at line 3
+declare exit handler for high_p...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10159,7 +10152,7 @@ declare hour_microsecond condition for sqlstate '02000';
 declare exit handler for hour_microsecond set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'hour_microsecond condition for sqlstate '02000';
-declare exit handler for hour_m' at line 3
+declare exit handler for hou...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10169,7 +10162,7 @@ declare hour_minute condition for sqlstate '02000';
 declare exit handler for hour_minute set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'hour_minute condition for sqlstate '02000';
-declare exit handler for hour_minute' at line 3
+declare exit handler for hour_min...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10179,7 +10172,7 @@ declare hour_second condition for sqlstate '02000';
 declare exit handler for hour_second set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'hour_second condition for sqlstate '02000';
-declare exit handler for hour_second' at line 3
+declare exit handler for hour_sec...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10189,8 +10182,7 @@ declare if condition for sqlstate '02000';
 declare exit handler for if set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'if condition for sqlstate '02000';
-declare exit handler for if set @var2 = 1;
-EN' at line 3
+declare exit handler for if set @var2 = 1;...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10200,7 +10192,7 @@ declare ignore condition for sqlstate '02000';
 declare exit handler for ignore set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'ignore condition for sqlstate '02000';
-declare exit handler for ignore set @var2' at line 3
+declare exit handler for ignore set @v...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10210,8 +10202,7 @@ declare in condition for sqlstate '02000';
 declare exit handler for in set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'in condition for sqlstate '02000';
-declare exit handler for in set @var2 = 1;
-EN' at line 3
+declare exit handler for in set @var2 = 1;...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10221,7 +10212,7 @@ declare index condition for sqlstate '02000';
 declare exit handler for index set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'index condition for sqlstate '02000';
-declare exit handler for index set @var2 =' at line 3
+declare exit handler for index set @var...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10231,7 +10222,7 @@ declare infile condition for sqlstate '02000';
 declare exit handler for infile set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'infile condition for sqlstate '02000';
-declare exit handler for infile set @var2' at line 3
+declare exit handler for infile set @v...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10241,7 +10232,7 @@ declare inner condition for sqlstate '02000';
 declare exit handler for inner set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'inner condition for sqlstate '02000';
-declare exit handler for inner set @var2 =' at line 3
+declare exit handler for inner set @var...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10251,7 +10242,7 @@ declare inout condition for sqlstate '02000';
 declare exit handler for inout set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'inout condition for sqlstate '02000';
-declare exit handler for inout set @var2 =' at line 3
+declare exit handler for inout set @var...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10261,7 +10252,7 @@ declare insensitive condition for sqlstate '02000';
 declare exit handler for insensitive set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'insensitive condition for sqlstate '02000';
-declare exit handler for insensitive' at line 3
+declare exit handler for insensit...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10271,7 +10262,7 @@ declare insert condition for sqlstate '02000';
 declare exit handler for insert set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'insert condition for sqlstate '02000';
-declare exit handler for insert set @var2' at line 3
+declare exit handler for insert set @v...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10281,8 +10272,7 @@ declare int condition for sqlstate '02000';
 declare exit handler for int set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'int condition for sqlstate '02000';
-declare exit handler for int set @var2 = 1;
-' at line 3
+declare exit handler for int set @var2 = ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10292,7 +10282,7 @@ declare int1 condition for sqlstate '02000';
 declare exit handler for int set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'int1 condition for sqlstate '02000';
-declare exit handler for int set @var2 = 1;' at line 3
+declare exit handler for int set @var2 =...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10302,7 +10292,7 @@ declare int2 condition for sqlstate '02000';
 declare exit handler for int set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'int2 condition for sqlstate '02000';
-declare exit handler for int set @var2 = 1;' at line 3
+declare exit handler for int set @var2 =...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10312,7 +10302,7 @@ declare int3 condition for sqlstate '02000';
 declare exit handler for int set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'int3 condition for sqlstate '02000';
-declare exit handler for int set @var2 = 1;' at line 3
+declare exit handler for int set @var2 =...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10322,7 +10312,7 @@ declare int4 condition for sqlstate '02000';
 declare exit handler for int set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'int4 condition for sqlstate '02000';
-declare exit handler for int set @var2 = 1;' at line 3
+declare exit handler for int set @var2 =...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10332,7 +10322,7 @@ declare int8 condition for sqlstate '02000';
 declare exit handler for int set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'int8 condition for sqlstate '02000';
-declare exit handler for int set @var2 = 1;' at line 3
+declare exit handler for int set @var2 =...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10342,7 +10332,7 @@ declare integer condition for sqlstate '02000';
 declare exit handler for integer set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'integer condition for sqlstate '02000';
-declare exit handler for integer set @va' at line 3
+declare exit handler for integer set ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10352,7 +10342,7 @@ declare interval condition for sqlstate '02000';
 declare exit handler for interval set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'interval condition for sqlstate '02000';
-declare exit handler for interval set @' at line 3
+declare exit handler for interval se...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10362,7 +10352,7 @@ declare into condition for sqlstate '02000';
 declare exit handler for into set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'into condition for sqlstate '02000';
-declare exit handler for into set @var2 = 1' at line 3
+declare exit handler for into set @var2 ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10372,8 +10362,7 @@ declare is condition for sqlstate '02000';
 declare exit handler for is set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'is condition for sqlstate '02000';
-declare exit handler for is set @var2 = 1;
-EN' at line 3
+declare exit handler for is set @var2 = 1;...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10383,7 +10372,7 @@ declare iterate condition for sqlstate '02000';
 declare exit handler for iterate set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'iterate condition for sqlstate '02000';
-declare exit handler for iterate set @va' at line 3
+declare exit handler for iterate set ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10393,7 +10382,7 @@ declare join condition for sqlstate '02000';
 declare exit handler for join set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'join condition for sqlstate '02000';
-declare exit handler for join set @var2 = 1' at line 3
+declare exit handler for join set @var2 ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10403,8 +10392,7 @@ declare key condition for sqlstate '02000';
 declare exit handler for key set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'key condition for sqlstate '02000';
-declare exit handler for key set @var2 = 1;
-' at line 3
+declare exit handler for key set @var2 = ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10414,7 +10402,7 @@ declare keys condition for sqlstate '02000';
 declare exit handler for keys set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'keys condition for sqlstate '02000';
-declare exit handler for keys set @var2 = 1' at line 3
+declare exit handler for keys set @var2 ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10424,7 +10412,7 @@ declare kill condition for sqlstate '02000';
 declare exit handler for kill set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'kill condition for sqlstate '02000';
-declare exit handler for kill set @var2 = 1' at line 3
+declare exit handler for kill set @var2 ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10434,7 +10422,7 @@ declare leading condition for sqlstate '02000';
 declare exit handler for leading set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'leading condition for sqlstate '02000';
-declare exit handler for leading set @va' at line 3
+declare exit handler for leading set ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10444,7 +10432,7 @@ declare leave condition for sqlstate '02000';
 declare exit handler for leave set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'leave condition for sqlstate '02000';
-declare exit handler for leave set @var2 =' at line 3
+declare exit handler for leave set @var...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10454,7 +10442,7 @@ declare left condition for sqlstate '02000';
 declare exit handler for left set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'left condition for sqlstate '02000';
-declare exit handler for left set @var2 = 1' at line 3
+declare exit handler for left set @var2 ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10464,7 +10452,7 @@ declare like condition for sqlstate '02000';
 declare exit handler for like set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'like condition for sqlstate '02000';
-declare exit handler for like set @var2 = 1' at line 3
+declare exit handler for like set @var2 ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10474,7 +10462,7 @@ declare limit condition for sqlstate '02000';
 declare exit handler for limit set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'limit condition for sqlstate '02000';
-declare exit handler for limit set @var2 =' at line 3
+declare exit handler for limit set @var...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10484,7 +10472,7 @@ declare linear condition for sqlstate '02000';
 declare exit handler for int set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'linear condition for sqlstate '02000';
-declare exit handler for int set @var2 = ' at line 3
+declare exit handler for int set @var2...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10494,7 +10482,7 @@ declare lines condition for sqlstate '02000';
 declare exit handler for lines set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'lines condition for sqlstate '02000';
-declare exit handler for lines set @var2 =' at line 3
+declare exit handler for lines set @var...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10504,7 +10492,7 @@ declare load condition for sqlstate '02000';
 declare exit handler for load set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'load condition for sqlstate '02000';
-declare exit handler for load set @var2 = 1' at line 3
+declare exit handler for load set @var2 ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10514,7 +10502,7 @@ declare localtime condition for sqlstate '02000';
 declare exit handler for localtime set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'localtime condition for sqlstate '02000';
-declare exit handler for localtime set' at line 3
+declare exit handler for localtime ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10524,7 +10512,7 @@ declare localtimestamp condition for sqlstate '02000';
 declare exit handler for localtimestamp set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'localtimestamp condition for sqlstate '02000';
-declare exit handler for localtim' at line 3
+declare exit handler for local...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10534,7 +10522,7 @@ declare lock condition for sqlstate '02000';
 declare exit handler for lock set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'lock condition for sqlstate '02000';
-declare exit handler for lock set @var2 = 1' at line 3
+declare exit handler for lock set @var2 ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10544,7 +10532,7 @@ declare long condition for sqlstate '02000';
 declare exit handler for long set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'long condition for sqlstate '02000';
-declare exit handler for long set @var2 = 1' at line 3
+declare exit handler for long set @var2 ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10554,7 +10542,7 @@ declare longblob condition for sqlstate '02000';
 declare exit handler for longblob set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'longblob condition for sqlstate '02000';
-declare exit handler for longblob set @' at line 3
+declare exit handler for longblob se...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10564,7 +10552,7 @@ declare longtext condition for sqlstate '02000';
 declare exit handler for longtext set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'longtext condition for sqlstate '02000';
-declare exit handler for longtext set @' at line 3
+declare exit handler for longtext se...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10574,7 +10562,7 @@ declare loop condition for sqlstate '02000';
 declare exit handler for loop set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'loop condition for sqlstate '02000';
-declare exit handler for loop set @var2 = 1' at line 3
+declare exit handler for loop set @var2 ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10584,7 +10572,7 @@ declare low_priority condition for sqlstate '02000';
 declare exit handler for low_priority set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'low_priority condition for sqlstate '02000';
-declare exit handler for low_priori' at line 3
+declare exit handler for low_pri...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10594,7 +10582,7 @@ declare master_ssl_verify_server_cert condition for sqlstate '02000';
 declare exit handler for int set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'master_ssl_verify_server_cert condition for sqlstate '02000';
-declare exit handl' at line 3
+declare exit ha...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10604,7 +10592,7 @@ declare match condition for sqlstate '02000';
 declare exit handler for match set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'match condition for sqlstate '02000';
-declare exit handler for match set @var2 =' at line 3
+declare exit handler for match set @var...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10614,7 +10602,7 @@ declare mediumblob condition for sqlstate '02000';
 declare exit handler for mediumblob set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'mediumblob condition for sqlstate '02000';
-declare exit handler for mediumblob s' at line 3
+declare exit handler for mediumblo...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10624,7 +10612,7 @@ declare mediumint condition for sqlstate '02000';
 declare exit handler for mediumint set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'mediumint condition for sqlstate '02000';
-declare exit handler for mediumint set' at line 3
+declare exit handler for mediumint ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10634,7 +10622,7 @@ declare mediumtext condition for sqlstate '02000';
 declare exit handler for mediumtext set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'mediumtext condition for sqlstate '02000';
-declare exit handler for mediumtext s' at line 3
+declare exit handler for mediumtex...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10644,7 +10632,7 @@ declare middleint condition for sqlstate '02000';
 declare exit handler for middleint set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'middleint condition for sqlstate '02000';
-declare exit handler for middleint set' at line 3
+declare exit handler for middleint ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10654,7 +10642,7 @@ declare minute_microsecond condition for sqlstate '02000';
 declare exit handler for minute_microsecond set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'minute_microsecond condition for sqlstate '02000';
-declare exit handler for minu' at line 3
+declare exit handler for m...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10664,7 +10652,7 @@ declare minute_second condition for sqlstate '02000';
 declare exit handler for minute_second set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'minute_second condition for sqlstate '02000';
-declare exit handler for minute_se' at line 3
+declare exit handler for minute...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10674,8 +10662,7 @@ declare mod condition for sqlstate '02000';
 declare exit handler for mod set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'mod condition for sqlstate '02000';
-declare exit handler for mod set @var2 = 1;
-' at line 3
+declare exit handler for mod set @var2 = ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10685,7 +10672,7 @@ declare modifies condition for sqlstate '02000';
 declare exit handler for modifies set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'modifies condition for sqlstate '02000';
-declare exit handler for modifies set @' at line 3
+declare exit handler for modifies se...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10695,7 +10682,7 @@ declare natural condition for sqlstate '02000';
 declare exit handler for natural set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'natural condition for sqlstate '02000';
-declare exit handler for natural set @va' at line 3
+declare exit handler for natural set ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10705,8 +10692,7 @@ declare not condition for sqlstate '02000';
 declare exit handler for not set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'not condition for sqlstate '02000';
-declare exit handler for not set @var2 = 1;
-' at line 3
+declare exit handler for not set @var2 = ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10716,7 +10702,7 @@ declare no_write_to_binlog condition for sqlstate '02000';
 declare exit handler for no_write_to_binlog set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'no_write_to_binlog condition for sqlstate '02000';
-declare exit handler for no_w' at line 3
+declare exit handler for n...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10726,7 +10712,7 @@ declare null condition for sqlstate '02000';
 declare exit handler for null set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'null condition for sqlstate '02000';
-declare exit handler for null set @var2 = 1' at line 3
+declare exit handler for null set @var2 ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10736,7 +10722,7 @@ declare numeric condition for sqlstate '02000';
 declare exit handler for numeric set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'numeric condition for sqlstate '02000';
-declare exit handler for numeric set @va' at line 3
+declare exit handler for numeric set ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10746,8 +10732,7 @@ declare on condition for sqlstate '02000';
 declare exit handler for on set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'on condition for sqlstate '02000';
-declare exit handler for on set @var2 = 1;
-EN' at line 3
+declare exit handler for on set @var2 = 1;...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10757,7 +10742,7 @@ declare optimize condition for sqlstate '02000';
 declare exit handler for optimize set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'optimize condition for sqlstate '02000';
-declare exit handler for optimize set @' at line 3
+declare exit handler for optimize se...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10773,7 +10758,7 @@ declare optionally condition for sqlstate '02000';
 declare exit handler for optionally set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'optionally condition for sqlstate '02000';
-declare exit handler for optionally s' at line 3
+declare exit handler for optionall...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10783,8 +10768,7 @@ declare or condition for sqlstate '02000';
 declare exit handler for or set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'or condition for sqlstate '02000';
-declare exit handler for or set @var2 = 1;
-EN' at line 3
+declare exit handler for or set @var2 = 1;...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10794,7 +10778,7 @@ declare order condition for sqlstate '02000';
 declare exit handler for order set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'order condition for sqlstate '02000';
-declare exit handler for order set @var2 =' at line 3
+declare exit handler for order set @var...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10804,8 +10788,7 @@ declare out condition for sqlstate '02000';
 declare exit handler for out set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'out condition for sqlstate '02000';
-declare exit handler for out set @var2 = 1;
-' at line 3
+declare exit handler for out set @var2 = ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10815,7 +10798,7 @@ declare outer condition for sqlstate '02000';
 declare exit handler for outer set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'outer condition for sqlstate '02000';
-declare exit handler for outer set @var2 =' at line 3
+declare exit handler for outer set @var...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10825,7 +10808,7 @@ declare outfile condition for sqlstate '02000';
 declare exit handler for outfile set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'outfile condition for sqlstate '02000';
-declare exit handler for outfile set @va' at line 3
+declare exit handler for outfile set ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10835,7 +10818,7 @@ declare precision condition for sqlstate '02000';
 declare exit handler for precision set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'precision condition for sqlstate '02000';
-declare exit handler for precision set' at line 3
+declare exit handler for precision ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10845,7 +10828,7 @@ declare primary condition for sqlstate '02000';
 declare exit handler for primary set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'primary condition for sqlstate '02000';
-declare exit handler for primary set @va' at line 3
+declare exit handler for primary set ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10855,7 +10838,7 @@ declare procedure condition for sqlstate '02000';
 declare exit handler for procedure set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'procedure condition for sqlstate '02000';
-declare exit handler for procedure set' at line 3
+declare exit handler for procedure ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10865,7 +10848,7 @@ declare purge condition for sqlstate '02000';
 declare exit handler for purge set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'purge condition for sqlstate '02000';
-declare exit handler for purge set @var2 =' at line 3
+declare exit handler for purge set @var...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10875,7 +10858,7 @@ declare range condition for sqlstate '02000';
 declare exit handler for int set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'range condition for sqlstate '02000';
-declare exit handler for int set @var2 = 1' at line 3
+declare exit handler for int set @var2 ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10885,7 +10868,7 @@ declare read condition for sqlstate '02000';
 declare exit handler for read set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'read condition for sqlstate '02000';
-declare exit handler for read set @var2 = 1' at line 3
+declare exit handler for read set @var2 ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10895,7 +10878,7 @@ declare reads condition for sqlstate '02000';
 declare exit handler for reads set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'reads condition for sqlstate '02000';
-declare exit handler for reads set @var2 =' at line 3
+declare exit handler for reads set @var...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10915,7 +10898,7 @@ declare read_write condition for sqlstate '02000';
 declare exit handler for int set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'read_write condition for sqlstate '02000';
-declare exit handler for int set @var' at line 3
+declare exit handler for int set @...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10925,7 +10908,7 @@ declare real condition for sqlstate '02000';
 declare exit handler for real set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'real condition for sqlstate '02000';
-declare exit handler for real set @var2 = 1' at line 3
+declare exit handler for real set @var2 ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10935,7 +10918,7 @@ declare references condition for sqlstate '02000';
 declare exit handler for references set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'references condition for sqlstate '02000';
-declare exit handler for references s' at line 3
+declare exit handler for reference...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10945,7 +10928,7 @@ declare regexp condition for sqlstate '02000';
 declare exit handler for regexp set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'regexp condition for sqlstate '02000';
-declare exit handler for regexp set @var2' at line 3
+declare exit handler for regexp set @v...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10955,7 +10938,7 @@ declare release condition for sqlstate '02000';
 declare exit handler for int set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'release condition for sqlstate '02000';
-declare exit handler for int set @var2 =' at line 3
+declare exit handler for int set @var...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10965,7 +10948,7 @@ declare rename condition for sqlstate '02000';
 declare exit handler for rename set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'rename condition for sqlstate '02000';
-declare exit handler for rename set @var2' at line 3
+declare exit handler for rename set @v...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10975,7 +10958,7 @@ declare repeat condition for sqlstate '02000';
 declare exit handler for repeat set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'repeat condition for sqlstate '02000';
-declare exit handler for repeat set @var2' at line 3
+declare exit handler for repeat set @v...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10985,7 +10968,7 @@ declare replace condition for sqlstate '02000';
 declare exit handler for replace set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'replace condition for sqlstate '02000';
-declare exit handler for replace set @va' at line 3
+declare exit handler for replace set ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -10995,7 +10978,7 @@ declare require condition for sqlstate '02000';
 declare exit handler for require set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'require condition for sqlstate '02000';
-declare exit handler for require set @va' at line 3
+declare exit handler for require set ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11005,7 +10988,7 @@ declare restrict condition for sqlstate '02000';
 declare exit handler for restrict set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'restrict condition for sqlstate '02000';
-declare exit handler for restrict set @' at line 3
+declare exit handler for restrict se...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11015,7 +10998,7 @@ declare return condition for sqlstate '02000';
 declare exit handler for return set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'return condition for sqlstate '02000';
-declare exit handler for return set @var2' at line 3
+declare exit handler for return set @v...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11025,7 +11008,7 @@ declare revoke condition for sqlstate '02000';
 declare exit handler for revoke set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'revoke condition for sqlstate '02000';
-declare exit handler for revoke set @var2' at line 3
+declare exit handler for revoke set @v...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11035,7 +11018,7 @@ declare right condition for sqlstate '02000';
 declare exit handler for right set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'right condition for sqlstate '02000';
-declare exit handler for right set @var2 =' at line 3
+declare exit handler for right set @var...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11045,7 +11028,7 @@ declare rlike condition for sqlstate '02000';
 declare exit handler for rlike set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'rlike condition for sqlstate '02000';
-declare exit handler for rlike set @var2 =' at line 3
+declare exit handler for rlike set @var...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11055,7 +11038,7 @@ declare schema condition for sqlstate '02000';
 declare exit handler for schema set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'schema condition for sqlstate '02000';
-declare exit handler for schema set @var2' at line 3
+declare exit handler for schema set @v...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11065,7 +11048,7 @@ declare schemas condition for sqlstate '02000';
 declare exit handler for schemas set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'schemas condition for sqlstate '02000';
-declare exit handler for schemas set @va' at line 3
+declare exit handler for schemas set ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11075,7 +11058,7 @@ declare second_microsecond condition for sqlstate '02000';
 declare exit handler for second_microsecond set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'second_microsecond condition for sqlstate '02000';
-declare exit handler for seco' at line 3
+declare exit handler for s...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11085,7 +11068,7 @@ declare select condition for sqlstate '02000';
 declare exit handler for SELECT set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'select condition for sqlstate '02000';
-declare exit handler for SELECT set @var2' at line 3
+declare exit handler for SELECT set @v...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11095,7 +11078,7 @@ declare sensitive condition for sqlstate '02000';
 declare exit handler for sensitive set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'sensitive condition for sqlstate '02000';
-declare exit handler for sensitive set' at line 3
+declare exit handler for sensitive ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11105,7 +11088,7 @@ declare separator condition for sqlstate '02000';
 declare exit handler for separator set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'separator condition for sqlstate '02000';
-declare exit handler for separator set' at line 3
+declare exit handler for separator ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11115,8 +11098,7 @@ declare set condition for sqlstate '02000';
 declare exit handler for set set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'set condition for sqlstate '02000';
-declare exit handler for set set @var2 = 1;
-' at line 3
+declare exit handler for set set @var2 = ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11126,7 +11108,7 @@ declare show condition for sqlstate '02000';
 declare exit handler for show set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'show condition for sqlstate '02000';
-declare exit handler for show set @var2 = 1' at line 3
+declare exit handler for show set @var2 ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11136,7 +11118,7 @@ declare smallint condition for sqlstate '02000';
 declare exit handler for smallint set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'smallint condition for sqlstate '02000';
-declare exit handler for smallint set @' at line 3
+declare exit handler for smallint se...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11146,7 +11128,7 @@ declare spatial condition for sqlstate '02000';
 declare exit handler for spatial set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'spatial condition for sqlstate '02000';
-declare exit handler for spatial set @va' at line 3
+declare exit handler for spatial set ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11156,7 +11138,7 @@ declare specific condition for sqlstate '02000';
 declare exit handler for specific set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'specific condition for sqlstate '02000';
-declare exit handler for specific set @' at line 3
+declare exit handler for specific se...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11166,8 +11148,7 @@ declare sql condition for sqlstate '02000';
 declare exit handler for sql set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'sql condition for sqlstate '02000';
-declare exit handler for sql set @var2 = 1;
-' at line 3
+declare exit handler for sql set @var2 = ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11177,7 +11158,7 @@ declare sqlexception condition for sqlstate '02000';
 declare exit handler for sqlexception set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'sqlexception condition for sqlstate '02000';
-declare exit handler for sqlexcepti' at line 3
+declare exit handler for sqlexce...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11187,7 +11168,7 @@ declare sqlstate condition for sqlstate '02000';
 declare exit handler for sqlstate set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'sqlstate condition for sqlstate '02000';
-declare exit handler for sqlstate set @' at line 3
+declare exit handler for sqlstate se...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11197,7 +11178,7 @@ declare sqlwarning condition for sqlstate '02000';
 declare exit handler for sqlwarning set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'sqlwarning condition for sqlstate '02000';
-declare exit handler for sqlwarning s' at line 3
+declare exit handler for sqlwarnin...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11207,7 +11188,7 @@ declare sql_big_result condition for sqlstate '02000';
 declare exit handler for sql_big_result set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'sql_big_result condition for sqlstate '02000';
-declare exit handler for sql_big_' at line 3
+declare exit handler for sql_b...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11217,7 +11198,7 @@ declare sql_calc_found_rows condition for sqlstate '02000';
 declare exit handler for sql_calc_found_rows set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'sql_calc_found_rows condition for sqlstate '02000';
-declare exit handler for sql' at line 3
+declare exit handler for ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11227,7 +11208,7 @@ declare sql_small_result condition for sqlstate '02000';
 declare exit handler for sql_small_result set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'sql_small_result condition for sqlstate '02000';
-declare exit handler for sql_sm' at line 3
+declare exit handler for sql...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11237,8 +11218,7 @@ declare ssl condition for sqlstate '02000';
 declare exit handler for ssl set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'ssl condition for sqlstate '02000';
-declare exit handler for ssl set @var2 = 1;
-' at line 3
+declare exit handler for ssl set @var2 = ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11248,7 +11228,7 @@ declare starting condition for sqlstate '02000';
 declare exit handler for starting set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'starting condition for sqlstate '02000';
-declare exit handler for starting set @' at line 3
+declare exit handler for starting se...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11258,7 +11238,7 @@ declare straight_join condition for sqlstate '02000';
 declare exit handler for straight_join set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'straight_join condition for sqlstate '02000';
-declare exit handler for straight_' at line 3
+declare exit handler for straig...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11268,7 +11248,7 @@ declare table condition for sqlstate '02000';
 declare exit handler for table set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'table condition for sqlstate '02000';
-declare exit handler for table set @var2 =' at line 3
+declare exit handler for table set @var...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11278,7 +11258,7 @@ declare terminated condition for sqlstate '02000';
 declare exit handler for terminated set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'terminated condition for sqlstate '02000';
-declare exit handler for terminated s' at line 3
+declare exit handler for terminate...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11288,7 +11268,7 @@ declare then condition for sqlstate '02000';
 declare exit handler for then set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'then condition for sqlstate '02000';
-declare exit handler for then set @var2 = 1' at line 3
+declare exit handler for then set @var2 ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11298,7 +11278,7 @@ declare tinyblob condition for sqlstate '02000';
 declare exit handler for tinyblob set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'tinyblob condition for sqlstate '02000';
-declare exit handler for tinyblob set @' at line 3
+declare exit handler for tinyblob se...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11308,7 +11288,7 @@ declare tinyint condition for sqlstate '02000';
 declare exit handler for tinyint set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'tinyint condition for sqlstate '02000';
-declare exit handler for tinyint set @va' at line 3
+declare exit handler for tinyint set ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11318,7 +11298,7 @@ declare tinytext condition for sqlstate '02000';
 declare exit handler for tinytext set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'tinytext condition for sqlstate '02000';
-declare exit handler for tinytext set @' at line 3
+declare exit handler for tinytext se...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11328,8 +11308,7 @@ declare to condition for sqlstate '02000';
 declare exit handler for to set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'to condition for sqlstate '02000';
-declare exit handler for to set @var2 = 1;
-EN' at line 3
+declare exit handler for to set @var2 = 1;...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11339,7 +11318,7 @@ declare trailing condition for sqlstate '02000';
 declare exit handler for trailing set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'trailing condition for sqlstate '02000';
-declare exit handler for trailing set @' at line 3
+declare exit handler for trailing se...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11349,7 +11328,7 @@ declare trigger condition for sqlstate '02000';
 declare exit handler for trigger set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'trigger condition for sqlstate '02000';
-declare exit handler for trigger set @va' at line 3
+declare exit handler for trigger set ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11359,7 +11338,7 @@ declare true condition for sqlstate '02000';
 declare exit handler for true set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'true condition for sqlstate '02000';
-declare exit handler for true set @var2 = 1' at line 3
+declare exit handler for true set @var2 ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11369,7 +11348,7 @@ declare undo condition for sqlstate '02000';
 declare exit handler for undo set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'undo condition for sqlstate '02000';
-declare exit handler for undo set @var2 = 1' at line 3
+declare exit handler for undo set @var2 ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11379,7 +11358,7 @@ declare union condition for sqlstate '02000';
 declare exit handler for union set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'union condition for sqlstate '02000';
-declare exit handler for union set @var2 =' at line 3
+declare exit handler for union set @var...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11389,7 +11368,7 @@ declare unique condition for sqlstate '02000';
 declare exit handler for unique set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'unique condition for sqlstate '02000';
-declare exit handler for unique set @var2' at line 3
+declare exit handler for unique set @v...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11399,7 +11378,7 @@ declare unlock condition for sqlstate '02000';
 declare exit handler for unlock set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'unlock condition for sqlstate '02000';
-declare exit handler for unlock set @var2' at line 3
+declare exit handler for unlock set @v...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11409,7 +11388,7 @@ declare unsigned condition for sqlstate '02000';
 declare exit handler for unsigned set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'unsigned condition for sqlstate '02000';
-declare exit handler for unsigned set @' at line 3
+declare exit handler for unsigned se...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11419,7 +11398,7 @@ declare update condition for sqlstate '02000';
 declare exit handler for update set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'update condition for sqlstate '02000';
-declare exit handler for update set @var2' at line 3
+declare exit handler for update set @v...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11429,7 +11408,7 @@ declare usage condition for sqlstate '02000';
 declare exit handler for usage set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'usage condition for sqlstate '02000';
-declare exit handler for usage set @var2 =' at line 3
+declare exit handler for usage set @var...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11439,8 +11418,7 @@ declare use condition for sqlstate '02000';
 declare exit handler for USE set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'use condition for sqlstate '02000';
-declare exit handler for USE set @var2 = 1;
-' at line 3
+declare exit handler for USE set @var2 = ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11450,7 +11428,7 @@ declare using condition for sqlstate '02000';
 declare exit handler for using set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'using condition for sqlstate '02000';
-declare exit handler for using set @var2 =' at line 3
+declare exit handler for using set @var...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11460,7 +11438,7 @@ declare utc_date condition for sqlstate '02000';
 declare exit handler for utc_date set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'utc_date condition for sqlstate '02000';
-declare exit handler for utc_date set @' at line 3
+declare exit handler for utc_date se...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11470,7 +11448,7 @@ declare utc_time condition for sqlstate '02000';
 declare exit handler for utc_time set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'utc_time condition for sqlstate '02000';
-declare exit handler for utc_time set @' at line 3
+declare exit handler for utc_time se...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11480,7 +11458,7 @@ declare utc_timestamp condition for sqlstate '02000';
 declare exit handler for utc_timestamp set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'utc_timestamp condition for sqlstate '02000';
-declare exit handler for utc_times' at line 3
+declare exit handler for utc_ti...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11490,7 +11468,7 @@ declare values condition for sqlstate '02000';
 declare exit handler for values set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'values condition for sqlstate '02000';
-declare exit handler for values set @var2' at line 3
+declare exit handler for values set @v...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11500,7 +11478,7 @@ declare varbinary condition for sqlstate '02000';
 declare exit handler for varbinary set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'varbinary condition for sqlstate '02000';
-declare exit handler for varbinary set' at line 3
+declare exit handler for varbinary ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11510,7 +11488,7 @@ declare varchar condition for sqlstate '02000';
 declare exit handler for varchar set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'varchar condition for sqlstate '02000';
-declare exit handler for varchar set @va' at line 3
+declare exit handler for varchar set ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11520,7 +11498,7 @@ declare varcharacter condition for sqlstate '02000';
 declare exit handler for varcharacter set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'varcharacter condition for sqlstate '02000';
-declare exit handler for varcharact' at line 3
+declare exit handler for varchar...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11530,7 +11508,7 @@ declare varying condition for sqlstate '02000';
 declare exit handler for varying set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'varying condition for sqlstate '02000';
-declare exit handler for varying set @va' at line 3
+declare exit handler for varying set ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11540,7 +11518,7 @@ declare when condition for sqlstate '02000';
 declare exit handler for when set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'when condition for sqlstate '02000';
-declare exit handler for when set @var2 = 1' at line 3
+declare exit handler for when set @var2 ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11550,7 +11528,7 @@ declare where condition for sqlstate '02000';
 declare exit handler for where set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'where condition for sqlstate '02000';
-declare exit handler for where set @var2 =' at line 3
+declare exit handler for where set @var...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11560,7 +11538,7 @@ declare while condition for sqlstate '02000';
 declare exit handler for while set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'while condition for sqlstate '02000';
-declare exit handler for while set @var2 =' at line 3
+declare exit handler for while set @var...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11569,9 +11547,8 @@ BEGIN
 declare with condition for sqlstate '02000';
 declare exit handler for with set @var2 = 1;
 END//
-ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'condition for sqlstate '02000';
-declare exit handler for with set @var2 = 1;
-END' at line 3
+ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'with condition for sqlstate '02000';
+declare exit handler for with set @var2 ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11581,7 +11558,7 @@ declare write condition for sqlstate '02000';
 declare exit handler for write set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'write condition for sqlstate '02000';
-declare exit handler for write set @var2 =' at line 3
+declare exit handler for write set @var...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11591,8 +11568,7 @@ declare xor condition for sqlstate '02000';
 declare exit handler for xor set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'xor condition for sqlstate '02000';
-declare exit handler for xor set @var2 = 1;
-' at line 3
+declare exit handler for xor set @var2 = ...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11602,7 +11578,7 @@ declare year_month condition for sqlstate '02000';
 declare exit handler for year_month set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'year_month condition for sqlstate '02000';
-declare exit handler for year_month s' at line 3
+declare exit handler for year_mont...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -11612,7 +11588,7 @@ declare zerofill condition for sqlstate '02000';
 declare exit handler for zerofill set @var2 = 1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'zerofill condition for sqlstate '02000';
-declare exit handler for zerofill set @' at line 3
+declare exit handler for zerofill se...' at line 3
 
 Testcase :
 ----------
@@ -11647,7 +11623,7 @@ set @x = 3;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'undo handler for sqlstate '23000' set @x2 = 1;
 set @x = 1;
-insert into t values ' at line 3
+insert into t valu...' at line 3
 DROP PROCEDURE IF EXISTS handler1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.handler1 does not exist
@@ -11662,8 +11638,7 @@ set @x = 3;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'handler for sqlstate '2300' set @x2 = 1;
 set @x = 1;
-insert into t values (1);
-s' at line 3
+insert into t values (1)...' at line 3
 DROP PROCEDURE IF EXISTS handler1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.handler1 does not exist
@@ -11678,8 +11653,7 @@ set @x = 3;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'handler for sqlstate '2300' set @x2 = 1;
 set @x = 1;
-insert into t values (1);
-s' at line 3
+insert into t values (1)...' at line 3
 DROP PROCEDURE IF EXISTS handler1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.handler1 does not exist
@@ -11694,8 +11668,7 @@ set @x = 3;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'handler for sqlstate '2300' set @x2 = 1;
 set @x = 1;
-insert into t values (1);
-s' at line 3
+insert into t values (1)...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
 Note	1305	PROCEDURE db_storedproc.sp1 does not exist
@@ -13675,7 +13648,7 @@ CREATE PROCEDURE sp1( )
 BEGIN
 declare with handler for sqlstate '02000' set @var2 = 1;
 END//
-ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'handler for sqlstate '02000' set @var2 = 1;
+ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'with handler for sqlstate '02000' set @var2 = 1;
 END' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 Warnings:
@@ -13821,7 +13794,7 @@ CALL sp1();
 @xx
 0
 Warnings:
-Warning	1366	Incorrect integer value: 'asd' for column 'xx' at row 1
+Warning	1366	Incorrect integer value: 'asd' for column ``.``.`xx` at row 1
 DROP PROCEDURE IF EXISTS sp1;
 CREATE PROCEDURE sp1()
 BEGIN
@@ -13870,7 +13843,7 @@ CALL sp1();
 xx
 0
 Warnings:
-Warning	1366	Incorrect double value: 'asd' for column 'xx' at row 1
+Warning	1366	Incorrect double value: 'asd' for column ``.``.`xx` at row 1
 DROP PROCEDURE IF EXISTS sp1;
 CREATE PROCEDURE sp1()
 BEGIN
@@ -13942,7 +13915,7 @@ CALL sp1();
 xx
 0
 Warnings:
-Warning	1366	Incorrect integer value: 'asd' for column 'xx' at row 1
+Warning	1366	Incorrect integer value: 'asd' for column ``.``.`xx` at row 1
 DROP PROCEDURE IF EXISTS sp1;
 CREATE PROCEDURE sp1()
 BEGIN
@@ -14493,7 +14466,7 @@ insert into tnull values( 1);
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near '1234567890;
 declare continue handler for cond1 set @var2 = 1;
-insert into tnull ' at line 3
+insert into tnu...' at line 3
 DROP PROCEDURE IF EXISTS sp1;
 CREATE PROCEDURE sp1()
 BEGIN
@@ -15342,7 +15315,7 @@ END case label1;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'case
 when action = 'delete'  then
-delete from res_t3_itisalongname_1381742_itsav' at line 3
+delete from res_t3_itisalongname_1381742_it...' at line 3
 DROP PROCEDURE IF EXISTS sp3;
 CREATE PROCEDURE sp3( action char(20) )
 BEGIN
@@ -15359,7 +15332,7 @@ END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'then
 delete from res_t3_itisalongname_1381742_itsaverylongname_1381742;
 else
-set' at line 5
+...' at line 5
 DROP PROCEDURE IF EXISTS sp3;
 CREATE PROCEDURE sp3( action char(20) )
 BEGIN
@@ -15374,7 +15347,7 @@ iterate label1;
 END case;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'then action = 'truncate'  when
-truncate from res_t3_itisalongname_1381742_itsave' at line 6
+truncate from res_t3_itisalongname_1381742_its...' at line 6
 DROP PROCEDURE IF EXISTS sp3;
 CREATE PROCEDURE sp3( action char(20) )
 BEGIN
@@ -15391,7 +15364,7 @@ delete from res_t3_itisalongname_1381742_itsaverylongname_1381742;
 END case;
 END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'when 'delete'  then
-delete from res_t3_itisalongname_1381742_itsaverylongname_13' at line 11
+delete from res_t3_itisalongname_1381742_itsaverylongname...' at line 11
 DROP PROCEDURE IF EXISTS sp3;
 CREATE PROCEDURE sp3( action char(20) )
 BEGIN
@@ -15454,8 +15427,7 @@ ERROR 42000: You have an error in your SQL syntax; check the manual that corresp
 leave label1;
 END if;
 iterate label1;
-END loop label1;
-EN' at line 9
+END loop label1;...' at line 9
 DROP PROCEDURE IF EXISTS sp4;
 CREATE PROCEDURE sp4()
 BEGIN
@@ -15475,7 +15447,7 @@ set count = count + 1;
 if count > 20 then
 leave label1;
 END if;
-iterate lab' at line 6
+iterate ...' at line 6
 DROP PROCEDURE IF EXISTS sp4;
 CREATE PROCEDURE sp4()
 BEGIN
@@ -15495,7 +15467,7 @@ leave label1;
 else
 set count=count+1;
 END if;
-iterate lab' at line 6
+iterate ...' at line 6
 DROP PROCEDURE IF EXISTS sp4;
 CREATE PROCEDURE sp4()
 BEGIN
@@ -15515,7 +15487,7 @@ if count > 20 then
 leave label1;
 else
 set count=count+1;
-iterate label1;' at line 6
+iterate labe...' at line 6
 DROP PROCEDURE IF EXISTS sp4;
 CREATE PROCEDURE sp4()
 BEGIN
@@ -15537,8 +15509,7 @@ ERROR 42000: You have an error in your SQL syntax; check the manual that corresp
 set count = 1;
 label1: loop
 if count > 20 then
-leave label1;
-' at line 7
+leave label...' at line 7
 DROP PROCEDURE IF EXISTS sp4;
 CREATE PROCEDURE sp4()
 BEGIN
@@ -15598,7 +15569,7 @@ END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'when case count = 1 then
 set count = 10;
 when count  = 2 then
-set count =  count' at line 3
+set count =  co...' at line 3
 DROP PROCEDURE IF EXISTS sp5;
 CREATE PROCEDURE sp5(count int)
 BEGIN
@@ -15613,7 +15584,7 @@ ERROR 42000: You have an error in your SQL syntax; check the manual that corresp
 when count = 1 then
 set count = 10;
 when count  = 2 then
-set count =  coun' at line 3
+set count =  c...' at line 3
 DROP PROCEDURE IF EXISTS sp5;
 CREATE PROCEDURE sp5(count int)
 BEGIN
@@ -15626,7 +15597,7 @@ END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'when count = 1 then
 set count = 10;
 case when count  = 2 then
-set count =  count' at line 3
+set count =  co...' at line 3
 
 Testcase 4.3.6:
 ---------------
@@ -15658,7 +15629,7 @@ END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'until count1 > 5
 repeat
 set count1 = count1 + 1;
-if count1 > 5 then leave label1' at line 4
+if count1 > 5 then leave lab...' at line 4
 DROP PROCEDURE IF EXISTS sp6;
 CREATE PROCEDURE sp6()
 BEGIN
@@ -15672,7 +15643,7 @@ END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'END repeat
 set count1 = count1 + 1;
 if count1 > 5 then leave label1; END if;
-unt' at line 4
+...' at line 4
 DROP PROCEDURE IF EXISTS sp6;
 CREATE PROCEDURE sp6()
 BEGIN
@@ -15742,7 +15713,7 @@ END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'END loop;
 set @dummystring = 'temp value';
 if count > 10 then leave label1;
-END ' at line 3
+E...' at line 3
 DROP PROCEDURE IF EXISTS sp7;
 CREATE PROCEDURE sp7()
 BEGIN
@@ -15756,7 +15727,7 @@ END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'iterate label1;
 loop
 set @dummystring = 'temp value';
-if count > 10 then leave l' at line 3
+if count > 10 then leav...' at line 3
 
 Testcase 4.3.8:
 --------------------------------------------------------------------------------
@@ -15884,7 +15855,7 @@ END//
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'loop
 if count1 > 2 then leave lable1;
 END if;
-insert into res_t3_itisalongname_1' at line 4
+insert into res_t3_itisalongnam...' at line 4
 
 Testcase 4.3.16:
 ----------------
@@ -16311,7 +16282,7 @@ set f1 = (f1 / 2); set f1 = (f1 * 2); set f1 = (f1 - 10); set f1 = (f1 + 10);
 return f1;
 END//
 SELECT fn4(-9.22e+15);
-ERROR 22003: BIGINT UNSIGNED value is out of range in '(f1@0 - 10)'
+ERROR 22003: BIGINT UNSIGNED value is out of range in 'f1@0 - 10'
 DROP FUNCTION IF EXISTS fn5;
 CREATE FUNCTION fn5( f1 decimal) returns decimal
 BEGIN
@@ -16792,7 +16763,7 @@ set f1 = (f1 / 2); set f1 = (f1 * 2); set f1 = (f1 - 10); set f1 = (f1 + 10);
 return f1;
 END//
 SELECT fn56(-8388601);
-ERROR 22003: BIGINT UNSIGNED value is out of range in '(f1@0 - 10)'
+ERROR 22003: BIGINT UNSIGNED value is out of range in 'f1@0 - 10'
 DROP FUNCTION IF EXISTS fn57;
 CREATE FUNCTION fn57( f1 numeric) returns numeric
 BEGIN
@@ -17060,7 +17031,7 @@ set f1 = (f1 / 2); set f1 = (f1 * 2); set f1 = (f1 - 10); set f1 = (f1 + 10);
 return f1;
 END//
 SELECT fn84(-32601);
-ERROR 22003: BIGINT UNSIGNED value is out of range in '(f1@0 - 10)'
+ERROR 22003: BIGINT UNSIGNED value is out of range in 'f1@0 - 10'
 DROP FUNCTION IF EXISTS fn85;
 CREATE FUNCTION fn85( f1 tinyint) returns tinyint
 BEGIN
@@ -17095,7 +17066,7 @@ set f1 = (f1 / 2); set f1 = (f1 * 2); set f1 = (f1 - 10); set f1 = (f1 + 10);
 return f1;
 END//
 SELECT fn88(-101);
-ERROR 22003: BIGINT UNSIGNED value is out of range in '(f1@0 - 10)'
+ERROR 22003: BIGINT UNSIGNED value is out of range in 'f1@0 - 10'
 DROP FUNCTION IF EXISTS fn89;
 CREATE FUNCTION fn89( f1 enum('1enum', '2enum')) returns enum('1enum', '2enum')
 BEGIN
@@ -17314,7 +17285,7 @@ set f1 = (f1 / 2); set f1 = (f1 * 2); set f1 = (f1 - 10); set f1 = (f1 + 10);
 SELECT f1;
 END//
 CALL sp4(-9.22e+15);
-ERROR 22003: BIGINT UNSIGNED value is out of range in '(f1@0 - 10)'
+ERROR 22003: BIGINT UNSIGNED value is out of range in 'f1@0 - 10'
 DROP PROCEDURE IF EXISTS sp5;
 CREATE PROCEDURE sp5( f1 decimal)
 BEGIN
@@ -17871,7 +17842,7 @@ set f1 = (f1 / 2); set f1 = (f1 * 2); set f1 = (f1 - 10); set f1 = (f1 + 10);
 SELECT f1;
 END//
 CALL sp56(-8388601);
-ERROR 22003: BIGINT UNSIGNED value is out of range in '(f1@0 - 10)'
+ERROR 22003: BIGINT UNSIGNED value is out of range in 'f1@0 - 10'
 DROP PROCEDURE IF EXISTS sp57;
 CREATE PROCEDURE sp57( f1 numeric)
 BEGIN
@@ -18203,7 +18174,7 @@ set f1 = (f1 / 2); set f1 = (f1 * 2); set f1 = (f1 - 10); set f1 = (f1 + 10);
 SELECT f1;
 END//
 CALL sp84(-32601);
-ERROR 22003: BIGINT UNSIGNED value is out of range in '(f1@0 - 10)'
+ERROR 22003: BIGINT UNSIGNED value is out of range in 'f1@0 - 10'
 DROP PROCEDURE IF EXISTS sp85;
 CREATE PROCEDURE sp85( f1 tinyint)
 BEGIN
@@ -18238,7 +18209,7 @@ set f1 = (f1 / 2); set f1 = (f1 * 2); set f1 = (f1 - 10); set f1 = (f1 + 10);
 SELECT f1;
 END//
 CALL sp88(-101);
-ERROR 22003: BIGINT UNSIGNED value is out of range in '(f1@0 - 10)'
+ERROR 22003: BIGINT UNSIGNED value is out of range in 'f1@0 - 10'
 DROP PROCEDURE IF EXISTS sp89;
 CREATE PROCEDURE sp89( f1 enum('1enum', '2enum'))
 BEGIN
@@ -18565,7 +18536,7 @@ CALL sp4(-9.22e+18, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute04();
-ERROR 22003: BIGINT value is out of range in '(f1@0 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f1@0 * 2'
 DROP PROCEDURE spexecute04;
 DROP PROCEDURE sp4;
 DROP PROCEDURE IF EXISTS sp6;
@@ -18678,7 +18649,7 @@ f7	f8	f9
 -9220000000000000000	-9220000000000000000	NULL
 f10	f11	f12
 -9220000000000000000	-9220000000000000000	NULL
-ERROR 22003: BIGINT UNSIGNED value is out of range in '(f1@0 * 2)'
+ERROR 22003: BIGINT UNSIGNED value is out of range in 'f1@0 * 2'
 DROP PROCEDURE spexecute07;
 DROP PROCEDURE sp07;
 DROP PROCEDURE IF EXISTS sp8;
@@ -18729,7 +18700,7 @@ CALL sp8(1.84e+17, var1, var2, -9.22e+18, var3, var4,
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute08();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute08;
 DROP PROCEDURE sp8;
 DROP PROCEDURE IF EXISTS sp9;
@@ -18780,7 +18751,7 @@ CALL sp9(-9.22e+15, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute09();
-ERROR 22003: BIGINT UNSIGNED value is out of range in '(f1@0 - 10)'
+ERROR 22003: BIGINT UNSIGNED value is out of range in 'f1@0 - 10'
 DROP PROCEDURE spexecute09;
 DROP PROCEDURE sp9;
 DROP PROCEDURE IF EXISTS sp10;
@@ -18823,7 +18794,7 @@ CALL sp10(-1.00e+09, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute10();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute10;
 DROP PROCEDURE sp10;
 DROP PROCEDURE IF EXISTS sp11;
@@ -18855,7 +18826,7 @@ CALL sp11(--1.00e+09, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, 
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute11();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute11;
 DROP PROCEDURE sp11;
 DROP PROCEDURE IF EXISTS sp12;
@@ -18887,7 +18858,7 @@ CALL sp12(99999999999, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6,
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute12();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute12;
 DROP PROCEDURE sp12;
 DROP PROCEDURE IF EXISTS sp13;
@@ -18919,7 +18890,7 @@ CALL sp13(-1.00e+09, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute13();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute13;
 DROP PROCEDURE sp13;
 DROP PROCEDURE IF EXISTS sp14;
@@ -18951,7 +18922,7 @@ CALL sp14(-1.00e+21, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute14();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute14;
 DROP PROCEDURE sp14;
 DROP PROCEDURE IF EXISTS sp15;
@@ -18982,7 +18953,7 @@ CALL sp15(1.00e+00, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute15();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute15;
 DROP PROCEDURE sp15;
 DROP PROCEDURE IF EXISTS sp16;
@@ -19013,7 +18984,7 @@ CALL sp16(1.00e+00, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute16();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute16;
 DROP PROCEDURE sp16;
 DROP PROCEDURE IF EXISTS sp17;
@@ -19044,7 +19015,7 @@ CALL sp17(1.00e+00, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute17();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute17;
 DROP PROCEDURE sp17;
 DROP PROCEDURE IF EXISTS sp18;
@@ -19075,7 +19046,7 @@ CALL sp18(1.00e+00, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute18();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute18;
 DROP PROCEDURE sp18;
 DROP PROCEDURE IF EXISTS sp19;
@@ -19106,7 +19077,7 @@ CALL sp19(1.00e+00, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute19();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute19;
 DROP PROCEDURE sp19;
 DROP PROCEDURE IF EXISTS sp20;
@@ -19137,7 +19108,7 @@ CALL sp20(1.00e+00, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute20();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute20;
 DROP PROCEDURE sp20;
 DROP PROCEDURE IF EXISTS sp21;
@@ -19168,7 +19139,7 @@ CALL sp21(1.00e+00, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute21();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute21;
 DROP PROCEDURE sp21;
 DROP PROCEDURE IF EXISTS sp22;
@@ -19199,7 +19170,7 @@ CALL sp22(1.00e+00, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute22();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute22;
 DROP PROCEDURE sp22;
 DROP PROCEDURE IF EXISTS sp23;
@@ -19230,7 +19201,7 @@ CALL sp23(-999999999, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, 
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute23();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute23;
 DROP PROCEDURE sp23;
 DROP PROCEDURE IF EXISTS sp24;
@@ -19261,7 +19232,7 @@ CALL sp24(1.1, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9.22e+
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute24();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute24;
 DROP PROCEDURE sp24;
 DROP PROCEDURE IF EXISTS sp25;
@@ -19292,7 +19263,7 @@ CALL sp25(-32701, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9.2
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute25();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute25;
 DROP PROCEDURE sp25;
 DROP PROCEDURE IF EXISTS sp26;
@@ -19323,7 +19294,7 @@ CALL sp26( '1997-12-31', var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute26();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute26;
 DROP PROCEDURE sp26;
 DROP PROCEDURE IF EXISTS sp27;
@@ -19354,7 +19325,7 @@ CALL sp27( '23:59:59.999999', var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute27();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute27;
 DROP PROCEDURE sp27;
 DROP PROCEDURE IF EXISTS sp28;
@@ -19385,7 +19356,7 @@ CALL sp28('1997-12-31 23:59:59.999999', var1, var2, -9.22e+18, var3, var4, -9.22
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute28();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute28;
 DROP PROCEDURE sp28;
 DROP PROCEDURE IF EXISTS sp29;
@@ -19416,7 +19387,7 @@ CALL sp29(1.00e+00, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute29();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute29;
 DROP PROCEDURE sp29;
 DROP PROCEDURE IF EXISTS sp30;
@@ -19447,7 +19418,7 @@ CALL sp30(1.00e+00, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute30();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute30;
 DROP PROCEDURE sp30;
 DROP PROCEDURE IF EXISTS sp31;
@@ -19478,7 +19449,7 @@ CALL sp31(1.00e+00, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute31();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute31;
 DROP PROCEDURE sp31;
 DROP PROCEDURE IF EXISTS sp32;
@@ -19509,7 +19480,7 @@ CALL sp32(1.00e+00, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute32();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute32;
 DROP PROCEDURE sp32;
 DROP PROCEDURE IF EXISTS sp33;
@@ -19540,7 +19511,7 @@ CALL sp33(1.00e+00, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute33();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute33;
 DROP PROCEDURE sp33;
 DROP PROCEDURE IF EXISTS sp34;
@@ -19571,7 +19542,7 @@ CALL sp34(1.00e+00, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute34();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute34;
 DROP PROCEDURE sp34;
 DROP PROCEDURE IF EXISTS sp35;
@@ -19602,7 +19573,7 @@ CALL sp35(1.00e+00, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute35();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute35;
 DROP PROCEDURE sp35;
 DROP PROCEDURE IF EXISTS sp36;
@@ -19633,7 +19604,7 @@ CALL sp36(1.00e+00, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute36();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute36;
 DROP PROCEDURE sp36;
 DROP PROCEDURE IF EXISTS sp37;
@@ -19664,7 +19635,7 @@ CALL sp37(1.00e+00, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute37();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute37;
 DROP PROCEDURE sp37;
 DROP PROCEDURE IF EXISTS sp38;
@@ -19695,7 +19666,7 @@ CALL sp38(1.00e+00, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute38();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute38;
 DROP PROCEDURE sp38;
 DROP PROCEDURE IF EXISTS sp39;
@@ -19726,7 +19697,7 @@ CALL sp39(1.00e+00, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute39();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute39;
 DROP PROCEDURE sp39;
 DROP PROCEDURE IF EXISTS sp40;
@@ -19757,7 +19728,7 @@ CALL sp40(1.1, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9.22e+
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute40();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute40;
 DROP PROCEDURE sp40;
 DROP PROCEDURE IF EXISTS sp41;
@@ -19788,7 +19759,7 @@ CALL sp41(1.1, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9.22e+
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute41();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute41;
 DROP PROCEDURE sp41;
 DROP PROCEDURE IF EXISTS sp42;
@@ -19819,7 +19790,7 @@ CALL sp42(1.1, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9.22e+
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute42();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute42;
 DROP PROCEDURE sp42;
 DROP PROCEDURE IF EXISTS sp43;
@@ -19850,7 +19821,7 @@ CALL sp43(-999999999, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, 
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute43();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute43;
 DROP PROCEDURE sp43;
 DROP PROCEDURE IF EXISTS sp44;
@@ -19881,7 +19852,7 @@ CALL sp44(9999999999, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, 
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute44();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute44;
 DROP PROCEDURE sp44;
 DROP PROCEDURE IF EXISTS sp45;
@@ -19912,7 +19883,7 @@ CALL sp45(-99999999, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute45();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute45;
 DROP PROCEDURE sp45;
 DROP PROCEDURE IF EXISTS sp46;
@@ -19943,7 +19914,7 @@ CALL sp46(-999999999, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, 
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute46();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute46;
 DROP PROCEDURE sp46;
 DROP PROCEDURE IF EXISTS sp47;
@@ -19974,7 +19945,7 @@ CALL sp47(9999999999, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, 
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute47();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute47;
 DROP PROCEDURE sp47;
 DROP PROCEDURE IF EXISTS sp48;
@@ -20005,7 +19976,7 @@ CALL sp48(-99999999, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute48();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute48;
 DROP PROCEDURE sp48;
 DROP PROCEDURE IF EXISTS sp49;
@@ -20036,7 +20007,7 @@ CALL sp49(-999999999, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, 
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute49();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute49;
 DROP PROCEDURE sp49;
 DROP PROCEDURE IF EXISTS sp50;
@@ -20067,7 +20038,7 @@ CALL sp50(9999999999, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, 
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute50();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute50;
 DROP PROCEDURE sp50;
 DROP PROCEDURE IF EXISTS sp51;
@@ -20098,7 +20069,7 @@ CALL sp51(-99999999, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute51();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute51;
 DROP PROCEDURE sp51;
 DROP PROCEDURE IF EXISTS sp52;
@@ -20129,7 +20100,7 @@ CALL sp52(-1.00e+20, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute52();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute52;
 DROP PROCEDURE sp52;
 DROP PROCEDURE IF EXISTS sp53;
@@ -20160,7 +20131,7 @@ CALL sp53(-1.00e+20, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute53();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute53;
 DROP PROCEDURE sp53;
 DROP PROCEDURE IF EXISTS sp54;
@@ -20191,7 +20162,7 @@ CALL sp54(1.00e+20, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute54();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute54;
 DROP PROCEDURE sp54;
 DROP PROCEDURE IF EXISTS sp55;
@@ -20222,7 +20193,7 @@ CALL sp55(-1.00e+20, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute55();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute55;
 DROP PROCEDURE sp55;
 DROP PROCEDURE IF EXISTS sp56;
@@ -20559,7 +20530,7 @@ CALL sp65(999999999, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute65();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute65;
 DROP PROCEDURE sp65;
 DROP PROCEDURE IF EXISTS sp66;
@@ -20590,7 +20561,7 @@ CALL sp66(1.00e+16, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute66();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute66;
 DROP PROCEDURE sp66;
 DROP PROCEDURE IF EXISTS sp67;
@@ -20621,7 +20592,7 @@ CALL sp67(1.00e+16, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute67();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute67;
 DROP PROCEDURE sp67;
 DROP PROCEDURE IF EXISTS sp68;
@@ -20652,7 +20623,7 @@ CALL sp68(-1.00e+21, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute68();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute68;
 DROP PROCEDURE sp68;
 DROP PROCEDURE IF EXISTS sp69;
@@ -20683,7 +20654,7 @@ CALL sp69(-1.00e+20, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute69();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute69;
 DROP PROCEDURE sp69;
 DROP PROCEDURE IF EXISTS sp70;
@@ -20714,7 +20685,7 @@ CALL sp70(1.00e+20, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute70();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute70;
 DROP PROCEDURE sp70;
 DROP PROCEDURE IF EXISTS sp71;
@@ -20745,7 +20716,7 @@ CALL sp71(1.00e+20, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute71();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute71;
 DROP PROCEDURE sp71;
 DROP PROCEDURE IF EXISTS sp72;
@@ -20776,7 +20747,7 @@ CALL sp72(1.00e+00, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute72();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute72;
 DROP PROCEDURE sp72;
 DROP PROCEDURE IF EXISTS sp73;
@@ -20807,7 +20778,7 @@ CALL sp73(1.00e+00, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute73();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute73;
 DROP PROCEDURE sp73;
 DROP PROCEDURE IF EXISTS sp74;
@@ -20838,7 +20809,7 @@ CALL sp74(1.00e+00, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute74();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute74;
 DROP PROCEDURE sp74;
 DROP PROCEDURE IF EXISTS sp75;
@@ -20869,7 +20840,7 @@ CALL sp75(-1.00e+09, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute75();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute75;
 DROP PROCEDURE sp75;
 DROP PROCEDURE IF EXISTS sp76;
@@ -20900,7 +20871,7 @@ CALL sp76(1.00e+00, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute76();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute76;
 DROP PROCEDURE sp76;
 DROP PROCEDURE IF EXISTS sp77;
@@ -20931,7 +20902,7 @@ CALL sp77(1.00e+00, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute77();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute77;
 DROP PROCEDURE sp77;
 DROP PROCEDURE IF EXISTS sp78;
@@ -20962,7 +20933,7 @@ CALL sp78(1.00e+00, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute78();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute78;
 DROP PROCEDURE sp78;
 DROP PROCEDURE IF EXISTS sp79;
@@ -20993,7 +20964,7 @@ CALL sp79(1.00e+00, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute79();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute79;
 DROP PROCEDURE sp79;
 DROP PROCEDURE IF EXISTS sp80;
@@ -21024,7 +20995,7 @@ CALL sp80(-2.15e+09, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute80();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute80;
 DROP PROCEDURE sp80;
 DROP PROCEDURE IF EXISTS sp81;
@@ -21055,7 +21026,7 @@ CALL sp81(4.29e+09, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute81();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute81;
 DROP PROCEDURE sp81;
 DROP PROCEDURE IF EXISTS sp82;
@@ -21086,7 +21057,7 @@ CALL sp82(4.29e+09, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute82();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute82;
 DROP PROCEDURE sp82;
 DROP PROCEDURE IF EXISTS sp83;
@@ -21117,7 +21088,7 @@ CALL sp83(2.15e+08, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute83();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute83;
 DROP PROCEDURE sp83;
 DROP PROCEDURE IF EXISTS sp84;
@@ -21148,7 +21119,7 @@ CALL sp84(-8388600, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute84();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute84;
 DROP PROCEDURE sp84;
 DROP PROCEDURE IF EXISTS sp85;
@@ -21179,7 +21150,7 @@ CALL sp85(16777201, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute85();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute85;
 DROP PROCEDURE sp85;
 DROP PROCEDURE IF EXISTS sp86;
@@ -21210,7 +21181,7 @@ CALL sp86(16777210, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute86();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute86;
 DROP PROCEDURE sp86;
 DROP PROCEDURE IF EXISTS sp87;
@@ -21241,7 +21212,7 @@ CALL sp87(-8388601, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute87();
-ERROR 22003: BIGINT UNSIGNED value is out of range in '(f1@0 - 10)'
+ERROR 22003: BIGINT UNSIGNED value is out of range in 'f1@0 - 10'
 DROP PROCEDURE spexecute87;
 DROP PROCEDURE sp87;
 DROP PROCEDURE IF EXISTS sp88;
@@ -21272,7 +21243,7 @@ CALL sp88(99999999, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute88();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute88;
 DROP PROCEDURE sp88;
 DROP PROCEDURE IF EXISTS sp89;
@@ -21303,7 +21274,7 @@ CALL sp89(99999999, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute89();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute89;
 DROP PROCEDURE sp89;
 DROP PROCEDURE IF EXISTS sp90;
@@ -21334,7 +21305,7 @@ CALL sp90(1.00e+20, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute90();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute90;
 DROP PROCEDURE sp90;
 DROP PROCEDURE IF EXISTS sp91;
@@ -21365,7 +21336,7 @@ CALL sp91(1.00e+20, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute91();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute91;
 DROP PROCEDURE sp91;
 DROP PROCEDURE IF EXISTS sp92;
@@ -21396,7 +21367,7 @@ CALL sp92(-1.00e+20, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute92();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute92;
 DROP PROCEDURE sp92;
 DROP PROCEDURE IF EXISTS sp93;
@@ -21427,7 +21398,7 @@ CALL sp93(1.00e+20, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute93();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute93;
 DROP PROCEDURE sp93;
 DROP PROCEDURE IF EXISTS sp94;
@@ -21458,7 +21429,7 @@ CALL sp94(-32701, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9.2
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute94();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute94;
 DROP PROCEDURE sp94;
 DROP PROCEDURE IF EXISTS sp95;
@@ -21489,7 +21460,7 @@ CALL sp95(65531, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9.22
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute95();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute95;
 DROP PROCEDURE sp95;
 DROP PROCEDURE IF EXISTS sp96;
@@ -21520,7 +21491,7 @@ CALL sp96(65531, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9.22
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute96();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute96;
 DROP PROCEDURE sp96;
 DROP PROCEDURE IF EXISTS sp97;
@@ -21551,7 +21522,7 @@ CALL sp97(-32601, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9.2
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute97();
-ERROR 22003: BIGINT UNSIGNED value is out of range in '(f1@0 - 10)'
+ERROR 22003: BIGINT UNSIGNED value is out of range in 'f1@0 - 10'
 DROP PROCEDURE spexecute97;
 DROP PROCEDURE sp97;
 DROP PROCEDURE IF EXISTS sp98;
@@ -21582,7 +21553,7 @@ CALL sp98(-115, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9.22e
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute98();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute98;
 DROP PROCEDURE sp98;
 DROP PROCEDURE IF EXISTS sp99;
@@ -21613,7 +21584,7 @@ CALL sp99(251, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9.22e+
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute99();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute99;
 DROP PROCEDURE sp99;
 DROP PROCEDURE IF EXISTS sp100;
@@ -21644,7 +21615,7 @@ CALL sp100(201, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9.22e
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute100();
-ERROR 22003: BIGINT value is out of range in '(f5@4 * 2)'
+ERROR 22003: BIGINT value is out of range in 'f5@4 * 2'
 DROP PROCEDURE spexecute100;
 DROP PROCEDURE sp100;
 DROP PROCEDURE IF EXISTS sp101;
@@ -21675,7 +21646,7 @@ CALL sp101(-101, var1, var2, -9.22e+18, var3, var4, -9.22e+18, var5, var6, -9.22
 SELECT var1, var2, var3, var4, var5, var6, var7, var8;
 END//
 CALL spexecute101();
-ERROR 22003: BIGINT UNSIGNED value is out of range in '(f1@0 - 10)'
+ERROR 22003: BIGINT UNSIGNED value is out of range in 'f1@0 - 10'
 DROP PROCEDURE spexecute101;
 DROP PROCEDURE sp101;
 USE db_storedproc;
@@ -22258,7 +22229,7 @@ delete from res_t9;
 drop table res_t9;
 return i1;
 END//
-ERROR HY000: Explicit or implicit commit is not allowed in stored function or trigger.
+ERROR HY000: Explicit or implicit commit is not allowed in stored function or trigger
 DROP FUNCTION IF EXISTS fn1;
 Warnings:
 Note	1305	FUNCTION db_storedproc.fn1 does not exist
@@ -22269,7 +22240,7 @@ create table res_t9 (f1 longtext, f2 longblob, f3 real);
 drop table res_t9;
 return i1;
 END//
-ERROR HY000: Explicit or implicit commit is not allowed in stored function or trigger.
+ERROR HY000: Explicit or implicit commit is not allowed in stored function or trigger
 DROP FUNCTION IF EXISTS fn1;
 Warnings:
 Note	1305	FUNCTION db_storedproc.fn1 does not exist
@@ -22283,7 +22254,7 @@ insert into res_t9 values (100, 'abc', 300);
 drop table res_t9;
 return i1;
 END//
-ERROR HY000: Explicit or implicit commit is not allowed in stored function or trigger.
+ERROR HY000: Explicit or implicit commit is not allowed in stored function or trigger
 DROP FUNCTION IF EXISTS fn1;
 Warnings:
 Note	1305	FUNCTION db_storedproc.fn1 does not exist
@@ -22296,7 +22267,7 @@ update res_t9 set f1 = 20;
 drop table res_t9;
 return i1;
 END//
-ERROR HY000: Explicit or implicit commit is not allowed in stored function or trigger.
+ERROR HY000: Explicit or implicit commit is not allowed in stored function or trigger
 drop table res_t9;
 DROP FUNCTION IF EXISTS fn1;
 Warnings:

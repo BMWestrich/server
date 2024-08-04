@@ -1,6 +1,7 @@
 /*****************************************************************************
 
-Copyright (c) 1996, 2012, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1996, 2016, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2017, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +13,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -291,7 +292,7 @@ ibool
 trx_in_trx_list(
 /*============*/
 	const trx_t*	in_trx)		/*!< in: transaction */
-	__attribute__((nonnull, warn_unused_result));
+	MY_ATTRIBUTE((nonnull, warn_unused_result));
 #endif /* UNIV_DEBUG */
 #if defined UNIV_DEBUG || defined UNIV_BLOB_LIGHT_DEBUG
 /***********************************************************//**
@@ -302,7 +303,7 @@ ibool
 trx_assert_recovered(
 /*=================*/
 	trx_id_t	trx_id)		/*!< in: transaction identifier */
-	__attribute__((warn_unused_result));
+	MY_ATTRIBUTE((warn_unused_result));
 #endif /* UNIV_DEBUG || UNIV_BLOB_LIGHT_DEBUG */
 /*****************************************************************//**
 Updates the offset information about the end of the MySQL binlog entry
@@ -328,19 +329,29 @@ UNIV_INTERN
 void
 trx_sys_print_mysql_binlog_offset(void);
 /*===================================*/
+
 #ifdef WITH_WSREP
-/** Update WSREP checkpoint XID in sys header. */
+
+/** Update WSREP XID info in sys_header of TRX_SYS_PAGE_NO = 5.
+@param[in]	xid		Transaction XID
+@param[in,out]	sys_header	sys_header
+@param[in]	mtr		minitransaction */
+UNIV_INTERN
 void
 trx_sys_update_wsrep_checkpoint(
-        const XID*      xid,         /*!< in: WSREP XID */
-        trx_sysf_t*     sys_header,  /*!< in: sys_header */
-        mtr_t*          mtr);        /*!< in: mtr       */
+	const XID*	xid,
+	trx_sysf_t*	sys_header,
+	mtr_t*		mtr);
 
-void
-/** Read WSREP checkpoint XID from sys header. */
+/** Read WSREP checkpoint XID from sys header.
+@param[out]	xid	Transaction XID
+@return  true on success, false on error. */
+UNIV_INTERN
+bool
 trx_sys_read_wsrep_checkpoint(
         XID* xid); /*!< out: WSREP XID */
 #endif /* WITH_WSREP */
+
 /*****************************************************************//**
 Prints to stderr the MySQL master log offset info in the trx system header if
 the magic number shows it valid. */
@@ -569,13 +580,71 @@ this contains the same fields as TRX_SYS_MYSQL_LOG_INFO below */
 						within that file */
 #define TRX_SYS_MYSQL_LOG_NAME		12	/*!< MySQL log file name */
 
+/** Memory map TRX_SYS_PAGE_NO = 5 when UNIV_PAGE_SIZE = 4096
+
+0...37 FIL_HEADER
+38...45 TRX_SYS_TRX_ID_STORE
+46...55 TRX_SYS_FSEG_HEADER (FSEG_HEADER_SIZE == 10)
+56      TRX_SYS_RSEGS
+  56...59  TRX_SYS_RSEG_SPACE       for slot 0
+  60...63  TRX_SYS_RSEG_PAGE_NO     for slot 0
+  64...67  TRX_SYS_RSEG_SPACE       for slot 1
+  68...71  TRX_SYS_RSEG_PAGE_NO     for slot 1
+....
+ 594..597  TRX_SYS_RSEG_SPACE       for slot 72
+ 598..601  TRX_SYS_RSEG_PAGE_NO     for slot 72
+...
+  ...1063  TRX_SYS_RSEG_PAGE_NO     for slot 126
+
+(UNIV_PAGE_SIZE-3500 WSREP ::: FAIL would overwrite undo tablespace
+space_id, page_no pairs :::)
+596 TRX_SYS_WSREP_XID_INFO             TRX_SYS_WSREP_XID_MAGIC_N_FLD
+600 TRX_SYS_WSREP_XID_FORMAT
+604 TRX_SYS_WSREP_XID_GTRID_LEN
+608 TRX_SYS_WSREP_XID_BQUAL_LEN
+612 TRX_SYS_WSREP_XID_DATA   (len = 128)
+739 TRX_SYS_WSREP_XID_DATA_END
+
+FIXED WSREP XID info offsets for 4k page size 10.0.32-galera
+(UNIV_PAGE_SIZE-2500)
+1596 TRX_SYS_WSREP_XID_INFO             TRX_SYS_WSREP_XID_MAGIC_N_FLD
+1600 TRX_SYS_WSREP_XID_FORMAT
+1604 TRX_SYS_WSREP_XID_GTRID_LEN
+1608 TRX_SYS_WSREP_XID_BQUAL_LEN
+1612 TRX_SYS_WSREP_XID_DATA   (len = 128)
+1739 TRX_SYS_WSREP_XID_DATA_END
+
+(UNIV_PAGE_SIZE - 2000 MYSQL MASTER LOG)
+2096   TRX_SYS_MYSQL_MASTER_LOG_INFO   TRX_SYS_MYSQL_LOG_MAGIC_N_FLD
+2100   TRX_SYS_MYSQL_LOG_OFFSET_HIGH
+2104   TRX_SYS_MYSQL_LOG_OFFSET_LOW
+2108   TRX_SYS_MYSQL_LOG_NAME
+
+(UNIV_PAGE_SIZE - 1000 MYSQL LOG)
+3096   TRX_SYS_MYSQL_LOG_INFO          TRX_SYS_MYSQL_LOG_MAGIC_N_FLD
+3100   TRX_SYS_MYSQL_LOG_OFFSET_HIGH
+3104   TRX_SYS_MYSQL_LOG_OFFSET_LOW
+3108   TRX_SYS_MYSQL_LOG_NAME
+
+(UNIV_PAGE_SIZE - 200 DOUBLEWRITE)
+3896   TRX_SYS_DOUBLEWRITE		TRX_SYS_DOUBLEWRITE_FSEG
+3906         TRX_SYS_DOUBLEWRITE_MAGIC
+3910         TRX_SYS_DOUBLEWRITE_BLOCK1
+3914         TRX_SYS_DOUBLEWRITE_BLOCK2
+3918         TRX_SYS_DOUBLEWRITE_REPEAT
+3930         TRX_SYS_DOUBLEWRITE_SPACE_ID_STORED_N
+
+(UNIV_PAGE_SIZE - 8, TAILER)
+4088..4096	FIL_TAILER
+
+*/
 #ifdef WITH_WSREP
-/* The offset to WSREP XID headers */
-#define TRX_SYS_WSREP_XID_INFO (UNIV_PAGE_SIZE - 3500)
+/** The offset to WSREP XID headers */
+#define TRX_SYS_WSREP_XID_INFO (ut_max(UNIV_PAGE_SIZE - 3500, 1596))
 #define TRX_SYS_WSREP_XID_MAGIC_N_FLD 0
 #define TRX_SYS_WSREP_XID_MAGIC_N 0x77737265
 
-/* XID field: formatID, gtrid_len, bqual_len, xid_data */
+/** XID field: formatID, gtrid_len, bqual_len, xid_data */
 #define TRX_SYS_WSREP_XID_LEN        (4 + 4 + 4 + XIDDATASIZE)
 #define TRX_SYS_WSREP_XID_FORMAT     4
 #define TRX_SYS_WSREP_XID_GTRID_LEN  8
@@ -674,17 +743,17 @@ struct trx_sys_t{
 	trx_id_t	max_trx_id;	/*!< The smallest number not yet
 					assigned as a transaction id or
 					transaction number */
-	char		pad1[64];	/*!< Ensure max_trx_id does not share
+	char		pad1[CACHE_LINE_SIZE];	/*!< Ensure max_trx_id does not share
 					cache line with other fields. */
 	trx_id_t*	descriptors;	/*!< Array of trx descriptors */
 	ulint		descr_n_max;	/*!< The current size of the descriptors
 					array. */
-	char		pad2[64];	/*!< Ensure static descriptor fields
+	char		pad2[CACHE_LINE_SIZE];	/*!< Ensure static descriptor fields
 					do not share cache lines with
 					descr_n_used */
 	ulint		descr_n_used;	/*!< Number of used elements in the
 					descriptors array. */
-	char		pad3[64];	/*!< Ensure descriptors do not share
+	char		pad3[CACHE_LINE_SIZE];	/*!< Ensure descriptors do not share
 					cache line with other fields */
 #ifdef UNIV_DEBUG
 	trx_id_t	rw_max_trx_id;	/*!< Max trx id of read-write transactions
@@ -694,7 +763,7 @@ struct trx_sys_t{
 					memory read-write transactions, sorted
 					on trx id, biggest first. Recovered
 					transactions are always on this list. */
-	char		pad4[64];	/*!< Ensure list base nodes do not
+	char		pad4[CACHE_LINE_SIZE];	/*!< Ensure list base nodes do not
 					share cache line with other fields */
 	trx_list_t	ro_trx_list;	/*!< List of active and committed in
 					memory read-only transactions, sorted
@@ -703,7 +772,7 @@ struct trx_sys_t{
 					is not necessary. We should exploit
 					this and increase concurrency during
 					add/remove. */
-	char		pad5[64];	/*!< Ensure list base nodes do not
+	char		pad5[CACHE_LINE_SIZE];	/*!< Ensure list base nodes do not
 					share cache line with other fields */
 	trx_list_t	mysql_trx_list;	/*!< List of transactions created
 					for MySQL. All transactions on
@@ -717,14 +786,14 @@ struct trx_sys_t{
 					mysql_trx_list may additionally contain
 					transactions that have not yet been
 					started in InnoDB. */
-	char		pad6[64];	/*!< Ensure list base nodes do not
+	char		pad6[CACHE_LINE_SIZE];	/*!< Ensure list base nodes do not
 					share cache line with other fields */
 	trx_list_t	trx_serial_list;
 					/*!< trx->no ordered List of
 					transactions in either TRX_PREPARED or
 					TRX_ACTIVE which have already been
 					assigned a serialization number */
-	char		pad7[64];	/*!< Ensure list base nodes do not
+	char		pad7[CACHE_LINE_SIZE];	/*!< Ensure list base nodes do not
 					share cache line with other fields */
 	trx_rseg_t*	const rseg_array[TRX_SYS_N_RSEGS];
 					/*!< Pointer array to rollback

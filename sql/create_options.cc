@@ -1,4 +1,4 @@
-/* Copyright (C) 2010 Monty Program Ab
+/* Copyright (C) 2010, 2017, MariaDB Corporation Ab
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 /**
   @file
@@ -23,7 +23,7 @@
 #include <my_getopt.h>
 #include "set_var.h"
 
-#define FRM_QUOTED_VALUE 0x8000
+#define FRM_QUOTED_VALUE 0x8000U
 
 /**
   Links this item to the given list end
@@ -97,14 +97,13 @@ static bool report_unknown_option(THD *thd, engine_option_value *val,
 {
   DBUG_ENTER("report_unknown_option");
 
-  if (val->parsed || suppress_warning)
+  if (val->parsed || suppress_warning || thd->slave_thread)
   {
     DBUG_PRINT("info", ("parsed => exiting"));
     DBUG_RETURN(FALSE);
   }
 
-  if (!(thd->variables.sql_mode & MODE_IGNORE_BAD_TABLE_OPTIONS) &&
-      !thd->slave_thread)
+  if (!(thd->variables.sql_mode & MODE_IGNORE_BAD_TABLE_OPTIONS))
   {
     my_error(ER_UNKNOWN_OPTION, MYF(0), val->name.str);
     DBUG_RETURN(TRUE);
@@ -124,8 +123,8 @@ static bool set_one_value(ha_create_table_option *opt,
                           MEM_ROOT *root)
 {
   DBUG_ENTER("set_one_value");
-  DBUG_PRINT("enter", ("opt: 0x%lx type: %u name '%s' value: '%s'",
-                       (ulong) opt,
+  DBUG_PRINT("enter", ("opt: %p type: %u name '%s' value: '%s'",
+                       opt,
                        opt->type, opt->name,
                        (value->str ? value->str : "<DEFAULT>")));
   switch (opt->type)
@@ -184,7 +183,7 @@ static bool set_one_value(ha_create_table_option *opt,
       {
         for (end=start;
              *end && *end != ',';
-             end+= my_mbcharlen(system_charset_info, *end)) /* no-op */;
+             end++) /* no-op */;
         if (!my_strnncoll(system_charset_info,
                           (uchar*)start, end-start,
                           (uchar*)value->str, value->length))
@@ -613,7 +612,8 @@ uchar *engine_option_value::frm_image(uchar *buff)
 {
   if (value.str)
   {
-    *buff++= name.length;
+    DBUG_ASSERT(name.length <= 0xff);
+    *buff++= (uchar)name.length;
     memcpy(buff, name.str, name.length);
     buff+= name.length;
     int2store(buff, value.length | (quoted_value ? FRM_QUOTED_VALUE : 0));
@@ -685,20 +685,25 @@ uchar *engine_table_options_frm_image(uchar *buff,
 
   @returns pointer to byte after last recorded in the buffer
 */
-uchar *engine_option_value::frm_read(const uchar *buff, engine_option_value **start,
+uchar *engine_option_value::frm_read(const uchar *buff, const uchar *buff_end,
+                                     engine_option_value **start,
                                      engine_option_value **end, MEM_ROOT *root)
 {
   LEX_STRING name, value;
   uint len;
+#define need_buff(N)  if (buff + (N) >= buff_end) return NULL
 
+  need_buff(3);
   name.length= buff[0];
   buff++;
+  need_buff(name.length + 2);
   if (!(name.str= strmake_root(root, (const char*)buff, name.length)))
     return NULL;
   buff+= name.length;
   len= uint2korr(buff);
   value.length= len & ~FRM_QUOTED_VALUE;
   buff+= 2;
+  need_buff(value.length);
   if (!(value.str= strmake_root(root, (const char*)buff, value.length)))
     return NULL;
   buff+= value.length;
@@ -735,8 +740,8 @@ bool engine_table_options_frm_read(const uchar *buff, uint length,
 
   while (buff < buff_end && *buff)
   {
-    if (!(buff= engine_option_value::frm_read(buff, &share->option_list, &end,
-                                              root)))
+    if (!(buff= engine_option_value::frm_read(buff, buff_end,
+                                              &share->option_list, &end, root)))
       DBUG_RETURN(TRUE);
   }
   buff++;
@@ -745,7 +750,7 @@ bool engine_table_options_frm_read(const uchar *buff, uint length,
   {
     while (buff < buff_end && *buff)
     {
-      if (!(buff= engine_option_value::frm_read(buff,
+      if (!(buff= engine_option_value::frm_read(buff, buff_end,
                                                 &share->field[count]->option_list,
                                                 &end, root)))
         DBUG_RETURN(TRUE);
@@ -757,7 +762,7 @@ bool engine_table_options_frm_read(const uchar *buff, uint length,
   {
     while (buff < buff_end && *buff)
     {
-      if (!(buff= engine_option_value::frm_read(buff,
+      if (!(buff= engine_option_value::frm_read(buff, buff_end,
                                                 &share->key_info[count].option_list,
                                                 &end, root)))
         DBUG_RETURN(TRUE);

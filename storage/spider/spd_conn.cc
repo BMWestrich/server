@@ -11,7 +11,7 @@
 
   You should have received a copy of the GNU General Public License
   along with this program; if not, write to the Free Software
-  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
+  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 #define MYSQL_SERVER 1
 #include "mysql_version.h"
@@ -67,9 +67,6 @@ extern PSI_thread_key spd_key_thd_bg_crd;
 extern PSI_thread_key spd_key_thd_bg_mon;
 #endif
 #endif
-
-extern pthread_mutex_t spider_global_trx_mutex;
-extern SPIDER_TRX *spider_global_trx;
 #endif
 
 HASH spider_open_connections;
@@ -2259,7 +2256,7 @@ void *spider_bg_conn_action(
   my_thread_init();
   DBUG_ENTER("spider_bg_conn_action");
   /* init start */
-  if (!(thd = new THD()))
+  if (!(thd = new THD(next_thread_id())))
   {
     pthread_mutex_lock(&conn->bg_conn_sync_mutex);
     pthread_cond_signal(&conn->bg_conn_sync_cond);
@@ -2267,7 +2264,6 @@ void *spider_bg_conn_action(
     my_thread_end();
     DBUG_RETURN(NULL);
   }
-  thd->thread_id = next_thread_id();
 #ifdef HAVE_PSI_INTERFACE
   mysql_thread_set_psi_id(thd->thread_id);
 #endif
@@ -2389,6 +2385,7 @@ void *spider_bg_conn_action(
           sql_type = SPIDER_SQL_TYPE_SELECT_HS;
         }
 #endif
+        pthread_mutex_assert_not_owner(&conn->mta_conn_mutex);
         if (dbton_handler->need_lock_before_set_sql_for_exec(sql_type))
         {
           pthread_mutex_lock(&conn->mta_conn_mutex);
@@ -2418,6 +2415,8 @@ void *spider_bg_conn_action(
         if (!result_list->bgs_error)
         {
           conn->need_mon = &spider->need_mons[conn->link_idx];
+          DBUG_ASSERT(!conn->mta_conn_mutex_lock_already);
+          DBUG_ASSERT(!conn->mta_conn_mutex_unlock_later);
           conn->mta_conn_mutex_lock_already = TRUE;
           conn->mta_conn_mutex_unlock_later = TRUE;
 #ifdef HA_CAN_BULK_ACCESS
@@ -2495,6 +2494,8 @@ void *spider_bg_conn_action(
 #ifdef HA_CAN_BULK_ACCESS
           }
 #endif
+          DBUG_ASSERT(conn->mta_conn_mutex_lock_already);
+          DBUG_ASSERT(conn->mta_conn_mutex_unlock_later);
           conn->mta_conn_mutex_lock_already = FALSE;
           conn->mta_conn_mutex_unlock_later = FALSE;
           SPIDER_CLEAR_FILE_POS(&conn->mta_conn_mutex_file_pos);
@@ -2505,11 +2506,14 @@ void *spider_bg_conn_action(
         }
       } else {
         spider->connection_ids[conn->link_idx] = conn->connection_id;
+        pthread_mutex_assert_not_owner(&conn->mta_conn_mutex);
+        DBUG_ASSERT(!conn->mta_conn_mutex_unlock_later);
         conn->mta_conn_mutex_unlock_later = TRUE;
         result_list->bgs_error =
           spider_db_store_result(spider, conn->link_idx, result_list->table);
         if ((result_list->bgs_error_with_message = thd->is_error()))
           strmov(result_list->bgs_error_msg, spider_stmt_da_message(thd));
+        DBUG_ASSERT(conn->mta_conn_mutex_unlock_later);
         conn->mta_conn_mutex_unlock_later = FALSE;
       }
       conn->bg_search = FALSE;
@@ -2573,12 +2577,26 @@ void *spider_bg_conn_action(
     {
       DBUG_PRINT("info",("spider bg exec sql start"));
       spider = (ha_spider*) conn->bg_target;
+      pthread_mutex_assert_not_owner(&conn->mta_conn_mutex);
+      pthread_mutex_lock(&conn->mta_conn_mutex);
+      SPIDER_SET_FILE_POS(&conn->mta_conn_mutex_file_pos);
+      conn->need_mon = &spider->need_mons[conn->link_idx];
+      DBUG_ASSERT(!conn->mta_conn_mutex_lock_already);
+      DBUG_ASSERT(!conn->mta_conn_mutex_unlock_later);
+      conn->mta_conn_mutex_lock_already = TRUE;
+      conn->mta_conn_mutex_unlock_later = TRUE;
       *conn->bg_error_num = spider_db_query_with_set_names(
         conn->bg_sql_type,
         spider,
         conn,
         conn->link_idx
       );
+      DBUG_ASSERT(conn->mta_conn_mutex_lock_already);
+      DBUG_ASSERT(conn->mta_conn_mutex_unlock_later);
+      conn->mta_conn_mutex_lock_already = FALSE;
+      conn->mta_conn_mutex_unlock_later = FALSE;
+      SPIDER_CLEAR_FILE_POS(&conn->mta_conn_mutex_file_pos);
+      pthread_mutex_unlock(&conn->mta_conn_mutex);
       conn->bg_exec_sql = FALSE;
       continue;
     }
@@ -2702,7 +2720,7 @@ void *spider_bg_sts_action(
   SPIDER_TRX *trx;
   int error_num = 0, roop_count;
   ha_spider spider;
-#ifdef _MSC_VER
+#if defined(_MSC_VER) || defined(__SUNPRO_CC)
   int *need_mons;
   SPIDER_CONN **conns;
   uint *conn_link_idx;
@@ -2729,7 +2747,7 @@ void *spider_bg_sts_action(
   my_thread_init();
   DBUG_ENTER("spider_bg_sts_action");
   /* init start */
-#ifdef _MSC_VER
+#if defined(_MSC_VER) || defined(__SUNPRO_CC)
 #if defined(HS_HAS_SQLCOM) && defined(HAVE_HANDLERSOCKET)
   if (!(need_mons = (int *)
     spider_bulk_malloc(spider_current_trx, 21, MYF(MY_WME),
@@ -2766,19 +2784,18 @@ void *spider_bg_sts_action(
   }
 #endif
   pthread_mutex_lock(&share->sts_mutex);
-  if (!(thd = new THD()))
+  if (!(thd = new THD(next_thread_id())))
   {
     share->bg_sts_thd_wait = FALSE;
     share->bg_sts_kill = FALSE;
     share->bg_sts_init = FALSE;
     pthread_mutex_unlock(&share->sts_mutex);
     my_thread_end();
-#ifdef _MSC_VER
+#if defined(_MSC_VER) || defined(__SUNPRO_CC)
     spider_free(NULL, need_mons, MYF(MY_WME));
 #endif
     DBUG_RETURN(NULL);
   }
-  thd->thread_id = next_thread_id();
 #ifdef HAVE_PSI_INTERFACE
   mysql_thread_set_psi_id(thd->thread_id);
 #endif
@@ -2795,15 +2812,12 @@ void *spider_bg_sts_action(
     my_pthread_setspecific_ptr(THR_THD, NULL);
 #endif
     my_thread_end();
-#ifdef _MSC_VER
+#if defined(_MSC_VER) || defined(__SUNPRO_CC)
     spider_free(NULL, need_mons, MYF(MY_WME));
 #endif
     DBUG_RETURN(NULL);
   }
   share->bg_sts_thd = thd;
-/*
-  spider.trx = spider_global_trx;
-*/
   spider.trx = trx;
   spider.share = share;
   spider.conns = conns;
@@ -2860,7 +2874,7 @@ void *spider_bg_sts_action(
     my_pthread_setspecific_ptr(THR_THD, NULL);
 #endif
     my_thread_end();
-#ifdef _MSC_VER
+#if defined(_MSC_VER) || defined(__SUNPRO_CC)
     spider_free(NULL, need_mons, MYF(MY_WME));
 #endif
     DBUG_RETURN(NULL);
@@ -2891,7 +2905,7 @@ void *spider_bg_sts_action(
       my_pthread_setspecific_ptr(THR_THD, NULL);
 #endif
       my_thread_end();
-#ifdef _MSC_VER
+#if defined(_MSC_VER) || defined(__SUNPRO_CC)
       spider_free(NULL, need_mons, MYF(MY_WME));
 #endif
       DBUG_RETURN(NULL);
@@ -2916,13 +2930,11 @@ void *spider_bg_sts_action(
       {
         if (!conns[spider.search_link_idx])
         {
-          pthread_mutex_lock(&spider_global_trx_mutex);
           spider_get_conn(share, spider.search_link_idx,
             share->conn_keys[spider.search_link_idx],
-            spider_global_trx, &spider, FALSE, FALSE, SPIDER_CONN_KIND_MYSQL,
+            trx, &spider, FALSE, FALSE, SPIDER_CONN_KIND_MYSQL,
             &error_num);
           conns[spider.search_link_idx]->error_mode = 0;
-          pthread_mutex_unlock(&spider_global_trx_mutex);
 /*
           if (
             error_num &&
@@ -2931,7 +2943,7 @@ void *spider_bg_sts_action(
           ) {
             lex_start(thd);
             error_num = spider_ping_table_mon_from_table(
-                spider_global_trx,
+                trx,
                 thd,
                 share,
                 (uint32) share->monitoring_sid[spider.search_link_idx],
@@ -2952,7 +2964,6 @@ void *spider_bg_sts_action(
         }
         if (spider.search_link_idx != -1 && conns[spider.search_link_idx])
         {
-          DBUG_ASSERT(!conns[spider.search_link_idx]->thd);
 #ifdef WITH_PARTITION_STORAGE_ENGINE
           if (spider_get_sts(share, spider.search_link_idx,
             share->bg_sts_try_time, &spider,
@@ -2973,7 +2984,7 @@ void *spider_bg_sts_action(
             ) {
               lex_start(thd);
               error_num = spider_ping_table_mon_from_table(
-                  spider_global_trx,
+                  trx,
                   thd,
                   share,
                   (uint32) share->monitoring_sid[spider.search_link_idx],
@@ -3082,7 +3093,7 @@ void *spider_bg_crd_action(
   int error_num = 0, roop_count;
   ha_spider spider;
   TABLE table;
-#ifdef _MSC_VER
+#if defined(_MSC_VER) || defined(__SUNPRO_CC)
   int *need_mons;
   SPIDER_CONN **conns;
   uint *conn_link_idx;
@@ -3109,7 +3120,7 @@ void *spider_bg_crd_action(
   my_thread_init();
   DBUG_ENTER("spider_bg_crd_action");
   /* init start */
-#ifdef _MSC_VER
+#if defined(_MSC_VER) || defined(__SUNPRO_CC)
 #if defined(HS_HAS_SQLCOM) && defined(HAVE_HANDLERSOCKET)
   if (!(need_mons = (int *)
     spider_bulk_malloc(spider_current_trx, 22, MYF(MY_WME),
@@ -3146,19 +3157,18 @@ void *spider_bg_crd_action(
   }
 #endif
   pthread_mutex_lock(&share->crd_mutex);
-  if (!(thd = new THD()))
+  if (!(thd = new THD(next_thread_id())))
   {
     share->bg_crd_thd_wait = FALSE;
     share->bg_crd_kill = FALSE;
     share->bg_crd_init = FALSE;
     pthread_mutex_unlock(&share->crd_mutex);
     my_thread_end();
-#ifdef _MSC_VER
+#if defined(_MSC_VER) || defined(__SUNPRO_CC)
     spider_free(NULL, need_mons, MYF(MY_WME));
 #endif
     DBUG_RETURN(NULL);
   }
-  thd->thread_id = next_thread_id();
 #ifdef HAVE_PSI_INTERFACE
   mysql_thread_set_psi_id(thd->thread_id);
 #endif
@@ -3175,7 +3185,7 @@ void *spider_bg_crd_action(
     my_pthread_setspecific_ptr(THR_THD, NULL);
 #endif
     my_thread_end();
-#ifdef _MSC_VER
+#if defined(_MSC_VER) || defined(__SUNPRO_CC)
     spider_free(NULL, need_mons, MYF(MY_WME));
 #endif
     DBUG_RETURN(NULL);
@@ -3184,9 +3194,6 @@ void *spider_bg_crd_action(
   table.s = share->table_share;
   table.field = share->table_share->field;
   table.key_info = share->table_share->key_info;
-/*
-  spider.trx = spider_global_trx;
-*/
   spider.trx = trx;
   spider.change_table_ptr(&table, share->table_share);
   spider.share = share;
@@ -3244,7 +3251,7 @@ void *spider_bg_crd_action(
     my_pthread_setspecific_ptr(THR_THD, NULL);
 #endif
     my_thread_end();
-#ifdef _MSC_VER
+#if defined(_MSC_VER) || defined(__SUNPRO_CC)
     spider_free(NULL, need_mons, MYF(MY_WME));
 #endif
     DBUG_RETURN(NULL);
@@ -3275,7 +3282,7 @@ void *spider_bg_crd_action(
       my_pthread_setspecific_ptr(THR_THD, NULL);
 #endif
       my_thread_end();
-#ifdef _MSC_VER
+#if defined(_MSC_VER) || defined(__SUNPRO_CC)
       spider_free(NULL, need_mons, MYF(MY_WME));
 #endif
       DBUG_RETURN(NULL);
@@ -3300,13 +3307,11 @@ void *spider_bg_crd_action(
       {
         if (!conns[spider.search_link_idx])
         {
-          pthread_mutex_lock(&spider_global_trx_mutex);
           spider_get_conn(share, spider.search_link_idx,
             share->conn_keys[spider.search_link_idx],
-            spider_global_trx, &spider, FALSE, FALSE, SPIDER_CONN_KIND_MYSQL,
+            trx, &spider, FALSE, FALSE, SPIDER_CONN_KIND_MYSQL,
             &error_num);
           conns[spider.search_link_idx]->error_mode = 0;
-          pthread_mutex_unlock(&spider_global_trx_mutex);
 /*
           if (
             error_num &&
@@ -3315,7 +3320,7 @@ void *spider_bg_crd_action(
           ) {
             lex_start(thd);
             error_num = spider_ping_table_mon_from_table(
-                spider_global_trx,
+                trx,
                 thd,
                 share,
                 (uint32) share->monitoring_sid[spider.search_link_idx],
@@ -3336,7 +3341,6 @@ void *spider_bg_crd_action(
         }
         if (spider.search_link_idx != -1 && conns[spider.search_link_idx])
         {
-          DBUG_ASSERT(!conns[spider.search_link_idx]->thd);
 #ifdef WITH_PARTITION_STORAGE_ENGINE
           if (spider_get_crd(share, spider.search_link_idx,
             share->bg_crd_try_time, &spider, &table,
@@ -3357,7 +3361,7 @@ void *spider_bg_crd_action(
             ) {
               lex_start(thd);
               error_num = spider_ping_table_mon_from_table(
-                  spider_global_trx,
+                  trx,
                   thd,
                   share,
                   (uint32) share->monitoring_sid[spider.search_link_idx],
@@ -3409,7 +3413,7 @@ int spider_create_mon_threads(
     {
       char link_idx_str[SPIDER_SQL_INT_LEN];
       int link_idx_str_length;
-#ifdef _MSC_VER
+#if defined(_MSC_VER) || defined(__SUNPRO_CC)
       spider_string conv_name_str(share->table_name_length +
         SPIDER_SQL_INT_LEN + 1);
       conv_name_str.set_charset(system_charset_info);
@@ -3636,7 +3640,7 @@ void *spider_bg_mon_action(
   DBUG_ENTER("spider_bg_mon_action");
   /* init start */
   pthread_mutex_lock(&share->bg_mon_mutexes[link_idx]);
-  if (!(thd = new THD()))
+  if (!(thd = new THD(next_thread_id())))
   {
     share->bg_mon_kill = FALSE;
     share->bg_mon_init = FALSE;
@@ -3645,7 +3649,6 @@ void *spider_bg_mon_action(
     my_thread_end();
     DBUG_RETURN(NULL);
   }
-  thd->thread_id = next_thread_id();
 #ifdef HAVE_PSI_INTERFACE
   mysql_thread_set_psi_id(thd->thread_id);
 #endif
@@ -3707,7 +3710,7 @@ void *spider_bg_mon_action(
     {
       lex_start(thd);
       error_num = spider_ping_table_mon_from_table(
-        spider_global_trx,
+        trx,
         thd,
         share,
         (uint32) share->monitoring_sid[link_idx],
@@ -3738,7 +3741,7 @@ int spider_conn_first_link_idx(
   int roop_count, active_links = 0;
   longlong balance_total = 0, balance_val;
   double rand_val;
-#ifdef _MSC_VER
+#if defined(_MSC_VER) || defined(__SUNPRO_CC)
   int *link_idxs, link_idx;
   long *balances;
 #else
@@ -3746,7 +3749,7 @@ int spider_conn_first_link_idx(
   long balances[link_count];
 #endif
   DBUG_ENTER("spider_conn_first_link_idx");
-#ifdef _MSC_VER
+#if defined(_MSC_VER) || defined(__SUNPRO_CC)
   if (!(link_idxs = (int *)
     spider_bulk_malloc(spider_current_trx, 24, MYF(MY_WME),
       &link_idxs, sizeof(int) * link_count,
@@ -3772,7 +3775,7 @@ int spider_conn_first_link_idx(
   if (active_links == 0)
   {
     DBUG_PRINT("info",("spider all links are failed"));
-#ifdef _MSC_VER
+#if defined(_MSC_VER) || defined(__SUNPRO_CC)
     spider_free(spider_current_trx, link_idxs, MYF(MY_WME));
 #endif
     DBUG_RETURN(-1);
@@ -3801,7 +3804,7 @@ int spider_conn_first_link_idx(
   }
 
   DBUG_PRINT("info",("spider first link_idx=%d", link_idxs[roop_count]));
-#ifdef _MSC_VER
+#if defined(_MSC_VER) || defined(__SUNPRO_CC)
   link_idx = link_idxs[roop_count];
   spider_free(spider_current_trx, link_idxs, MYF(MY_WME));
   DBUG_RETURN(link_idx);

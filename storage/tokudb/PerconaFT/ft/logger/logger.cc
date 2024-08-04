@@ -36,6 +36,7 @@ Copyright (c) 2006, 2015, Percona and/or its affiliates. All rights reserved.
 
 #ident "Copyright (c) 2006, 2015, Percona and/or its affiliates. All rights reserved."
 
+#include <my_global.h>
 #include <memory.h>
 #include <ctype.h>
 #include <limits.h>
@@ -49,11 +50,22 @@ Copyright (c) 2006, 2015, Percona and/or its affiliates. All rights reserved.
 
 #include "util/status.h"
 
-static const int log_format_version=TOKU_LOG_VERSION;
+int writing_rollback = 0;
+extern "C" {
+  uint force_recovery = 0;
+}
 
-static int open_logfile (TOKULOGGER logger);
-static void logger_write_buffer (TOKULOGGER logger, LSN *fsynced_lsn);
-static void delete_logfile(TOKULOGGER logger, long long index, uint32_t version);
+static const int log_format_version = TOKU_LOG_VERSION;
+
+toku_instr_key *result_output_condition_lock_mutex_key;
+toku_instr_key *result_output_condition_key;
+toku_instr_key *tokudb_file_log_key;
+
+static int open_logfile(TOKULOGGER logger);
+static void logger_write_buffer(TOKULOGGER logger, LSN *fsynced_lsn);
+static void delete_logfile(TOKULOGGER logger,
+                           long long index,
+                           uint32_t version);
 static void grab_output(TOKULOGGER logger, LSN *fsynced_lsn);
 static void release_output(TOKULOGGER logger, LSN fsynced_lsn);
 
@@ -131,10 +143,13 @@ int toku_logger_create (TOKULOGGER *resultp) {
     // n_in_file is uninitialized
     result->write_block_size = FT_DEFAULT_NODE_SIZE; // default logging size is the same as the default ft block size
     toku_logfilemgr_create(&result->logfilemgr);
-    *resultp=result;
+    *resultp = result;
     ml_init(&result->input_lock);
-    toku_mutex_init(&result->output_condition_lock, NULL);
-    toku_cond_init(&result->output_condition,       NULL);
+    toku_mutex_init(*result_output_condition_lock_mutex_key,
+                    &result->output_condition_lock,
+                    nullptr);
+    toku_cond_init(
+        *result_output_condition_key, &result->output_condition, nullptr);
     result->rollback_cachefile = NULL;
     result->output_is_available = true;
     toku_txn_manager_init(&result->txn_manager);
@@ -222,6 +237,7 @@ void toku_logger_initialize_rollback_cache(TOKULOGGER logger, FT ft) {
 }
 
 int toku_logger_open_rollback(TOKULOGGER logger, CACHETABLE cachetable, bool create) {
+    writing_rollback++;
     assert(logger->is_open);
     assert(!logger->rollback_cachefile);
 
@@ -241,6 +257,7 @@ int toku_logger_open_rollback(TOKULOGGER logger, CACHETABLE cachetable, bool cre
     } else {
         toku_ft_handle_close(ft_handle);
     }
+    writing_rollback--;
     return r;
 }
 
@@ -258,20 +275,20 @@ void toku_logger_close_rollback_check_empty(TOKULOGGER logger, bool clean_shutdo
             FT CAST_FROM_VOIDP(ft, toku_cachefile_get_userdata(cf));
             if (clean_shutdown) {
                 //Verify it is safe to close it.
-                assert(!ft->h->dirty);  //Must not be dirty.
+                assert(!ft->h->dirty());  //Must not be dirty.
                 ft->blocktable.free_unused_blocknums(ft->h->root_blocknum);
                 // Must have no data blocks (rollback logs or otherwise).
                 ft->blocktable.verify_no_data_blocks_except_root(ft->h->root_blocknum);
-                assert(!ft->h->dirty);
+                assert(!ft->h->dirty());
             } else {
-                ft->h->dirty = 0;
+                ft->h->clear_dirty();
             }
             ft_to_close = toku_ft_get_only_existing_ft_handle(ft);
             if (clean_shutdown) {
                 bool is_empty;
                 is_empty = toku_ft_is_empty_fast(ft_to_close);
                 assert(is_empty);
-                assert(!ft->h->dirty); // it should not have been dirtied by the toku_ft_is_empty test.
+                assert(!ft->h->dirty()); // it should not have been dirtied by the toku_ft_is_empty test.
             }
         }
 
@@ -300,10 +317,10 @@ int toku_logger_close(TOKULOGGER *loggerp) {
     grab_output(logger, &fsynced_lsn);
     logger_write_buffer(logger, &fsynced_lsn);
     if (logger->fd!=-1) {
-        if ( logger->write_log_files ) {
+        if (logger->write_log_files) {
             toku_file_fsync_without_accounting(logger->fd);
         }
-        r = close(logger->fd);
+        r = toku_os_close(logger->fd);
         assert(r == 0);
     }
     r = close_logdir(logger);
@@ -345,9 +362,13 @@ static int close_and_open_logfile (TOKULOGGER logger, LSN *fsynced_lsn)
     if (logger->write_log_files) {
         toku_file_fsync_without_accounting(logger->fd);
         *fsynced_lsn = logger->written_lsn;
-        toku_logfilemgr_update_last_lsn(logger->logfilemgr, logger->written_lsn);          // fixes t:2294
+        toku_logfilemgr_update_last_lsn(logger->logfilemgr,
+                                        logger->written_lsn);  // fixes t:2294
     }
-    r = close(logger->fd);                               if (r!=0) return get_error_errno();
+    r = toku_os_close(logger->fd);
+
+    if (r != 0)
+        return get_error_errno();
     return open_logfile(logger);
 }
 
@@ -654,12 +675,8 @@ int toku_logger_find_logfiles (const char *directory, char ***resultp, int *n_lo
         snprintf(fname, fnamelen, "%s/%s", directory, de->d_name);
         result[n_results++] = fname;
     }
-    // Return them in increasing order.  Set width to allow for newer log file names ("xxx.tokulog13")
-    // which are one character longer than old log file names ("xxx.tokulog2").  The comparison function
-    // won't look beyond the terminating NUL, so an extra character in the comparison string doesn't matter.
-    // Allow room for terminating NUL after "xxx.tokulog13" even if result[0] is of form "xxx.tokulog2."
-    int width = sizeof(result[0]+2);
-    qsort(result, n_results, width, logfilenamecompare);
+    // Return them in increasing order.
+    qsort(result, n_results, sizeof(result[0]), logfilenamecompare);
     *resultp    = result;
     *n_logfiles = n_results;
     result[n_results]=0; // make a trailing null
@@ -677,18 +694,28 @@ static int open_logfile (TOKULOGGER logger)
 {
     int fnamelen = strlen(logger->directory)+50;
     char fname[fnamelen];
-    snprintf(fname, fnamelen, "%s/log%012lld.tokulog%d", logger->directory, logger->next_log_file_number, TOKU_LOG_VERSION);
+    snprintf(fname,
+             fnamelen,
+             "%s/log%012lld.tokulog%d",
+             logger->directory,
+             logger->next_log_file_number,
+             TOKU_LOG_VERSION);
     long long index = logger->next_log_file_number;
     if (logger->write_log_files) {
-        logger->fd = open(fname, O_CREAT+O_WRONLY+O_TRUNC+O_EXCL+O_BINARY, S_IRUSR+S_IWUSR);
-        if (logger->fd==-1) {
+        logger->fd =
+            toku_os_open(fname,
+                         O_CREAT + O_WRONLY + O_TRUNC + O_EXCL + O_BINARY,
+                         S_IRUSR + S_IWUSR,
+                         *tokudb_file_log_key);
+        if (logger->fd == -1) {
             return get_error_errno();
         }
         fsync_logdir(logger);
         logger->next_log_file_number++;
     } else {
-        logger->fd = open(DEV_NULL_FILE, O_WRONLY+O_BINARY);
-        if (logger->fd==-1) {
+        logger->fd = toku_os_open(
+            DEV_NULL_FILE, O_WRONLY + O_BINARY, S_IWUSR, *tokudb_file_log_key);
+        if (logger->fd == -1) {
             return get_error_errno();
         }
     }
@@ -834,10 +861,11 @@ int toku_logger_restart(TOKULOGGER logger, LSN lastlsn)
     logger_write_buffer(logger, &fsynced_lsn);
 
     // close the log file
-    if ( logger->write_log_files) { // fsyncs don't work to /dev/null
+    if (logger->write_log_files) {  // fsyncs don't work to /dev/null
         toku_file_fsync_without_accounting(logger->fd);
     }
-    r = close(logger->fd);                              assert(r == 0);
+    r = toku_os_close(logger->fd);
+    assert(r == 0);
     logger->fd = -1;
 
     // reset the LSN's to the lastlsn when the logger was opened
@@ -1237,11 +1265,13 @@ void toku_txnid2txn(TOKULOGGER logger, TXNID_PAIR txnid, TOKUTXN *result) {
 }
 
 // Find the earliest LSN in a log.  No locks are needed.
-static int peek_at_log (TOKULOGGER logger, char* filename, LSN *first_lsn) {
-    int fd = open(filename, O_RDONLY+O_BINARY);
-    if (fd<0) {
+static int peek_at_log(TOKULOGGER logger, char *filename, LSN *first_lsn) {
+    int fd = toku_os_open(
+        filename, O_RDONLY + O_BINARY, S_IRUSR, *tokudb_file_log_key);
+    if (fd < 0) {
         int er = get_error_errno();
-        if (logger->write_log_files) printf("couldn't open: %s\n", strerror(er));
+        if (logger->write_log_files)
+            printf("couldn't open: %s\n", strerror(er));
         return er;
     }
     enum { SKIP = 12+1+4 }; // read the 12 byte header, the first message, and the first len
@@ -1258,10 +1288,13 @@ static int peek_at_log (TOKULOGGER logger, char* filename, LSN *first_lsn) {
         lsn = rbuf_ulonglong(&rb);
     }
 
-    r=close(fd);
-    if (r!=0) { return 0; }
+    r = toku_os_close(fd);
 
-    first_lsn->lsn=lsn;
+    if (r != 0) {
+        return 0;
+    }
+
+    first_lsn->lsn = lsn;
     return 0;
 }
 

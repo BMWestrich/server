@@ -14,9 +14,13 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #include "sql_error.h"
+
+
+#define LAST_STMT_ID 0xFFFFFFFF
+#define STMT_ID_MASK 0x7FFFFFFF
 
 class THD;
 struct LEX;
@@ -68,15 +72,20 @@ private:
 
 void mysqld_stmt_prepare(THD *thd, const char *packet, uint packet_length);
 void mysqld_stmt_execute(THD *thd, char *packet, uint packet_length);
+void mysqld_stmt_execute_bulk(THD *thd, char *packet, uint packet_length);
+void mysqld_stmt_bulk_execute(THD *thd, char *packet, uint packet_length);
 void mysqld_stmt_close(THD *thd, char *packet);
 void mysql_sql_stmt_prepare(THD *thd);
 void mysql_sql_stmt_execute(THD *thd);
+void mysql_sql_stmt_execute_immediate(THD *thd);
 void mysql_sql_stmt_close(THD *thd);
 void mysqld_stmt_fetch(THD *thd, char *packet, uint packet_length);
 void mysqld_stmt_reset(THD *thd, char *packet);
 void mysql_stmt_get_longdata(THD *thd, char *pos, ulong packet_length);
 void reinit_stmt_before_use(THD *thd, LEX *lex);
 
+my_bool bulk_parameters_iterations(THD *thd);
+my_bool bulk_parameters_set(THD *thd);
 /**
   Execute a fragment of server code in an isolated context, so that
   it doesn't leave any effect on THD. THD must have no open tables.

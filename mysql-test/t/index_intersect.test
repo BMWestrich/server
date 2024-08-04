@@ -1,3 +1,6 @@
+--source include/default_optimizer_switch.inc
+--source include/default_charset.inc
+
 --disable_warnings
 DROP TABLE IF EXISTS t1,t2,t3,t4;
 DROP DATABASE IF EXISTS world;
@@ -221,6 +224,7 @@ SELECT * FROM City
         AND Country BETWEEN 'S' AND 'Z';
 
 --replace_column 9 #
+--replace_result PRIMARY,Country,Population PRIMARY,Population,Country 4,7,4 4,4,7
 EXPLAIN
 SELECT * FROM City 
   WHERE ID BETWEEN 3001 AND 4000 AND Population > 600000
@@ -306,6 +310,7 @@ SELECT * FROM City
   WHERE ID BETWEEN 1 AND 500 AND Population > 1000000 AND Country LIKE 'A%';
 
 --replace_column 9 #
+--replace_result PRIMARY,Country,Population PRIMARY,Population,Country 4,7,4 4,4,7
 EXPLAIN
 SELECT * FROM City 
   WHERE ID BETWEEN 3001 AND 4000 AND Population > 600000

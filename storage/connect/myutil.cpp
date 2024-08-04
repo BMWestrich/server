@@ -13,11 +13,11 @@
 /************************************************************************/
 #include "my_global.h"
 #include <mysql.h>
-#if defined(__WIN__)
+#if defined(_WIN32)
 //#include <windows.h>
-#else   // !__WIN__
+#else   // !_WIN32
 #include "osutil.h"
-#endif  // !__WIN__
+#endif  // !_WIN32
 
 #include "global.h"
 #include "plgdbsem.h"
@@ -42,7 +42,8 @@ int MYSQLtoPLG(char *typname, char *var)
     type = TYPE_INT;
   else if (!stricmp(typname, "smallint"))
     type = TYPE_SHORT;
-  else if (!stricmp(typname, "char") || !stricmp(typname, "varchar"))
+  else if (!stricmp(typname, "char") || !stricmp(typname, "varchar") ||
+		       !stricmp(typname, "enum") || !stricmp(typname, "set"))
     type = TYPE_STRING;
   else if (!stricmp(typname, "double")  || !stricmp(typname, "float") ||
            !stricmp(typname, "real"))
@@ -87,10 +88,12 @@ int MYSQLtoPLG(char *typname, char *var)
       else if (!stricmp(typname, "year"))
         *var = 'Y';
 
-    } else if (type == TYPE_STRING && !stricmp(typname, "varchar"))
-      // This is to make the difference between CHAR and VARCHAR 
-      *var = 'V';
-    else if (type == TYPE_ERROR && xconv == TPC_SKIP)
+		} else if (type == TYPE_STRING) {
+			if (!stricmp(typname, "varchar"))
+			  // This is to make the difference between CHAR and VARCHAR
+				*var = 'V';
+
+		} else if (type == TYPE_ERROR && xconv == TPC_SKIP)
       *var = 'K';
     else
       *var = 0;
@@ -165,10 +168,9 @@ const char *PLGtoMYSQLtype(int type, bool dbf, char v)
     case TYPE_BIGINT:   return "BIGINT";
     case TYPE_TINY:     return "TINYINT";
     case TYPE_DECIM:    return "DECIMAL";
-    default:            return "CHAR(0)";
+    default:            return (v) ? "VARCHAR" : "CHAR";
     } // endswitch mytype
 
-  return "CHAR(0)";
   } // end of PLGtoMYSQLtype
 
 /************************************************************************/
@@ -215,7 +217,7 @@ int MYSQLtoPLG(int mytype, char *var)
     case MYSQL_TYPE_VARCHAR:
 #endif   // !ALPHA)
     case MYSQL_TYPE_STRING:
-      type = TYPE_STRING;
+      type = (*var == 'B') ? TYPE_BIN : TYPE_STRING;
       break;
     case MYSQL_TYPE_BLOB:
     case MYSQL_TYPE_TINY_BLOB:
@@ -229,7 +231,7 @@ int MYSQLtoPLG(int mytype, char *var)
               type = TYPE_STRING;
               *var = 'X';
             } else
-              type = TYPE_ERROR;
+              type = TYPE_BIN;
  
             break;
           case TPC_SKIP:
@@ -266,9 +268,9 @@ int MYSQLtoPLG(int mytype, char *var)
 /************************************************************************/
 /*  Returns the format corresponding to a MySQL date type number.       */
 /************************************************************************/
-char *MyDateFmt(int mytype)
+PCSZ MyDateFmt(int mytype)
   {
-  char *fmt;
+  PCSZ fmt;
 
   switch (mytype) {
     case MYSQL_TYPE_TIMESTAMP:
@@ -294,9 +296,9 @@ char *MyDateFmt(int mytype)
 /************************************************************************/
 /*  Returns the format corresponding to a MySQL date type name.         */
 /************************************************************************/
-char *MyDateFmt(char *typname)
+PCSZ MyDateFmt(char *typname)
   {
-  char *fmt;
+  PCSZ fmt;
 
   if (!stricmp(typname, "datetime") || !stricmp(typname, "timestamp"))
     fmt = "YYYY-MM-DD hh:mm:ss";

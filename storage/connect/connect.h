@@ -1,4 +1,4 @@
-/* Copyright (C) Olivier Bertrand 2004 - 2011
+/* Copyright (C) MariaDB Corporation Ab
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -11,10 +11,11 @@
 
   You should have received a copy of the GNU General Public License
   along with this program; if not, write to the Free Software
-  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
+	Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 /**************** Cnt H Declares Source Code File (.H) *****************/
 /*  Name: CONNECT.H    Version 2.4                                     */
+/*  Author Olivier BERTRAND  bertrandop@gmail.com                      */
 /*  This file contains the some based classes declares.                */
 /***********************************************************************/
 #include "filamtxt.h"
@@ -45,6 +46,7 @@ int   CntIndexRange(PGLOBAL g, PTDB ptdb, const uchar* *key, uint *len,
                     bool *incl, key_part_map *kmap);
 PGLOBAL CntExit(PGLOBAL g);
 
+#if 0
 /***********************************************************************/
 /*  Definition of classes XKPDEF, DOXDEF, TDBDOX                       */
 /*  These classes purpose is chiefly to access protected items!        */
@@ -65,7 +67,8 @@ class TDBDOX: public TDBDOS {
   friend int   CntIndexRange(PGLOBAL, PTDB, const uchar**, uint*,
                              bool*, key_part_map*);
   friend class ha_connect;
-  }; // end of class TDBDOX
+	TDBDOX() : TDBDOS((PGLOBAL)0, (PTDBDOS)0) {}     /* Never called */
+}; // end of class TDBDOX
 
 class XKPDEF: public KPARTDEF {
   friend class TDBDOX;
@@ -74,3 +77,4 @@ class XKPDEF: public KPARTDEF {
  public:
   XKPDEF(const char *name, int n) : KPARTDEF((PSZ)name, n) {}
   }; // end of class XKPDEF
+#endif // 0

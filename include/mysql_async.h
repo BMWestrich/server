@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 /* Common definitions for MariaDB non-blocking client library. */
 
@@ -21,9 +21,9 @@
 extern int my_connect_async(struct mysql_async_context *b, my_socket fd,
                             const struct sockaddr *name, uint namelen,
                             int vio_timeout);
-extern ssize_t my_recv_async(struct mysql_async_context *b, int fd,
+extern ssize_t my_recv_async(struct mysql_async_context *b, my_socket fd,
                              unsigned char *buf, size_t size, int timeout);
-extern ssize_t my_send_async(struct mysql_async_context *b, int fd,
+extern ssize_t my_send_async(struct mysql_async_context *b, my_socket fd,
                              const unsigned char *buf, size_t size,
                              int timeout);
 extern my_bool my_io_wait_async(struct mysql_async_context *b,

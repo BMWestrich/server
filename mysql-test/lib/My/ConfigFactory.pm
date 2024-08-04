@@ -13,7 +13,7 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335  USA
 
 package My::ConfigFactory;
 
@@ -182,55 +182,6 @@ sub fix_log_slow_queries {
   return "$dir/mysqld-slow.log";
 }
 
-sub fix_std_data {
-  my ($self, $config, $group_name, $group)= @_;
-  my $testdir= $self->get_testdir($group);
-  return "$testdir/std_data";
-}
-
-sub ssl_supported {
-  my ($self)= @_;
-  return $self->{ARGS}->{ssl};
-}
-
-sub fix_skip_ssl {
-  return if !ssl_supported(@_);
-  # Add skip-ssl if ssl is supported to avoid
-  # that mysqltest connects with SSL by default
-  return 1;
-}
-
-sub fix_ssl_ca {
-  return if !ssl_supported(@_);
-  my $std_data= fix_std_data(@_);
-  return "$std_data/cacert.pem"
-}
-
-sub fix_ssl_server_cert {
-  return if !ssl_supported(@_);
-  my $std_data= fix_std_data(@_);
-  return "$std_data/server-cert.pem"
-}
-
-sub fix_ssl_client_cert {
-  return if !ssl_supported(@_);
-  my $std_data= fix_std_data(@_);
-  return "$std_data/client-cert.pem"
-}
-
-sub fix_ssl_server_key {
-  return if !ssl_supported(@_);
-  my $std_data= fix_std_data(@_);
-  return "$std_data/server-key.pem"
-}
-
-sub fix_ssl_client_key {
-  return if !ssl_supported(@_);
-  my $std_data= fix_std_data(@_);
-  return "$std_data/client-key.pem"
-}
-
-
 #
 # Rules to run for each mysqld in the config
 #  - will be run in order listed here
@@ -246,7 +197,7 @@ my @mysqld_rules=
  { '#host' => \&fix_host },
  { 'port' => \&fix_port },
  { 'socket' => \&fix_socket },
- { '#log-error' => \&fix_log_error },
+ { 'log-error' => \&fix_log_error },
  { 'general-log' => 1 },
  { 'plugin-dir' => sub { $::plugindir } },
  { 'general-log-file' => \&fix_log },
@@ -255,9 +206,6 @@ my @mysqld_rules=
  { '#user' => sub { return shift->{ARGS}->{user} || ""; } },
  { '#password' => sub { return shift->{ARGS}->{password} || ""; } },
  { 'server-id' => \&fix_server_id, },
- { 'ssl-ca' => \&fix_ssl_ca },
- { 'ssl-cert' => \&fix_ssl_server_cert },
- { 'ssl-key' => \&fix_ssl_server_key },
  { 'bind-address' => \&fix_bind_address },
   );
 
@@ -284,10 +232,6 @@ my @client_rules=
 #
 my @mysqltest_rules=
 (
- { 'ssl-ca' => \&fix_ssl_ca },
- { 'ssl-cert' => \&fix_ssl_client_cert },
- { 'ssl-key' => \&fix_ssl_client_key },
- { 'skip-ssl' => \&fix_skip_ssl },
 );
 
 
@@ -367,7 +311,7 @@ sub post_check_client_groups {
 				$first_mysqld->name());
 
  # Then generate [client.<suffix>] for each [mysqld.<suffix>]
- foreach my $mysqld ( $config->like('mysqld.') ) {
+ foreach my $mysqld ( $config->like('mysqld\.') ) {
    $self->post_check_client_group($config,
 				  'client'.$mysqld->after('mysqld'),
 				  $mysqld->name())
@@ -389,12 +333,12 @@ sub post_check_embedded_group {
   my $mysqld= $config->group('mysqld') or
     croak "Can't run with embedded, config has no default mysqld section";
 
-  my $first_mysqld= $config->first_like('mysqld.') or
+  my $first_mysqld= $config->first_like('mysqld\.') or
     croak "Can't run with embedded, config has no mysqld";
 
   my %no_copy = map { $_ => 1 }
     (
-     '#log-error', # Embedded server writes stderr to mysqltest's log file
+     'log-error', # Embedded server writes stderr to mysqltest's log file
      'slave-net-timeout', # Embedded server are not build with replication
      'shared-memory-base-name', # No shared memory for embedded
     );
@@ -428,7 +372,7 @@ sub resolve_at_variable {
   }
   $res .= $after;
 
-  $config->insert($group->name(), $option->name(), $res)
+  $option->{value}= $res;
 }
 
 
@@ -513,7 +457,7 @@ sub new_config {
   }
 
   $self->run_section_rules($config,
-			   'mysqld.',
+			   'mysqld\.',
 			   @mysqld_rules);
 
   # [mysqlbinlog] need additional settings

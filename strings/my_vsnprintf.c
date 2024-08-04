@@ -1,5 +1,5 @@
 /* Copyright (c) 2000, 2011, Oracle and/or its affiliates.
-   Copyright (c) 2009-2011, Monty Program Ab
+   Copyright (c) 2009, 2020, MariaDB Corporation.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -12,15 +12,14 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #include "strings_def.h"
 #include <m_ctype.h>
-#include <stdarg.h>
 #include <my_sys.h>
 #include <my_base.h>
 #include <my_handler_errors.h>
-
+#include <mysql_com.h>                        /* For FLOATING_POINT_DECIMALS */
 
 #define MAX_ARGS 32                           /* max positional args count*/
 #define MAX_PRINT_INFO 32                     /* max print position count */
@@ -93,10 +92,10 @@ static const char *get_length(const char *fmt, size_t *length, uint *pre_zero)
 */
 
 static const char *get_length_arg(const char *fmt, ARGS_INFO *args_arr,
-                                  uint *arg_count, size_t *length, uint *flags)
+                                  size_t *arg_count, size_t *length, uint *flags)
 {
   fmt= get_length(fmt+1, length, flags);
-  *arg_count= MY_MAX(*arg_count, (uint) *length);
+  *arg_count= MY_MAX(*arg_count, *length);
   (*length)--;    
   DBUG_ASSERT(*fmt == '$' && *length < MAX_ARGS);
   args_arr[*length].arg_type= 'd';
@@ -154,12 +153,15 @@ static const char *check_longlong(const char *fmt, uint *have_longlong)
 */
 
 static char *backtick_string(CHARSET_INFO *cs, char *to, const char *end,
-                             char *par, size_t par_len, char quote_char)
+                             char *par, size_t par_len, char quote_char,
+                             my_bool cut)
 {
+  char *last[3]= {0,0,0};
   uint char_len;
   char *start= to;
   char *par_end= par + par_len;
   size_t buff_length= (size_t) (end - to);
+  uint index= 0;
 
   if (buff_length <= par_len)
     goto err;
@@ -168,8 +170,12 @@ static char *backtick_string(CHARSET_INFO *cs, char *to, const char *end,
   for ( ; par < par_end; par+= char_len)
   {
     uchar c= *(uchar *) par;
-    if (!(char_len= my_mbcharlen(cs, c)))
-      char_len= 1;
+    if (cut)
+    {
+      last[index]= start;
+      index= (index + 1) % 3;
+    }
+    char_len= my_charlen_fix(cs, par, par_end);
     if (char_len == 1 && c == (uchar) quote_char )
     {
       if (start + 1 >= end)
@@ -180,9 +186,30 @@ static char *backtick_string(CHARSET_INFO *cs, char *to, const char *end,
       goto err;
     start= strnmov(start, par, char_len);
   }
-    
+
   if (start + 1 >= end)
     goto err;
+
+  if (cut)
+  {
+    uint dots= 0;
+    start= NULL;
+    for (; dots < 3; dots++)
+    {
+      if (index == 0)
+        index= 2;
+      else
+        index--;
+      if (!last[index])
+        break;
+      start= last[index];
+    }
+    if (start == NULL)
+      goto err; // there was no characters at all
+    for (; dots; dots--)
+      *start++= '.';
+
+  }
   *start++= quote_char;
   return start;
 
@@ -197,22 +224,59 @@ err:
 */
 
 static char *process_str_arg(CHARSET_INFO *cs, char *to, const char *end,
-                             size_t width, char *par, uint print_type)
+                             size_t width, char *par, uint print_type,
+                             my_bool nice_cut)
 {
   int well_formed_error;
-  size_t plen, left_len= (size_t) (end - to) + 1;
+  uint dots= 0;
+  size_t plen, left_len= (size_t) (end - to) + 1, slen=0;
   if (!par)
     par = (char*) "(null)";
 
-  plen= strnlen(par, width);
-  if (left_len <= plen)
-    plen = left_len - 1;
-  plen= cs->cset->well_formed_len(cs, par, par + plen,
-                                  width, &well_formed_error);
+  if (nice_cut)
+  {
+    plen= slen= strnlen(par, width + 1);
+    if (plen > width)
+      plen= width;
+    if (left_len <= plen)
+      plen = left_len - 1;
+    if ((slen > plen))
+    {
+      if (plen < 3)
+      {
+        dots= (uint) plen;
+        plen= 0;
+      }
+      else
+      {
+        dots= 3;
+        plen-= 3;
+      }
+    }
+  }
+  else
+  {
+    plen= slen= strnlen(par, width);
+    dots= 0;
+    if (left_len <= plen)
+      plen = left_len - 1;
+  }
+
+  plen= my_well_formed_length(cs, par, par + plen, width, &well_formed_error);
   if (print_type & ESCAPED_ARG)
-    to= backtick_string(cs, to, end, par, plen, '`');
+  {
+    to= backtick_string(cs, to, end, par, plen + dots, '`', MY_TEST(dots));
+    dots= 0;
+  }
   else
     to= strnmov(to,par,plen);
+
+  if (dots)
+  {
+    for (; dots; dots--)
+      *(to++)= '.';
+    *(to)= 0;
+  }
   return to;
 }
 
@@ -241,8 +305,8 @@ static char *process_dbl_arg(char *to, char *end, size_t width,
 {
   if (width == MAX_WIDTH)
     width= FLT_DIG; /* width not set, use default */
-  else if (width >= NOT_FIXED_DEC)
-    width= NOT_FIXED_DEC - 1; /* max.precision for my_fcvt() */
+  else if (width >= FLOATING_POINT_DECIMALS)
+    width= FLOATING_POINT_DECIMALS - 1; /* max.precision for my_fcvt() */
   width= MY_MIN(width, (size_t)(end-to) - 1);
   
   if (arg_type == 'f')
@@ -333,7 +397,7 @@ static char *process_args(CHARSET_INFO *cs, char *to, char *end,
 {
   ARGS_INFO args_arr[MAX_ARGS];
   PRINT_INFO print_arr[MAX_PRINT_INFO];
-  uint idx= 0, arg_count= arg_index;
+  size_t idx= 0, arg_count= arg_index;
 
 start:
   /* Here we are at the beginning of positional argument, right after $ */
@@ -393,6 +457,7 @@ start:
       switch (args_arr[i].arg_type) {
       case 's':
       case 'b':
+      case 'T':
         args_arr[i].str_arg= va_arg(ap, char *);
         break;
       case 'f':
@@ -427,12 +492,14 @@ start:
       size_t width= 0, length= 0;
       switch (print_arr[i].arg_type) {
       case 's':
+      case 'T':
       {
         char *par= args_arr[print_arr[i].arg_idx].str_arg;
         width= (print_arr[i].flags & WIDTH_ARG)
           ? (size_t)args_arr[print_arr[i].width].longlong_arg
           : print_arr[i].width;
-        to= process_str_arg(cs, to, end, width, par, print_arr[i].flags);
+        to= process_str_arg(cs, to, end, width, par, print_arr[i].flags,
+                            (print_arr[i].arg_type == 'T'));
         break;
       }
       case 'b':
@@ -497,9 +564,9 @@ start:
           char errmsg_buff[MYSYS_STRERROR_SIZE];
           *to++= ' ';
           *to++= '"';
-          my_strerror(errmsg_buff, sizeof(errmsg_buff), larg);
+          my_strerror(errmsg_buff, sizeof(errmsg_buff), (int) larg);
           to= process_str_arg(cs, to, real_end, width, errmsg_buff,
-                              print_arr[i].flags);
+                              print_arr[i].flags, 1);
           if (real_end > to) *to++= '"';
         }
         break;
@@ -623,10 +690,10 @@ size_t my_vsnprintf_ex(CHARSET_INFO *cs, char *to, size_t n,
 
     fmt= check_longlong(fmt, &have_longlong);
 
-    if (*fmt == 's')				/* String parameter */
+    if (*fmt == 's' || *fmt == 'T')			/* String parameter */
     {
       reg2 char *par= va_arg(ap, char *);
-      to= process_str_arg(cs, to, end, width, par, print_type);
+      to= process_str_arg(cs, to, end, width, par, print_type, (*fmt == 'T'));
       continue;
     }
     else if (*fmt == 'b')				/* Buffer parameter */
@@ -637,7 +704,13 @@ size_t my_vsnprintf_ex(CHARSET_INFO *cs, char *to, size_t n,
     }
     else if (*fmt == 'f' || *fmt == 'g')
     {
+#if __has_feature(memory_sanitizer)         /* QQ: MSAN has double trouble? */
+      __msan_check_mem_is_initialized(ap, sizeof(double));
+#endif
       double d= va_arg(ap, double);
+#if __has_feature(memory_sanitizer)        /* QQ: MSAN has double trouble? */
+      __msan_unpoison(&d, sizeof(double));
+#endif
       to= process_dbl_arg(to, end, width, d, *fmt);
       continue;
     }
@@ -677,8 +750,9 @@ size_t my_vsnprintf_ex(CHARSET_INFO *cs, char *to, size_t n,
         char errmsg_buff[MYSYS_STRERROR_SIZE];
         *to++= ' ';
         *to++= '"';
-        my_strerror(errmsg_buff, sizeof(errmsg_buff), larg);
-        to= process_str_arg(cs, to, real_end, width, errmsg_buff, print_type);
+        my_strerror(errmsg_buff, sizeof(errmsg_buff), (int) larg);
+        to= process_str_arg(cs, to, real_end, width, errmsg_buff,
+                            print_type, 1);
         if (real_end > to) *to++= '"';
       }
       continue;
@@ -755,14 +829,14 @@ int my_vfprintf(FILE *stream, const char* format, va_list args)
       and try again.
     */
     if (alloc)
-      (*my_str_free)(p);
+      my_free(p);
     else
       alloc= 1;
     new_len= cur_len*2;
     if (new_len < cur_len)
       return 0;                                 /* Overflow */
     cur_len= new_len;
-    p= (*my_str_malloc)(cur_len);
+    p= my_malloc(cur_len, MYF(MY_FAE));
     if (!p)
       return 0;
   }
@@ -770,7 +844,7 @@ int my_vfprintf(FILE *stream, const char* format, va_list args)
   if (fputs(p, stream) < 0)
     ret= -1;
   if (alloc)
-    (*my_str_free)(p);
+    my_free(p);
   return ret;
 }
 
@@ -793,7 +867,7 @@ int my_fprintf(FILE *stream, const char* format, ...)
   @param nr         Error number
 */
 
-void my_strerror(char *buf, size_t len, int nr)
+const char* my_strerror(char *buf, size_t len, int nr)
 {
   char *msg= NULL;
 
@@ -805,7 +879,7 @@ void my_strerror(char *buf, size_t len, int nr)
                   "Internal error/check (Not system error)" :
                   "Internal error < 0 (Not system error)"),
             len-1);
-    return;
+    return buf;
   }
 
   /*
@@ -846,4 +920,5 @@ void my_strerror(char *buf, size_t len, int nr)
   */
   if (!buf[0])
     strmake(buf, "unknown error", len - 1);
+  return buf;
 }

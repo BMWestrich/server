@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software Foundation,
-   51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA */
+   51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 #include <my_global.h>
 #include <stdlib.h>
@@ -79,7 +79,7 @@ void set_token(int tok, const char *str)
   }
 
   compiled_token_array[tok].m_token_string= str;
-  compiled_token_array[tok].m_token_length= strlen(str);
+  compiled_token_array[tok].m_token_length= (int)strlen(str);
   compiled_token_array[tok].m_append_space= true;
   compiled_token_array[tok].m_start_expr= false;
 }

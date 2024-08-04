@@ -12,11 +12,10 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #include <my_global.h>
 #include <my_sys.h>
-#include <base64.h>
 #include <tap.h>
 #include <string.h>
 
@@ -49,18 +48,18 @@ main(int argc __attribute__((unused)),char *argv[])
     }
 
     /* Encode */
-    needed_length= base64_needed_encoded_length(src_len);
+    needed_length= my_base64_needed_encoded_length(src_len);
     str= (char *) malloc(needed_length);
     for (k= 0; k < needed_length; k++)
       str[k]= 0xff; /* Fill memory to check correct NUL termination */
-    ok(base64_encode(src, src_len, str) == 0,
-       "base64_encode: size %d", i);
+    ok(my_base64_encode(src, src_len, str) == 0,
+       "my_base64_encode: size %d", i);
     ok(needed_length == strlen(str) + 1,
-       "base64_needed_encoded_length: size %d", i);
+       "my_base64_needed_encoded_length: size %d", i);
 
     /* Decode */
-    dst= (char *) malloc(base64_needed_decoded_length(strlen(str)));
-    dst_len= base64_decode(str, strlen(str), dst, NULL, 0);
+    dst= (char *) malloc(my_base64_needed_decoded_length(strlen(str)));
+    dst_len= my_base64_decode(str, strlen(str), dst, NULL, 0);
     ok(dst_len == src_len, "Comparing lengths");
 
     cmp= memcmp(src, dst, src_len);
@@ -91,6 +90,9 @@ main(int argc __attribute__((unused)),char *argv[])
       diag("src length: %.8x, dst length: %.8x\n",
            (uint) src_len, (uint) dst_len);
     }
+    free(dst);
+    free(str);
+    free(src);
   }
   my_end(0);
   return exit_status();

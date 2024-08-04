@@ -1,4 +1,5 @@
-# Copyright (c) 2006, 2014, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2006, 2017, Oracle and/or its affiliates.
+# Copyright (c) 2011, 2017, MariaDB Corporation
 # 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,7 +12,7 @@
 # 
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335 USA
 
 # Build comp_sql - used for embedding SQL in C or C++ programs
 IF(NOT CMAKE_CROSSCOMPILING)
@@ -73,15 +74,37 @@ IF(UNIX)
 )
 ENDIF()
 
+# Configure two scripts from one 'in' file.
+# The maria_add_gis_sp.sql - to be sent to 'mysql' tool
+# and the maria_add_gis_sp_bootstrap.sql, that can be sent to
+# the server as a bootstrap command.
+
+SET(ADD_GIS_SP_SET_DELIMITER "delimiter |")
+SET(ADD_GIS_SP_RESET_DELIMITER "delimiter ;")
+SET(ADD_GIS_SP_EOL "|")
+CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/maria_add_gis_sp.sql.in
+  ${CMAKE_CURRENT_BINARY_DIR}/maria_add_gis_sp.sql ESCAPE_QUOTES @ONLY)
+
+SET(ADD_GIS_SP_SET_DELIMITER "")
+SET(ADD_GIS_SP_RESET_DELIMITER "")
+SET(ADD_GIS_SP_EOL ";")
+CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/maria_add_gis_sp.sql.in
+  ${CMAKE_CURRENT_BINARY_DIR}/maria_add_gis_sp_bootstrap.sql ESCAPE_QUOTES @ONLY)
+
+IF (NOT WITHOUT_SERVER)
 INSTALL(FILES 
   ${CMAKE_CURRENT_SOURCE_DIR}/mysql_system_tables.sql 
   ${CMAKE_CURRENT_SOURCE_DIR}/mysql_system_tables_data.sql
   ${CMAKE_CURRENT_SOURCE_DIR}/mysql_performance_tables.sql
+  ${CMAKE_CURRENT_SOURCE_DIR}/mysql_test_db.sql
   ${CMAKE_CURRENT_SOURCE_DIR}/fill_help_tables.sql
   ${CMAKE_CURRENT_SOURCE_DIR}/mysql_test_data_timezone.sql
+  ${CMAKE_CURRENT_BINARY_DIR}/maria_add_gis_sp.sql
+  ${CMAKE_CURRENT_BINARY_DIR}/maria_add_gis_sp_bootstrap.sql
   ${FIX_PRIVILEGES_SQL}
   DESTINATION ${INSTALL_MYSQLSHAREDIR} COMPONENT Server
 )
+ENDIF()
 
 # TCMalloc hacks
 IF(MALLOC_LIB)
@@ -94,6 +117,13 @@ IF(CMAKE_GENERATOR MATCHES "Makefiles|Ninja")
     SET(CFLAGS   "${CFLAGS} -arch ${ARCH}")
     SET(CXXFLAGS "${CXXFLAGS} -arch ${ARCH}")
   ENDFOREACH()
+ENDIF()
+
+
+IF(CMAKE_SYSTEM_NAME MATCHES "FreeBSD")
+  SET (PERL_PATH "/usr/local/bin/perl")
+ELSE()
+  SET (PERL_PATH "/usr/bin/perl")
 ENDIF()
 
 IF(UNIX)
@@ -133,6 +163,7 @@ ENDIF()
 
 SET(HOSTNAME "hostname")
 SET(MYSQLD_USER "mysql")
+SET(MYSQLD_GROUP "mysql")
 ENDIF(UNIX)
 
 # Really ugly, one script, "mysql_install_db", needs prefix set to ".",
@@ -146,6 +177,7 @@ IF(INSTALL_LAYOUT MATCHES "STANDALONE")
   SET(scriptdir ${prefix}/${INSTALL_BINDIR})
   SET(libexecdir ${prefix}/${INSTALL_SBINDIR})
   SET(pkgdatadir ${prefix}/${INSTALL_MYSQLSHAREDIR})
+  SET(pkgplugindir ${prefix}/${INSTALL_PLUGINDIR})
   SET(localstatedir ${prefix}/data)
 ELSE()
   SET(prefix "${CMAKE_INSTALL_PREFIX}")
@@ -154,8 +186,14 @@ ELSE()
   SET(scriptdir ${INSTALL_BINDIRABS})
   SET(libexecdir ${INSTALL_SBINDIRABS})
   SET(pkgdatadir ${INSTALL_MYSQLSHAREDIRABS})
+  SET(pkgplugindir ${INSTALL_PLUGINDIRABS})
   SET(localstatedir ${MYSQL_DATADIR})
 ENDIF()
+
+SET(resolveip_locations "$basedir/${INSTALL_BINDIR} $basedir/bin")
+SET(mysqld_locations "$basedir/${INSTALL_SBINDIR} $basedir/libexec $basedir/sbin $basedir/bin")
+SET(errmsg_locations "$basedir/${INSTALL_MYSQLSHAREDIR}/english $basedir/share/english $basedir/share/mysql/english")
+SET(pkgdata_locations "$basedir/${INSTALL_MYSQLSHAREDIR} $basedir/share $basedir/share/mysql")
 
 IF(UNIX)
 CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/mysql_install_db.sh
@@ -233,12 +271,55 @@ IF(WIN32)
   ENDFOREACH()
 ELSE()
   IF(WITH_WSREP)
-    SET(WSREP_BINARIES
-      wsrep_sst_common
+    SET(WSREP_SCRIPTS
       wsrep_sst_mysqldump
       wsrep_sst_rsync
       wsrep_sst_xtrabackup
       wsrep_sst_xtrabackup-v2
+      wsrep_sst_mariabackup
+    )
+    # The following script is sourced from other SST scripts, so it should
+    # not be made executable.
+    SET(WSREP_SOURCE
+      wsrep_sst_common
+    )
+
+    SET (wsrep_sst_rsync_wan ${CMAKE_CURRENT_BINARY_DIR}/wsrep_sst_rsync_wan)
+    ADD_CUSTOM_COMMAND(
+      OUTPUT ${wsrep_sst_rsync_wan}
+      COMMAND ${CMAKE_COMMAND} ARGS -E create_symlink
+        wsrep_sst_rsync
+        wsrep_sst_rsync_wan
+    )
+    ADD_CUSTOM_TARGET(symlink_wsrep_sst_rsync
+        ALL
+        DEPENDS ${wsrep_sst_rsync_wan}
+    )
+    INSTALL(
+      FILES  ${wsrep_sst_rsync_wan}
+      DESTINATION ${INSTALL_BINDIR}
+      COMPONENT Server
+    )
+
+    FOREACH(file ${WSREP_SOURCE})
+      CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/${file}.sh
+        ${CMAKE_CURRENT_BINARY_DIR}/${file} ESCAPE_QUOTES @ONLY)
+      IF(NOT ${file}_COMPONENT)
+        SET(${file}_COMPONENT Server)
+      ENDIF()
+      INSTALL(FILES
+        ${CMAKE_CURRENT_BINARY_DIR}/${file}
+        DESTINATION ${INSTALL_BINDIR}
+        COMPONENT ${${file}_COMPONENT}
+       )
+    ENDFOREACH()
+  ENDIF()
+  IF (NOT WITHOUT_SERVER)
+    SET(SERVER_SCRIPTS
+      mysql_fix_extensions
+      mysqld_multi
+      mysqld_safe
+      mysqldumpslow
     )
   ENDIF()
   # Configure this one, for testing, but do not install it.
@@ -248,7 +329,6 @@ ELSE()
   SET(BIN_SCRIPTS
     msql2mysql
     mysql_config
-    mysql_fix_extensions
     mysql_setpermission
     mysql_secure_installation
     mysqlaccess
@@ -256,10 +336,8 @@ ELSE()
     mysql_find_rows
     mytop
     mysqlhotcopy
-    mysqldumpslow
-    mysqld_multi
-    mysqld_safe
-    ${WSREP_BINARIES}
+    ${SERVER_SCRIPTS}
+    ${WSREP_SCRIPTS}
     ${SYSTEMD_SCRIPTS}
   )
   FOREACH(file ${BIN_SCRIPTS})
@@ -273,6 +351,9 @@ ELSE()
       MESSAGE(FATAL_ERROR "Can not find ${file}.sh or ${file} in "
         "${CMAKE_CURRENT_SOURCE_DIR}" )
     ENDIF()
+    # TODO: The following EXECUTE could be redundant as INSTALL_SCRIPT
+    # macro does an INSTALL(PROGRAMS ..) that automatically sets +x on
+    # the executable.
     EXECUTE_PROCESS(COMMAND chmod +x ${CMAKE_CURRENT_BINARY_DIR}/${file})
     IF(NOT ${file}_COMPONENT)
       SET(${file}_COMPONENT Server)
@@ -284,29 +365,6 @@ ELSE()
      )
   ENDFOREACH()
 ENDIF()
-
-# Configure two scripts from one 'in' file.
-# The maria_add_gis_sp.sql - to be sent to 'mysql' tool
-# and the maria_add_gis_sp_bootstrap.sql, that can be sent to
-# the server as a bootstrap command.
-
-SET(ADD_GIS_SP_SET_DELIMITER "delimiter |")
-SET(ADD_GIS_SP_RESET_DELIMITER "delimiter ;")
-SET(ADD_GIS_SP_EOL "|")
-CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/maria_add_gis_sp.sql.in
-  ${CMAKE_CURRENT_BINARY_DIR}/maria_add_gis_sp.sql ESCAPE_QUOTES @ONLY)
-
-SET(ADD_GIS_SP_SET_DELIMITER "")
-SET(ADD_GIS_SP_RESET_DELIMITER "")
-SET(ADD_GIS_SP_EOL ";")
-CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/maria_add_gis_sp.sql.in
-  ${CMAKE_CURRENT_BINARY_DIR}/maria_add_gis_sp_bootstrap.sql ESCAPE_QUOTES @ONLY)
-
-INSTALL_SCRIPT(${CMAKE_CURRENT_BINARY_DIR}/maria_add_gis_sp.sql
-               ${CMAKE_CURRENT_BINARY_DIR}/maria_add_gis_sp_bootstrap.sql
-  DESTINATION ${INSTALL_MYSQLSHAREDIR}
-  COMPONENT Server
-  )
 
 # Install libgcc as  mylibgcc.a
 IF(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_FLAGS MATCHES "-static")
@@ -323,4 +381,3 @@ IF(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_FLAGS MATCHES "-static")
     COMPONENT Development)
   ENDIF()
 ENDIF()
-

@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #include <my_global.h>
 #include <mysql/plugin_encryption.h>
@@ -23,9 +23,19 @@
 static plugin_ref encryption_manager= 0;
 struct encryption_service_st encryption_handler;
 
+extern "C" {
+
+uint no_get_key(uint, uint, uchar*, uint*)
+{
+  return ENCRYPTION_KEY_VERSION_INVALID;
+}
 uint no_key(uint)
 {
   return ENCRYPTION_KEY_VERSION_INVALID;
+}
+uint zero_size(uint,uint)
+{
+  return 0;
 }
 
 static int ctx_init(void *ctx, const unsigned char* key, unsigned int klen,
@@ -40,6 +50,13 @@ static unsigned int get_length(unsigned int slen, unsigned int key_id,
 {
   return my_aes_get_size(MY_AES_CBC, slen);
 }
+
+uint ctx_size(unsigned int, unsigned int)
+{
+  return MY_AES_CTX_SIZE;
+}
+
+} /* extern "C" */
 
 int initialize_encryption_plugin(st_plugin_int *plugin)
 {
@@ -57,9 +74,14 @@ int initialize_encryption_plugin(st_plugin_int *plugin)
   st_mariadb_encryption *handle=
     (struct st_mariadb_encryption*) plugin->plugin->info;
 
-  encryption_handler.encryption_ctx_size_func=
-    handle->crypt_ctx_size ? handle->crypt_ctx_size :
-    (uint (*)(unsigned int, unsigned int))my_aes_ctx_size;
+  /*
+    Compiler on Spark doesn't like the '?' operator here as it
+    believes the (uint (*)...) implies the C++ call model.
+  */
+  if (handle->crypt_ctx_size)
+    encryption_handler.encryption_ctx_size_func= handle->crypt_ctx_size;
+  else
+    encryption_handler.encryption_ctx_size_func= ctx_size;
 
   encryption_handler.encryption_ctx_init_func=
     handle->crypt_ctx_init ? handle->crypt_ctx_init : ctx_init;
@@ -84,18 +106,26 @@ int initialize_encryption_plugin(st_plugin_int *plugin)
 
 int finalize_encryption_plugin(st_plugin_int *plugin)
 {
-  encryption_handler.encryption_key_get_func=
-      (uint (*)(uint, uint, uchar*, uint*))no_key;
-  encryption_handler.encryption_key_get_latest_version_func= no_key;
+  bool used= plugin_ref_to_int(encryption_manager) == plugin;
+
+  if (used)
+  {
+    encryption_handler.encryption_key_get_func= no_get_key;
+    encryption_handler.encryption_key_get_latest_version_func= no_key;
+    encryption_handler.encryption_ctx_size_func= zero_size;
+  }
 
   if (plugin && plugin->plugin->deinit && plugin->plugin->deinit(NULL))
   {
     DBUG_PRINT("warning", ("Plugin '%s' deinit function returned error.",
                            plugin->name.str));
   }
-  if (encryption_manager)
+
+  if (used)
+  {
     plugin_unlock(NULL, encryption_manager);
-  encryption_manager= 0;
+    encryption_manager= 0;
+  }
   return 0;
 }
 

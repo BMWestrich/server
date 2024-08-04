@@ -1,5 +1,5 @@
 /* Copyright (c) 2004, 2013, Oracle and/or its affiliates.
-   Copyright (c) 2011, 2015, MariaDB
+   Copyright (c) 2011, 2016, MariaDB Corporation
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA
 */
 
 #define MYSQL_LEX 1
@@ -35,6 +35,7 @@
 #include "sp_cache.h"
 #include "datadict.h"   // dd_frm_is_view()
 #include "sql_derived.h"
+#include "sql_cte.h"    // check_dependencies_in_with_clauses()
 
 #define MD5_BUFF_LENGTH 33
 
@@ -167,7 +168,7 @@ err:
   @param item_list  List of Items which should be checked
 */
 
-static void make_valid_column_names(THD *thd, List<Item> &item_list)
+void make_valid_column_names(THD *thd, List<Item> &item_list)
 {
   Item *item;
   uint name_len;
@@ -214,7 +215,8 @@ fill_defined_view_parts (THD *thd, TABLE_LIST *view)
   LEX *lex= thd->lex;
   TABLE_LIST decoy;
 
-  memcpy (&decoy, view, sizeof (TABLE_LIST));
+  decoy= *view;
+  decoy.mdl_request.key.mdl_key_init(&view->mdl_request.key);
   if (tdc_open_view(thd, &decoy, OPEN_VIEW_NO_PARSE))
     return TRUE;
 
@@ -244,7 +246,7 @@ fill_defined_view_parts (THD *thd, TABLE_LIST *view)
   @param mode VIEW_CREATE_NEW, VIEW_ALTER, VIEW_CREATE_OR_REPLACE
 
   @retval FALSE Operation was a success.
-  @retval TRUE An error occured.
+  @retval TRUE An error occurred.
 */
 
 bool create_view_precheck(THD *thd, TABLE_LIST *tables, TABLE_LIST *view,
@@ -289,6 +291,8 @@ bool create_view_precheck(THD *thd, TABLE_LIST *tables, TABLE_LIST *view,
   {
     for (tbl= sl->get_table_list(); tbl; tbl= tbl->next_local)
     {
+      if (!tbl->with && tbl->select_lex)
+        tbl->with= tbl->select_lex->find_table_def_in_with_clauses(tbl);
       /*
         Ensure that we have some privileges on this table, more strict check
         will be done on column level after preparation,
@@ -330,12 +334,11 @@ bool create_view_precheck(THD *thd, TABLE_LIST *tables, TABLE_LIST *view,
     {
       if (!tbl->table_in_first_from_clause)
       {
-        if (check_access(thd, SELECT_ACL, tbl->db,
-                         &tbl->grant.privilege,
-                         &tbl->grant.m_internal,
-                         0, 0) ||
-            check_grant(thd, SELECT_ACL, tbl, FALSE, 1, FALSE))
+        if (check_single_table_access(thd, SELECT_ACL, tbl, FALSE))
+        {
+          tbl->hide_view_error(thd);
           goto err;
+        }
       }
     }
   }
@@ -387,7 +390,7 @@ bool create_view_precheck(THD *thd, TABLE_LIST *tables, TABLE_LIST *view,
   @note This function handles both create and alter view commands.
 
   @retval FALSE Operation was a success.
-  @retval TRUE An error occured.
+  @retval TRUE An error occurred.
 */
 
 bool mysql_create_view(THD *thd, TABLE_LIST *views,
@@ -405,8 +408,18 @@ bool mysql_create_view(THD *thd, TABLE_LIST *views,
   bool res= FALSE;
   DBUG_ENTER("mysql_create_view");
 
-  /* This is ensured in the parser. */
-  DBUG_ASSERT(!lex->proc_list.first && !lex->result &&
+  /*
+    This is ensured in the parser.
+    NOTE: Originally, the assert below contained the extra condition
+      && !lex->result
+    but in this form the assert is failed in case CREATE VIEW run under
+    cursor (the case when the byte 'flags' in the COM_STMT_EXECUTE packet has
+    the flag CURSOR_TYPE_READ_ONLY set). For the cursor use case
+    thd->lex->result is assigned a pointer to the class Select_materialize
+    inside the function mysql_open_cursor() just before handling of a statement
+    will be started and the function mysql_create_view() called.
+  */
+  DBUG_ASSERT(!lex->proc_list.first &&
               !lex->param_list.elements);
 
   /*
@@ -429,12 +442,22 @@ bool mysql_create_view(THD *thd, TABLE_LIST *views,
   lex->link_first_table_back(view, link_to_local);
   view->open_type= OT_BASE_ONLY;
 
-  if (open_temporary_tables(thd, lex->query_tables) ||
+  WSREP_TO_ISOLATION_BEGIN(WSREP_MYSQL_DB, NULL, NULL);
+
+  /*
+    ignore lock specs for CREATE statement
+  */
+  if (lex->current_select->lock_type != TL_READ_DEFAULT)
+  {
+    lex->current_select->set_lock_for_tables(TL_READ_DEFAULT, false);
+    view->mdl_request.set_type(MDL_EXCLUSIVE);
+  }
+
+  if (thd->open_temporary_tables(lex->query_tables) ||
       open_and_lock_tables(thd, lex->query_tables, TRUE, 0))
   {
-    view= lex->unlink_first_table(&link_to_local);
     res= TRUE;
-    goto err;
+    goto err_no_relink;
   }
 
   view= lex->unlink_first_table(&link_to_local);
@@ -625,7 +648,8 @@ bool mysql_create_view(THD *thd, TABLE_LIST *views,
 
   if (!res && mysql_bin_log.is_open())
   {
-    String buff;
+    StringBuffer<128> buff(thd->variables.character_set_client);
+    DBUG_ASSERT(buff.charset()->mbminlen == 1);
     const LEX_STRING command[3]=
       {{ C_STRING_WITH_LEN("CREATE ") },
        { C_STRING_WITH_LEN("ALTER ") },
@@ -681,9 +705,15 @@ bool mysql_create_view(THD *thd, TABLE_LIST *views,
   lex->link_first_table_back(view, link_to_local);
   DBUG_RETURN(0);
 
+
+WSREP_ERROR_LABEL:
+  res= TRUE;
+  goto err_no_relink;
+
 err:
   THD_STAGE_INFO(thd, stage_end);
   lex->link_first_table_back(view, link_to_local);
+err_no_relink:
   unit->cleanup();
   DBUG_RETURN(res || thd->is_error());
 }
@@ -853,6 +883,13 @@ static int mysql_register_view(THD *thd, TABLE_LIST *view,
   LEX *lex= thd->lex;
 
   /*
+    Ensure character set number != 17 (character set = filename) and mbminlen=1
+    because these character sets are not parser friendly, which can give weird
+    sequence in .frm file of view and later give parsing error.
+  */
+  DBUG_ASSERT(thd->charset()->mbminlen == 1 && thd->charset()->number != 17);
+
+  /*
     View definition query -- a SELECT statement that fully defines view. It
     is generated from the Item-tree built from the original (specified by
     the user) query. The idea is that generated query should eliminates all
@@ -877,15 +914,8 @@ static int mysql_register_view(THD *thd, TABLE_LIST *view,
 
     View definition query is stored in the client character set.
   */
-  char view_query_buff[4096];
-  String view_query(view_query_buff,
-                    sizeof (view_query_buff),
-                    thd->charset());
-
-  char is_query_buff[4096];
-  String is_query(is_query_buff,
-                  sizeof (is_query_buff),
-                  system_charset_info);
+  StringBuffer<4096> view_query(thd->charset());
+  StringBuffer<4096> is_query(system_charset_info);
 
   char md5[MD5_BUFF_LENGTH];
   bool can_be_merged;
@@ -898,12 +928,14 @@ static int mysql_register_view(THD *thd, TABLE_LIST *view,
   view_query.length(0);
   is_query.length(0);
   {
-    ulong sql_mode= thd->variables.sql_mode & MODE_ANSI_QUOTES;
+    sql_mode_t sql_mode= thd->variables.sql_mode & MODE_ANSI_QUOTES;
     thd->variables.sql_mode&= ~MODE_ANSI_QUOTES;
 
-    lex->unit.print(&view_query, QT_VIEW_INTERNAL);
-    lex->unit.print(&is_query,
-                    enum_query_type(QT_TO_SYSTEM_CHARSET | QT_WITHOUT_INTRODUCERS));
+    lex->unit.print(&view_query, enum_query_type(QT_VIEW_INTERNAL |
+                                                 QT_ITEM_ORIGINAL_FUNC_NULLIF));
+    lex->unit.print(&is_query, enum_query_type(QT_TO_SYSTEM_CHARSET |
+                                               QT_WITHOUT_INTRODUCERS |
+                                               QT_ITEM_ORIGINAL_FUNC_NULLIF));
 
     thd->variables.sql_mode|= sql_mode;
   }
@@ -1133,7 +1165,7 @@ bool mysql_make_view(THD *thd, TABLE_SHARE *share, TABLE_LIST *table,
   bool result, view_is_mergeable;
   TABLE_LIST *UNINIT_VAR(view_main_select_tables);
   DBUG_ENTER("mysql_make_view");
-  DBUG_PRINT("info", ("table: 0x%lx (%s)", (ulong) table, table->table_name));
+  DBUG_PRINT("info", ("table: %p (%s)", table, table->table_name));
 
   if (table->required_type == FRMTYPE_TABLE)
   {
@@ -1169,8 +1201,6 @@ bool mysql_make_view(THD *thd, TABLE_SHARE *share, TABLE_LIST *table,
       See MDEV-6668 for details.
     */
     mysql_derived_reinit(thd, NULL, table);
-
-    thd->select_number+= table->view->number_of_selects;
 
     DEBUG_SYNC(thd, "after_cached_view_opened");
     DBUG_RETURN(0);
@@ -1300,6 +1330,7 @@ bool mysql_make_view(THD *thd, TABLE_SHARE *share, TABLE_LIST *table,
 
     now Lex placed in statement memory
   */
+
   table->view= lex= thd->lex= (LEX*) new(thd->mem_root) st_lex_local;
   if (!table->view)
   {
@@ -1325,10 +1356,11 @@ bool mysql_make_view(THD *thd, TABLE_SHARE *share, TABLE_LIST *table,
       goto end;
 
     lex_start(thd);
+    lex->stmt_lex= old_lex;
     view_select= &lex->select_lex;
-    view_select->select_number= ++thd->select_number;
+    view_select->select_number= ++thd->lex->stmt_lex->current_select_number;
 
-    ulonglong saved_mode= thd->variables.sql_mode;
+    sql_mode_t saved_mode= thd->variables.sql_mode;
     /* switch off modes which can prevent normal parsing of VIEW
       - MODE_REAL_AS_FLOAT            affect only CREATE TABLE parsing
       + MODE_PIPES_AS_CONCAT          affect expression parsing
@@ -1359,9 +1391,6 @@ bool mysql_make_view(THD *thd, TABLE_SHARE *share, TABLE_LIST *table,
     /* Parse the query. */
 
     parse_status= parse_sql(thd, & parser_state, table->view_creation_ctx);
-
-    lex->number_of_selects=
-      (thd->select_number - view_select->select_number) + 1;
 
     /* Restore environment. */
 
@@ -1521,8 +1550,8 @@ bool mysql_make_view(THD *thd, TABLE_SHARE *share, TABLE_LIST *table,
       for (tbl= view_main_select_tables; tbl; tbl= tbl->next_local)
       {
         tbl->lock_type= table->lock_type;
-        tbl->mdl_request.set_type((tbl->lock_type >= TL_WRITE_ALLOW_WRITE) ?
-                                  MDL_SHARED_WRITE : MDL_SHARED_READ);
+        tbl->mdl_request.set_type(table->mdl_request.type);
+        tbl->updating= table->updating;
       }
       /*
         If the view is mergeable, we might want to
@@ -1609,6 +1638,8 @@ bool mysql_make_view(THD *thd, TABLE_SHARE *share, TABLE_LIST *table,
       sl->context.error_processor= &view_error_processor;
       sl->context.error_processor_data= (void *)table;
     }
+
+    view_select->master_unit()->is_view= true;
 
     /*
       check MERGE algorithm ability
@@ -2129,7 +2160,7 @@ mysql_rename_view(THD *thd,
       view definition parsing or use temporary 'view_def'
       object for it.
     */
-    bzero(&view_def, sizeof(view_def));
+    view_def.reset();
     view_def.timestamp.str= view_def.timestamp_buffer;
     view_def.view_suid= TRUE;
 

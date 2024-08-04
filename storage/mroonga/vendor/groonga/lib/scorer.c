@@ -13,7 +13,7 @@
 
   You should have received a copy of the GNU Lesser General Public
   License along with this library; if not, write to the Free Software
-  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA
 */
 
 #include <string.h>
@@ -157,24 +157,24 @@ grn_scorer_matched_record_get_n_args(grn_ctx *ctx,
 
 grn_rc
 grn_scorer_register(grn_ctx *ctx,
-                    const char *plugin_name_ptr,
-                    int plugin_name_length,
+                    const char *scorer_name_ptr,
+                    int scorer_name_length,
                     grn_scorer_score_func *score)
 {
-  if (plugin_name_length == -1) {
-    plugin_name_length = strlen(plugin_name_ptr);
+  if (scorer_name_length == -1) {
+    scorer_name_length = strlen(scorer_name_ptr);
   }
 
   {
     grn_obj *scorer_object = grn_proc_create(ctx,
-                                             plugin_name_ptr,
-                                             plugin_name_length,
+                                             scorer_name_ptr,
+                                             scorer_name_length,
                                              GRN_PROC_SCORER,
                                              NULL, NULL, NULL, 0, NULL);
     if (scorer_object == NULL) {
       GRN_PLUGIN_ERROR(ctx, GRN_SCORER_ERROR,
                        "[scorer][%.*s] failed to grn_proc_create()",
-                       plugin_name_length, plugin_name_ptr);
+                       scorer_name_length, scorer_name_ptr);
       return ctx->rc;
     }
 

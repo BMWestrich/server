@@ -1,58 +1,68 @@
 SET NAMES utf8;
 CREATE TABLE t1 ENGINE=CONNECT TABLE_TYPE=ODBC CONNECTION='Bad connection string';
-ERROR HY000: SQLDriverConnect: [unixODBC][Driver Manager]Data source name not found, and no default driver specified
 CREATE TABLE t1 ENGINE=CONNECT TABLE_TYPE=ODBC CATFUNC=Sources;
 SHOW CREATE TABLE t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
   `Name` varchar(256) NOT NULL,
-  `Description` varchar(256) NOT NULL
+  `Description` varchar(256) DEFAULT NULL
 ) ENGINE=CONNECT DEFAULT CHARSET=latin1 `TABLE_TYPE`='ODBC' `CATFUNC`='Sources'
 SELECT * FROM t1;
 Name	Description
-Firebird	Firebird
+Excel Files	Microsoft Excel Driver (*.xls, *.xlsx, *.xlsm, *.xlsb)
+MS Access Database	Microsoft Access Driver (*.mdb, *.accdb)
+ORACLE_TEST	Oracle in XE
+SQLServer_Test	SQL Server Native Client 11.0
+Firebird	Firebird/InterBase(r) driver
+ConnectEngineOracle	Oracle in XE
+ConnectEngineSQLServer	SQL Server Native Client 11.0
 DROP TABLE t1;
 CREATE TABLE t1 ENGINE=CONNECT TABLE_TYPE=ODBC CATFUNC=Drivers;
 SHOW CREATE TABLE t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
   `Description` char(128) NOT NULL,
-  `Attributes` varchar(256) NOT NULL
+  `Attributes` varchar(256) DEFAULT NULL
 ) ENGINE=CONNECT DEFAULT CHARSET=latin1 `TABLE_TYPE`='ODBC' `CATFUNC`='Drivers'
 SELECT * FROM t1;
 Description	Attributes
-Firebird	Description=Firebird ODBC Driver in usr;Driver=/usr/local/lib/libOdbcFb.so;Setup=/usr/local/lib/libOdbcFb.so;FileUsage=1;
+SQL Server	APILevel=2;ConnectFunctions=YYY;CPTimeout=60;DriverODBCVer=03.50;FileUsage=0;SQLLevel=1;UsageCount=1;
+Oracle in XE	ConnectionFunctions=YYY;DriverODBCVer=03.51;CPTimeout=60;FileUsage=0;APILevel=1;SQLLevel=1;
+SQL Server Native Client 11.0	UsageCount=1;APILevel=2;ConnectFunctions=YYY;CPTimeout=60;DriverODBCVer=03.80;FileUsage=0;SQLLevel=1;
+ODBC Driver 13 for SQL Server	UsageCount=1;APILevel=2;ConnectFunctions=YYY;CPTimeout=60;DriverODBCVer=03.80;FileUsage=0;SQLLevel=1;
+SQL Server Native Client RDA 11.0	UsageCount=1;APILevel=2;ConnectFunctions=YYY;CPTimeout=60;DriverODBCVer=03.80;FileUsage=0;SQLLevel=1;
+Firebird/InterBase(r) driver	UsageCount=1;FileExtns=*.fdb,*.gdb;APILevel=1;ConnectFunctions=YYY;FileUsage=0;DriverODBCVer=03.51;SQLLevel=1;
 DROP TABLE t1;
 CREATE TABLE t1 ENGINE=CONNECT TABLE_TYPE=ODBC CATFUNC=Tables CONNECTION='Not important';
 SHOW CREATE TABLE t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `Table_Cat` char(128) NOT NULL,
-  `Table_Schema` char(128) NOT NULL,
+  `Table_Cat` char(128) DEFAULT NULL,
+  `Table_Schema` char(128) DEFAULT NULL,
   `Table_Name` char(128) NOT NULL,
   `Table_Type` char(16) NOT NULL,
-  `Remark` char(255) NOT NULL
+  `Remark` char(255) DEFAULT NULL
 ) ENGINE=CONNECT DEFAULT CHARSET=latin1 CONNECTION='Not important' `TABLE_TYPE`='ODBC' `CATFUNC`='Tables'
 DROP TABLE t1;
 CREATE TABLE t1 ENGINE=CONNECT TABLE_TYPE=ODBC CATFUNC=Columns CONNECTION='Not important';
 SHOW CREATE TABLE t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `Table_Cat` char(128) NOT NULL,
-  `Table_Schema` char(128) NOT NULL,
+  `Table_Cat` char(128) DEFAULT NULL,
+  `Table_Schema` char(128) DEFAULT NULL,
   `Table_Name` char(128) NOT NULL,
   `Column_Name` char(128) NOT NULL,
   `Data_Type` smallint(6) NOT NULL,
   `Type_Name` char(30) NOT NULL,
   `Column_Size` int(10) NOT NULL,
   `Buffer_Length` int(10) NOT NULL,
-  `Decimal_Digits` smallint(6) NOT NULL,
-  `Radix` smallint(6) NOT NULL,
+  `Decimal_Digits` smallint(6) DEFAULT NULL,
+  `Radix` smallint(6) DEFAULT NULL,
   `Nullable` smallint(6) NOT NULL,
-  `Remarks` char(255) NOT NULL
+  `Remarks` char(255) DEFAULT NULL
 ) ENGINE=CONNECT DEFAULT CHARSET=latin1 CONNECTION='Not important' `TABLE_TYPE`='ODBC' `CATFUNC`='Columns'
 DROP TABLE t1;
-CREATE TABLE t1 ENGINE=CONNECT TABLE_TYPE=ODBC TABNAME='EMPLOYEE' CONNECTION='DSN=Firebird;UID=SYSDBA;PWD=manager';
+CREATE TABLE t1 ENGINE=CONNECT TABLE_TYPE=ODBC TABNAME='EMPLOYEE' CONNECTION='DSN=Firebird;UID=SYSDBA;PWD=masterkey';
 SELECT * FROM t1;
 EMP_NO	FIRST_NAME	LAST_NAME	PHONE_EXT	HIRE_DATE	DEPT_NO	JOB_CODE	JOB_GRADE	JOB_COUNTRY	SALARY	FULL_NAME
 2	Robert	Nelson	250	1988-12-28 00:00:00	600	VP	2	USA	105900.00	Nelson, Robert
@@ -89,9 +99,9 @@ EMP_NO	FIRST_NAME	LAST_NAME	PHONE_EXT	HIRE_DATE	DEPT_NO	JOB_CODE	JOB_GRADE	JOB_C
 113	Mary	Page	845	1993-04-12 00:00:00	671	Eng	4	USA	48000.00	Page, Mary
 114	Bill	Parker	247	1993-06-01 00:00:00	623	Eng	5	USA	35000.00	Parker, Bill
 118	Takashi	Yamamoto	23	1993-07-01 00:00:00	115	SRep	4	Japan	7480000.00	Yamamoto, Takashi
-121	Roberto	Ferrari	1	1993-07-12 00:00:00	125	SRep	4	Italy	99000000.00	Ferrari, Roberto
+121	Roberto	Ferrari	1	1993-07-12 00:00:00	125	SRep	4	Italy	33000.00	Ferrari, Roberto
 127	Michael	Yanowski	492	1993-08-09 00:00:00	100	SRep	4	USA	44000.00	Yanowski, Michael
-134	Jacques	Glon	NULL	1993-08-23 00:00:00	123	SRep	4	France	390500.00	Glon, Jacques
+134	Jacques	Glon	NULL	1993-08-23 00:00:00	123	SRep	4	France	38500.00	Glon, Jacques
 136	Scott	Johnson	265	1993-09-13 00:00:00	623	Doc	3	USA	60000.00	Johnson, Scott
 138	T.J.	Green	218	1993-11-01 00:00:00	621	Eng	4	USA	36000.00	Green, T.J.
 141	Pierre	Osborne	NULL	1994-01-03 00:00:00	121	SRep	4	Switzerland	110000.00	Osborne, Pierre

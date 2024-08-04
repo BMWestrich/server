@@ -1309,5 +1309,108 @@ LEFT    JOIN t4  AS alias5
         JOIN t5  ON alias5.f5
 ON alias2.f3  ON alias1.f2;
 DROP TABLE t1,t2,t3,t4,t5;
+
+--echo #
+--echo # MDEV-7992: Nested left joins + 'not exists' optimization
+--echo #
+
+CREATE TABLE t1(
+  K1 INT PRIMARY KEY,
+  Name VARCHAR(15)
+);
+
+INSERT INTO t1 VALUES
+  (1,'T1Row1'), (2,'T1Row2');
+
+
+CREATE TABLE t2(
+  K2 INT PRIMARY KEY,
+  K1r INT,
+  rowTimestamp DATETIME,
+  Event VARCHAR(15)
+);
+
+INSERT INTO t2 VALUES
+  (1, 1, '2015-04-13 10:42:11' ,'T1Row1Event1'),
+  (2, 1, '2015-04-13 10:42:12' ,'T1Row1Event2'),
+  (3, 1, '2015-04-13 10:42:12' ,'T1Row1Event3');
+
+let $q1=
+SELECT t1a.*, t2a.*,
+       t2i.K2 AS K2B, t2i.K1r AS K1rB,
+       t2i.rowTimestamp AS rowTimestampB, t2i.Event AS EventB
+FROM 
+  t1 t1a JOIN t2 t2a ON t2a.K1r = t1a.K1
+  LEFT JOIN 
+  ( t1 t1i LEFT JOIN t2 t2i ON  t2i.K1r = t1i.K1) 
+  ON (t1i.K1 = 1) AND
+     (((t2i.K1r = t1a.K1 AND t2i.rowTimestamp > t2a.rowTimestamp ) OR
+      (t2i.rowTimestamp = t2a.rowTimestamp AND t2i.K2 > t2a.K2))
+      OR (t2i.K2 IS NULL))
+WHERE 
+t2a.K1r = 1 AND t2i.K2 IS NULL;
+
+eval $q1;
+eval EXPLAIN EXTENDED $q1;
+
+CREATE VIEW v1 AS 
+  SELECT t2i.*
+   FROM t1 as t1i LEFT JOIN t2 as t2i ON t2i.K1r = t1i.K1
+   WHERE t1i.K1 = 1 ;
+
+let $q2=
+SELECT
+  t1a.*, t2a.*, t2b.K2 as K2B, t2b.K1r as K1rB,
+  t2b.rowTimestamp as rowTimestampB, t2b.Event as EventB
+FROM
+  t1 as t1a JOIN t2 as t2a ON t2a.K1r = t1a.K1
+  LEFT JOIN
+  v1 as t2b
+  ON ((t2b.K1r = t1a.K1 AND t2b.rowTimestamp > t2a.rowTimestamp) OR
+     (t2b.rowTimestamp = t2a.rowTimestamp AND t2b.K2 > t2a.K2))
+     OR (t2b.K2 IS NULL)
+WHERE
+  t1a.K1 = 1 AND 
+  t2b.K2 IS NULL;
+
+eval $q2;
+eval EXPLAIN EXTENDED $q2;
+
+DROP VIEW v1;
+DROP TABLE t1,t2;
+
 set optimizer_search_depth= @tmp_mdev621;
 
+--echo #
+--echo # MDEV-19588: Nested left joins using optimized join cache
+--echo #
+
+set optimizer_switch='optimize_join_buffer_size=on';
+
+set @save_join_cache_level= @@join_cache_level;
+set join_cache_level=2;
+
+CREATE TABLE t1 (i1 int, c1 varchar(20), pk int) engine=myisam;
+
+CREATE TABLE t2 (pk int, c1 varchar(20), i1 int) engine=myisam;
+INSERT INTO t2 VALUES (7,'a',-912),(8,'a',5);
+
+CREATE TABLE t3 (pk int, c1 varchar(20), i1 int) engine=myisam;
+INSERT INTO t3 VALUES
+(1,'a',-145),(2,'a',6),(3,'a',1),(7,'a',NULL),(8,'a',889),(9,'a',146),
+(10,'a',177),(16,'a',-433),(17,'a',NULL),(18,'a',2),(19,'a',3),(20,'a',5),
+(21,'a',-484),(22,'a',369),(23,'a',-192),(24,'a',-163),(25,'a',5),(26,'a',NULL);
+
+let $q=
+SELECT t3.*
+FROM t3 LEFT JOIN t1 LEFT JOIN t2 ON t1.i1 = t2.i1 ON t3.i1 = t1.i1
+WHERE t2.pk < 13 OR t3.i1 IS NULL;
+
+eval $q;
+eval explain extended $q;
+
+DROP TABLE t1,t2,t3;
+
+set join_cache_level= @save_join_cache_level;
+
+set optimizer_switch=@save_optimizer_switch;

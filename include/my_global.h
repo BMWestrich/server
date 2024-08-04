@@ -1,6 +1,6 @@
 /*
    Copyright (c) 2001, 2013, Oracle and/or its affiliates.
-   Copyright (c) 2010, 2013, Monty Program Ab.
+   Copyright (c) 2009, 2017, MariaDB Corporation
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA */
 
 /* This is the include file that should be included 'first' in every C file. */
 
@@ -164,7 +164,7 @@
 #  if defined(__i386__) || defined(__ppc__)
 #    define SIZEOF_CHARP 4
 #    define SIZEOF_LONG 4
-#  elif defined(__x86_64__) || defined(__ppc64__)
+#  elif defined(__x86_64__) || defined(__ppc64__) || defined(__aarch64__)
 #    define SIZEOF_CHARP 8
 #    define SIZEOF_LONG 8
 #  else
@@ -255,7 +255,9 @@
   AIX includes inttypes.h from sys/types.h
   Explicitly request format macros before the first inclusion of inttypes.h
 */
-#define __STDC_FORMAT_MACROS  
+#if !defined(__STDC_FORMAT_MACROS)
+#define __STDC_FORMAT_MACROS
+#endif  // !defined(__STDC_FORMAT_MACROS)
 #endif
 
 
@@ -437,9 +439,8 @@ extern "C" int madvise(void *addr, size_t len, int behav);
 #define SIGNAL_HANDLER_RESET_ON_DELIVERY
 #endif
 
-#ifndef STDERR_FILENO
-#define STDERR_FILENO fileno(stderr)
-#endif
+/* don't assume that STDERR_FILENO is 2, mysqld can freopen */
+#undef STDERR_FILENO
 
 #ifndef SO_EXT
 #ifdef _WIN32
@@ -530,13 +531,6 @@ typedef int	my_socket;	/* File descriptor for sockets */
 #endif
 /* Type for fuctions that handles signals */
 #define sig_handler RETSIGTYPE
-C_MODE_START
-#ifdef HAVE_SIGHANDLER_T
-#define sig_return sighandler_t
-#else
-typedef void (*sig_return)(void); /* Returns type from signal */
-#endif
-C_MODE_END
 #if defined(__GNUC__) && !defined(_lint)
 typedef char	pchar;		/* Mixed prototypes can take char */
 typedef char	puchar;		/* Mixed prototypes can take char */
@@ -592,8 +586,15 @@ typedef SOCKET_SIZE_TYPE size_socket;
 #ifndef O_CLOEXEC
 #define O_CLOEXEC       0
 #endif
+#ifdef __GLIBC__
+#define STR_O_CLOEXEC "e"
+#else
+#define STR_O_CLOEXEC ""
+#endif
 #ifndef SOCK_CLOEXEC
 #define SOCK_CLOEXEC    0
+#else
+#define HAVE_SOCK_CLOEXEC
 #endif
 
 /* additional file share flags for win32 */
@@ -677,7 +678,7 @@ typedef SOCKET_SIZE_TYPE size_socket;
   smaller what the disk page size. This influences the speed of the
   isam btree library. eg to big to slow.
 */
-#define IO_SIZE			4096
+#define IO_SIZE			4096U
 /*
   How much overhead does malloc have. The code often allocates
   something like 1024-MALLOC_OVERHEAD bytes
@@ -803,25 +804,8 @@ inline unsigned long long my_double2ulonglong(double d)
 #define SIZE_T_MAX      (~((size_t) 0))
 #endif
 
-#ifndef isfinite
-#ifdef HAVE_FINITE
-#define isfinite(x) finite(x)
-#else
-#define finite(x) (1.0 / fabs(x) > 0.0)
-#endif /* HAVE_FINITE */
-#elif (__cplusplus >= 201103L)
+#ifdef __cplusplus
 #include <cmath>
-static inline bool isfinite(double x) { return std::isfinite(x); }
-#endif /* isfinite */
-
-#ifndef HAVE_ISNAN
-#define isnan(x) ((x) != (x))
-#endif
-
-#ifdef HAVE_ISINF
-#define my_isinf(X) isinf(X)
-#else /* !HAVE_ISINF */
-#define my_isinf(X) (!finite(X) && !isnan(X))
 #endif
 
 /* Define missing math constants. */
@@ -878,8 +862,7 @@ typedef long long	my_ptrdiff_t;
   and related routines are refactored.
 */
 
-#define my_offsetof(TYPE, MEMBER) \
-        ((size_t)((char *)&(((TYPE *)0x10)->MEMBER) - (char*)0x10))
+#define my_offsetof(TYPE, MEMBER) PTR_BYTE_DIFF(&((TYPE *)0x10)->MEMBER, 0x10)
 
 #define NullS		(char *) 0
 
@@ -1071,14 +1054,14 @@ typedef ulong		myf;	/* Type of MyFlags in my_funcs */
 #ifdef _WIN32
 #define dlsym(lib, name) (void*)GetProcAddress((HMODULE)lib, name)
 #define dlopen(libname, unused) LoadLibraryEx(libname, NULL, 0)
+#define RTLD_DEFAULT GetModuleHandle(NULL)
 #define dlclose(lib) FreeLibrary((HMODULE)lib)
 static inline char *dlerror(void)
 {
   static char win_errormsg[2048];
-  if(FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM,
-                   0, GetLastError(), 0, win_errormsg, 2048, NULL))
-    return win_errormsg;
-  return "";
+  FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM,
+    0, GetLastError(), 0, win_errormsg, 2048, NULL);
+  return win_errormsg;
 }
 #define HAVE_DLOPEN 1
 #define HAVE_DLERROR 1
@@ -1092,11 +1075,19 @@ static inline char *dlerror(void)
 #ifndef HAVE_DLERROR
 #define dlerror() ""
 #endif
+#ifndef HAVE_DLADDR
+#define dladdr(A, B) 0
+/* Dummy definition in case we're missing dladdr() */
+typedef struct { const char *dli_fname, dli_fbase; } Dl_info;
+#endif
 #else
 #define dlerror() "No support for dynamic loading (static build?)"
 #define dlopen(A,B) 0
 #define dlsym(A,B) 0
 #define dlclose(A) 0
+#define dladdr(A, B) 0
+/* Dummy definition in case we're missing dladdr() */
+typedef struct { const char *dli_fname, dli_fbase; } Dl_info;
 #endif
 
 /*
@@ -1230,6 +1221,33 @@ static inline double rint(double x)
 #if defined(_AIX) && defined(_LARGE_FILE_API)
 #undef _LARGE_FILE_API
 #undef __GNUG__
+#endif
+
+/*
+  Provide defaults for the CPU cache line size, if it has not been detected by
+  CMake using getconf
+*/
+#if !defined(CPU_LEVEL1_DCACHE_LINESIZE) || CPU_LEVEL1_DCACHE_LINESIZE == 0
+  #if CPU_LEVEL1_DCACHE_LINESIZE == 0
+    #undef CPU_LEVEL1_DCACHE_LINESIZE
+  #endif
+
+  #if defined(__s390__)
+    #define CPU_LEVEL1_DCACHE_LINESIZE 256
+  #elif defined(__powerpc__) || defined(__aarch64__)
+    #define CPU_LEVEL1_DCACHE_LINESIZE 128
+  #else
+    #define CPU_LEVEL1_DCACHE_LINESIZE 64
+  #endif
+#endif
+
+#define FLOATING_POINT_DECIMALS 31
+
+/* Keep client compatible with earlier versions */
+#ifdef MYSQL_SERVER
+#define NOT_FIXED_DEC           DECIMAL_NOT_SPECIFIED
+#else
+#define NOT_FIXED_DEC           FLOATING_POINT_DECIMALS
 #endif
 
 #endif /* my_global_h */

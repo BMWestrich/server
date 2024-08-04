@@ -12,7 +12,7 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA
 
 # Default values that applies to all MySQL Servers
 [mysqld]
@@ -44,6 +44,8 @@ loose-feedback-user-info=  mysql-test
 loose-feedback-debug-startup-interval=20
 loose-feedback-debug-first-interval=60
 loose-feedback-debug-interval=60
+
+loose-pam-debug
 
 loose-innodb_data_file_path=      ibdata1:12M:autoextend
 loose-innodb_buffer_pool_size=    8M
@@ -106,6 +108,10 @@ binlog-direct-non-transactional-updates
 
 default-storage-engine=myisam
 
+loose-ssl-ca=@ENV.MYSQL_TEST_DIR/std_data/cacert.pem
+loose-ssl-cert=@ENV.MYSQL_TEST_DIR/std_data/server-cert.pem
+loose-ssl-key=@ENV.MYSQL_TEST_DIR/std_data/server-key.pem
+
 # here, at the end of [mysqld] group mtr will automatically disable
 # all optional plugins.
 
@@ -121,4 +127,3 @@ local-infile
 # tables.  Let's enable it in the [server] group, because this group
 # is read after [mysqld] and [embedded]
 loose-aria
-

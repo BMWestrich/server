@@ -13,7 +13,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /**
   @file
@@ -27,9 +27,13 @@
 
 #include <mysql/plugin.h>
 
-#define MYSQL_AUTHENTICATION_INTERFACE_VERSION 0x0200
+#define MYSQL_AUTHENTICATION_INTERFACE_VERSION 0x0201
 
 #include <mysql/plugin_auth_common.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /* defines for MYSQL_SERVER_AUTH_INFO.password_used */
 
@@ -101,6 +105,11 @@ typedef struct st_mysql_server_auth_info
   */
   unsigned int host_or_ip_length;
 
+  /**
+    Current THD pointer (to use with various services)
+  */
+  MYSQL_THD thd;
+
 } MYSQL_SERVER_AUTH_INFO;
 
 /**
@@ -122,5 +131,10 @@ struct st_mysql_auth
   */
   int (*authenticate_user)(MYSQL_PLUGIN_VIO *vio, MYSQL_SERVER_AUTH_INFO *info);
 };
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif
 

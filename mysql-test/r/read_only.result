@@ -2,7 +2,7 @@ set @start_read_only= @@global.read_only;
 DROP TABLE IF EXISTS t1,t2,t3;
 create user test@localhost;
 grant CREATE, SELECT, DROP on *.* to test@localhost;
-connect (con1,localhost,test,,test);
+connect  con1,localhost,test,,test;
 connection default;
 set global read_only=0;
 connection con1;
@@ -34,6 +34,8 @@ create temporary table t3 (a int);
 create temporary table t4 (a int) select * from t3;
 insert into t3 values(1);
 insert into t4 select * from t3;
+create table t3 (a int);
+ERROR HY000: The MariaDB server is running with the --read-only option so it cannot execute this statement
 update t1,t3 set t1.a=t3.a+1 where t1.a=t3.a;
 ERROR HY000: The MariaDB server is running with the --read-only option so it cannot execute this statement
 update t1,t3 set t3.a=t1.a+1 where t1.a=t3.a;
@@ -49,6 +51,9 @@ delete t1 from t1,t3 where t1.a=t3.a;
 drop table t1;
 insert into t1 values(1);
 ERROR HY000: The MariaDB server is running with the --read-only option so it cannot execute this statement
+drop temporary table if exists t1;
+Warnings:
+Note	1051	Unknown table 'test.t1'
 connection default;
 set global read_only=0;
 lock table t1 write;
@@ -109,7 +114,7 @@ set global read_only=0;
 flush tables with read lock;
 set global read_only=1;
 unlock tables;
-connect (root2,localhost,root,,test);
+connect  root2,localhost,root,,test;
 connection default;
 set global read_only=0;
 flush tables with read lock;
@@ -120,6 +125,7 @@ select @@global.read_only;
 @@global.read_only
 1
 unlock tables;
+disconnect root2;
 drop temporary table ttt;
 ERROR 42S02: Unknown table 'test.ttt'
 drop temporary table if exists ttt;
@@ -127,6 +133,7 @@ Warnings:
 Note	1051	Unknown table 'test.ttt'
 connection default;
 set global read_only=0;
+disconnect con1;
 drop table t1,t2;
 drop user test@localhost;
 #
@@ -145,7 +152,7 @@ grant all on mysqltest_db2.* to `mysqltest_u1`@`%`;
 create database mysqltest_db1;
 grant all on mysqltest_db1.* to `mysqltest_u1`@`%`;
 flush privileges;
-connect (con_bug27440,127.0.0.1,mysqltest_u1,,test,MASTER_MYPORT,);
+connect  con_bug27440,127.0.0.1,mysqltest_u1,,test,$MASTER_MYPORT,;
 connection con_bug27440;
 create database mysqltest_db2;
 ERROR HY000: The MariaDB server is running with the --read-only option so it cannot execute this statement
@@ -163,14 +170,29 @@ flush privileges;
 drop database mysqltest_db1;
 set global read_only= @start_read_only;
 #
+# MDEV-16987 - ALTER DATABASE possible in read-only mode
+#
+CREATE USER user1@localhost;
+GRANT ALTER ON test1.* TO user1@localhost;
+CREATE DATABASE test1;
+SET GLOBAL read_only=1;
+ALTER DATABASE test1 CHARACTER SET utf8;
+ERROR HY000: The MariaDB server is running with the --read-only option so it cannot execute this statement
+SET GLOBAL read_only=0;
+DROP DATABASE test1;
+DROP USER user1@localhost;
+USE test;
+# End of 5.5 tests
+#
 # WL#5968 Implement START TRANSACTION READ (WRITE|ONLY);
 #
 #
 # Test interaction with read_only system variable.
-DROP TABLE IF EXISTS t1;
 CREATE TABLE t1(a INT);
 INSERT INTO t1 VALUES (1), (2);
 CREATE USER user1;
+connect  con1, localhost, user1;
+connection default;
 SET GLOBAL read_only= 1;
 # All allowed with super privilege
 START TRANSACTION;
@@ -181,6 +203,7 @@ START TRANSACTION READ WRITE;
 COMMIT;
 # We allow implicit RW transaction without super privilege
 # for compatibility reasons
+connection con1;
 START TRANSACTION;
 # Check that table updates are still disallowed.
 INSERT INTO t1 VALUES (3);
@@ -196,6 +219,9 @@ COMMIT;
 START TRANSACTION READ WRITE;
 ERROR HY000: The MariaDB server is running with the --read-only option so it cannot execute this statement
 COMMIT;
+disconnect con1;
+connection default;
 DROP USER user1;
 SET GLOBAL read_only= 0;
 DROP TABLE t1;
+# End of 10.0 tests

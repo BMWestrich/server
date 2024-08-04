@@ -64,7 +64,6 @@ struct mysql_position
 class federatedx_io_mysql :public federatedx_io
 {
   MYSQL mysql; /* MySQL connection */
-  MYSQL_ROWS *current;
   DYNAMIC_ARRAY savepoints;
   bool requested_autocommit;
   bool actual_autocommit;
@@ -108,7 +107,8 @@ public:
   virtual void free_result(FEDERATEDX_IO_RESULT *io_result);
   virtual unsigned int get_num_fields(FEDERATEDX_IO_RESULT *io_result);
   virtual my_ulonglong get_num_rows(FEDERATEDX_IO_RESULT *io_result);
-  virtual FEDERATEDX_IO_ROW *fetch_row(FEDERATEDX_IO_RESULT *io_result);
+  virtual FEDERATEDX_IO_ROW *fetch_row(FEDERATEDX_IO_RESULT *io_result,
+                                       FEDERATEDX_IO_ROWS **current= NULL);
   virtual ulong *fetch_lengths(FEDERATEDX_IO_RESULT *io_result);
   virtual const char *get_column_data(FEDERATEDX_IO_ROW *row,
                                       unsigned int column);
@@ -117,9 +117,10 @@ public:
 
   virtual size_t get_ref_length() const;
   virtual void mark_position(FEDERATEDX_IO_RESULT *io_result,
-                             void *ref);
+                             void *ref, FEDERATEDX_IO_ROWS *current);
   virtual int seek_position(FEDERATEDX_IO_RESULT **io_result,
                             const void *ref);
+  virtual void set_thd(void *thd);
 };
 
 
@@ -264,9 +265,8 @@ ulong federatedx_io_mysql::savepoint_release(ulong sp)
     savept= dynamic_element(&savepoints, savepoints.elements - 1, SAVEPT *);
     if (savept->level < sp)
       break;
-  if ((savept->flags & (SAVEPOINT_REALIZED | 
-                        SAVEPOINT_RESTRICT)) == SAVEPOINT_REALIZED)
-    last= savept;
+    if ((savept->flags & (SAVEPOINT_REALIZED | SAVEPOINT_RESTRICT)) == SAVEPOINT_REALIZED)
+      last= savept;
     savepoints.elements--;
   }
 
@@ -292,8 +292,8 @@ ulong federatedx_io_mysql::savepoint_rollback(ulong sp)
   while (savepoints.elements)
   {
     savept= dynamic_element(&savepoints, savepoints.elements - 1, SAVEPT *);
-  if (savept->level <= sp)
-    break;
+    if (savept->level <= sp)
+      break;
     savepoints.elements--;
   }
 
@@ -515,10 +515,12 @@ my_ulonglong federatedx_io_mysql::get_num_rows(FEDERATEDX_IO_RESULT *io_result)
 }
 
 
-FEDERATEDX_IO_ROW *federatedx_io_mysql::fetch_row(FEDERATEDX_IO_RESULT *io_result)
+FEDERATEDX_IO_ROW *federatedx_io_mysql::fetch_row(FEDERATEDX_IO_RESULT *io_result,
+                                                  FEDERATEDX_IO_ROWS **current)
 {
   MYSQL_RES *result= (MYSQL_RES*)io_result;
-  current= result->data_cursor;
+  if (current)
+    *current= (FEDERATEDX_IO_ROWS *) result->data_cursor;
   return (FEDERATEDX_IO_ROW *) mysql_fetch_row(result);
 }
 
@@ -626,11 +628,11 @@ size_t federatedx_io_mysql::get_ref_length() const
 
 
 void federatedx_io_mysql::mark_position(FEDERATEDX_IO_RESULT *io_result,
-                                        void *ref)
+                                        void *ref, FEDERATEDX_IO_ROWS *current)
 {
   mysql_position& pos= *reinterpret_cast<mysql_position*>(ref);
   pos.result= (MYSQL_RES *) io_result;
-  pos.offset= current;
+  pos.offset= (MYSQL_ROW_OFFSET) current;
 }
 
 int federatedx_io_mysql::seek_position(FEDERATEDX_IO_RESULT **io_result,
@@ -648,3 +650,7 @@ int federatedx_io_mysql::seek_position(FEDERATEDX_IO_RESULT **io_result,
   return 0;
 }
 
+void federatedx_io_mysql::set_thd(void *thd)
+{
+  mysql.net.thd= thd;
+}

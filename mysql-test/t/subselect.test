@@ -12,6 +12,8 @@ drop table if exists t1,t2,t3,t4,t5,t6,t7,t8,t11,t12;
 drop view if exists v2;
 --enable_warnings
 
+call mtr.add_suppression("Sort aborted.*");
+
 set @subselect_tmp=@@optimizer_switch;
 set @@optimizer_switch=ifnull(@optimizer_switch_for_subselect_test,
                               "semijoin=on,firstmatch=on,loosescan=on,semijoin_with_cache=on,partial_match_rowid_merge=off,partial_match_table_scan=off");
@@ -24,7 +26,8 @@ if (`select @join_cache_level_for_subselect_test is not null`)
 {
   set join_cache_level=@join_cache_level_for_subselect_test;
 }
- set optimizer_switch='mrr=on,mrr_sort_keys=on,index_condition_pushdown=on';
+SET optimizer_switch='mrr=on,mrr_sort_keys=on,index_condition_pushdown=on';
+SET optimizer_use_condition_selectivity=1;
 
 select (select 2);
 explain extended select (select 2);
@@ -51,7 +54,7 @@ SELECT * FROM (SELECT 1 as id) b WHERE id IN (SELECT * FROM (SELECT 1 as id) c O
 SELECT * FROM (SELECT 1) a  WHERE 1 IN (SELECT 1,1);
 SELECT 1 IN (SELECT 1);
 SELECT 1 FROM (SELECT 1 as a) b WHERE 1 IN (SELECT (SELECT a));
--- error ER_WRONG_USAGE
+-- error ER_PARSE_ERROR
 select (SELECT 1 FROM (SELECT 1) a PROCEDURE ANALYSE(1));
 -- error ER_PARSE_ERROR
 SELECT 1 FROM (SELECT 1) a PROCEDURE ANALYSE((SELECT 1));
@@ -569,7 +572,7 @@ drop table t1, t2;
 create table t1 (a float);
 -- error ER_NOT_SUPPORTED_YET
 select 10.5 IN (SELECT * from t1 LIMIT 1);
--- error ER_WRONG_USAGE
+-- error ER_PARSE_ERROR
 select 10.5 IN (SELECT * from t1 LIMIT 1 UNION SELECT 1.5);
 -- error ER_NOT_SUPPORTED_YET
 select 10.5 IN (SELECT * from t1 UNION SELECT 1.5 LIMIT 1);
@@ -676,9 +679,9 @@ CREATE TABLE `t3` (
   PRIMARY KEY  (`numeropost`),
   UNIQUE KEY `maxnumrep` (`maxnumrep`)
 ) ENGINE=MyISAM CHARSET=latin1;
-INSERT INTO t1 VALUES ('joce','1','','joce'),('test','2','','test');
+INSERT IGNORE INTO t1 VALUES ('joce','1','','joce'),('test','2','','test');
 
-INSERT INTO t2 VALUES ('joce','1','','joce'),('test','2','','test');
+INSERT IGNORE INTO t2 VALUES ('joce','1','','joce'),('test','2','','test');
 
 INSERT INTO t3 VALUES (1,1);
 
@@ -3339,7 +3342,7 @@ create table t1(f11 int, f12 int);
 create table t2(f21 int unsigned not null, f22 int, f23 varchar(10));
 insert into t1 values(1,1),(2,2), (3, 3);
 --disable_warnings
-insert into t2
+insert ignore into t2
 select -1 , (@a:=(A.a + 10 * (B.a + 10 * (C.a+10*D.a))))/5000 + 1, @a
 from t0 A, t0 B, t0 C, t0 D;
 --enable_warnings
@@ -3600,7 +3603,7 @@ SET SESSION sql_mode=@old_sql_mode;
 drop table t2, t1;
 drop view v1;
 
---echo End of 5.0 tests.
+--echo # End of 5.0 tests.
 
 #
 # Test [NOT] IN truth table (both as top-level and general predicate).
@@ -4685,7 +4688,7 @@ select * from t2 where a=(select a from t1) and a='x';
 
 drop table t1,t2;
 
---echo End of 5.1 tests
+--echo # End of 5.1 tests
 
 --echo #
 --echo # Bug #11765713 58705:
@@ -5029,6 +5032,7 @@ EXPLAIN
 SELECT table1.f1, table2.f1_key FROM t1 AS table1, t2 AS table2
   WHERE EXISTS (SELECT DISTINCT f1_key FROM t2 
                   WHERE f1_key != table2.f1_key AND f1_key >= table1.f1);
+--sorted_result
 SELECT table1.f1, table2.f1_key FROM t1 AS table1, t2 AS table2
   WHERE EXISTS (SELECT DISTINCT f1_key FROM t2 
                   WHERE f1_key != table2.f1_key AND f1_key >= table1.f1);
@@ -5156,7 +5160,7 @@ eval SELECT * FROM ( $subq ) AS alias3;
 
 DROP TABLE t1,t2;
 
---echo End of 5.2 tests
+--echo # End of 5.2 tests
 
 --echo #
 --echo # BUG#779885: Crash in eliminate_item_equal with materialization=on in
@@ -5328,6 +5332,7 @@ SELECT DISTINCT f1_key
 FROM t2 
 WHERE f1_key != table2.f1_key AND f1_key >= table1.f1 );
 
+--sorted_result
 eval $query;
 eval explain $query;
 
@@ -5979,6 +5984,19 @@ DROP TABLE t1;
 SET SESSION big_tables=0;
 
 --echo #
+--echo # MDEV-10776: Server crash on query
+--echo #
+create table t1 (field1 int);
+
+insert into t1 values (1);
+
+select round((select 1 from t1 limit 1))
+from t1
+group by round((select 1 from t1 limit 1));
+
+drop table t1;
+
+--echo #
 --echo # MDEV-7930: Assertion `table_share->tmp_table != NO_TMP_TABLE ||
 --echo # m_lock_type != 2' failed in  handler::ha_index_read_map
 --echo #
@@ -5991,12 +6009,218 @@ INSERT INTO t2 VALUES (3);
 
 CREATE ALGORITHM=MERGE VIEW v2 AS SELECT * FROM t2;
 
+--error ER_WRONG_GROUP_FIELD
+SELECT ( SELECT MIN(t2.f2) FROM t1 ) AS sq FROM t2 GROUP BY sq;
+--error ER_WRONG_GROUP_FIELD
 SELECT ( SELECT MIN(v2.f2) FROM t1 ) AS sq FROM v2 GROUP BY sq;
 SELECT * FROM v2 where ( SELECT MIN(v2.f2) FROM t1 ) > 0;
 SELECT count(*) FROM v2 group by ( SELECT MIN(v2.f2) FROM t1 );
 
 delete from t1;
+--error ER_WRONG_GROUP_FIELD
+SELECT ( SELECT MIN(t2.f2) FROM t1 ) AS sq FROM t2 GROUP BY sq;
+--error ER_WRONG_GROUP_FIELD
 SELECT ( SELECT MIN(v2.f2) FROM t1 ) AS sq FROM v2 GROUP BY sq;
 
 drop view v2;
 drop table t1,t2;
+
+--echo #
+--echo # MDEV-10386 Assertion `fixed == 1' failed in virtual String* Item_func_conv_charset::val_str(String*)
+--echo #
+
+CREATE TABLE t1 (f1 CHAR(3) CHARACTER SET utf8 NULL, f2 CHAR(3) CHARACTER SET latin1 NULL);
+INSERT INTO t1 VALUES ('foo','bar');
+SELECT * FROM t1 WHERE f2 >= SOME ( SELECT f1 FROM t1 );
+SELECT * FROM t1 WHERE f2 <= SOME ( SELECT f1 FROM t1 );
+DROP TABLE t1;
+
+--echo #
+--echo # MDEV-10146: Wrong result (or questionable result and behavior)
+--echo # with aggregate function in uncorrelated SELECT subquery
+--echo #
+CREATE TABLE t1 (f1 INT);
+CREATE VIEW v1 AS SELECT * FROM t1;
+INSERT INTO t1 VALUES (1),(2);
+
+CREATE TABLE t2 (f2 int);
+
+INSERT INTO t2 VALUES (3);
+SELECT ( SELECT MAX(f1) FROM t2 ) FROM t1;
+
+SELECT ( SELECT MAX(f1) FROM t2 ) FROM v1;
+
+INSERT INTO t2 VALUES (4);
+
+--error ER_SUBQUERY_NO_1_ROW
+SELECT ( SELECT MAX(f1) FROM t2 ) FROM v1;
+--error ER_SUBQUERY_NO_1_ROW
+SELECT ( SELECT MAX(f1) FROM t2 ) FROM t1;
+
+drop view v1;
+drop table t1,t2;
+
+#
+# MDEV-7828 Assertion `key_read == 0' failed in TABLE::enable_keyread with SELECT SQ and WHERE SQ
+#
+CREATE TABLE t1 (f1 INT, KEY(f1)) ENGINE=MyISAM;
+INSERT t1 VALUES (4),(8);
+CREATE TABLE t2 (f2 INT, KEY(f2)) ENGINE=MyISAM;
+INSERT t2 VALUES (6);
+SELECT (SELECT MAX(sq.f2) FROM t1) FROM (SELECT * FROM t2) AS sq WHERE f2 = 2;
+--echo #
+--echo # Disable this query till MDEV-13399 is resolved
+--echo #
+--echo # INSERT t2 VALUES (9);
+--echo # --error ER_SUBQUERY_NO_1_ROW
+--echo # SELECT (SELECT MAX(sq.f2) FROM t1) FROM (SELECT * FROM t2) AS sq WHERE f2 = 2;
+--echo #
+drop table t1, t2;
+
+--echo #
+--echo # MDEV-13933: Wrong results in COUNT() query with EXISTS and exists_to_in
+--echo # (5.5 test)
+--echo #
+SET @optimiser_switch_save= @@optimizer_switch;
+ 
+CREATE TABLE t1 (a INT NOT NULL);
+INSERT INTO t1 VALUES (1),(1),(1),(5),(5);
+ 
+CREATE TABLE t2 (b INT);
+INSERT INTO t2 VALUES (5),(1);
+ 
+CREATE TABLE t3 (c INT, KEY(c));
+INSERT INTO t3 VALUES (5),(5);
+ 
+SET optimizer_switch='semijoin=on';
+select t1.a from t1 where t1.a in (select `test`.`t2`.`b` from `test`.`t2`)
+and t1.a in (select `test`.`t3`.`c` from `test`.`t3`);
+ 
+SET optimizer_switch='semijoin=off';
+select t1.a from t1 where t1.a in (select `test`.`t2`.`b` from `test`.`t2`)
+and t1.a in (select `test`.`t3`.`c` from `test`.`t3`);
+ 
+SET @@optimizer_switch= @optimiser_switch_save;
+DROP TABLE t1, t2, t3;
+
+--echo #
+--echo # MDEV-16820: impossible where with inexpensive subquery
+--echo #
+
+create table t1 (a int) engine=myisam;
+insert into t1 values (3), (1), (7);
+
+create table t2 (b int, index idx(b));
+insert into t2 values (2), (5), (3), (2);
+
+explain select * from t1 where (select max(b) from t2) = 10;
+explain select * from t1 where (select max(b) from t2) = 10 and t1.a > 3;
+
+drop table t1,t2;
+
+
+--echo #
+--echo # MDEV-19429: Wrong query result with EXISTS and LIMIT 0
+--echo #
+create table t10 (a int);
+insert into t10 values (1),(2),(3);
+create table t12 (a int);
+insert into t12 values (1),(2),(3);
+select * from t10 where exists (select * from t12 order by a limit 0);
+explain select * from t10 where exists (select * from t12 order by a limit 0);
+
+prepare stmt1 from "select * from t10 where exists (select * from t12 order by a limit ?)";
+
+set @l=1;
+execute stmt1 using @l;
+set @l=2;
+execute stmt1 using @l;
+set @l=0;
+execute stmt1 using @l;
+
+deallocate prepare stmt1;
+
+drop table t10, t12;
+
+--echo End of 5.5 tests
+--echo # End of 10.0 tests
+
+--echo #
+--echo # MDEV-9487: Server crashes in Time_and_counter_tracker::incr_loops
+--echo # with UNION in ALL subquery
+--echo #
+SET NAMES utf8;
+CREATE TABLE t1 (f VARCHAR(8)) ENGINE=MyISAM;
+INSERT INTO t1 VALUES ('foo');
+SELECT f FROM t1 WHERE f > ALL ( SELECT 'bar' UNION SELECT 'baz' );
+SELECT f FROM t1 WHERE f > ALL ( SELECT 'bar');
+drop table t1;
+SET NAMES default;
+
+--echo #
+--echo # MDEV-10045: Server crashes in Time_and_counter_tracker::incr_loops
+--echo #
+SET NAMES utf8;
+
+CREATE TABLE t1 (f1 VARCHAR(3), f2 INT UNSIGNED) ENGINE=MyISAM;
+CREATE TABLE t2 (f3 INT) ENGINE=MyISAM;
+
+SELECT * FROM t1, t2 WHERE f3 = f2 AND f1 > ANY ( SELECT 'foo' UNION SELECT 'bar' );
+SELECT * FROM t1, t2 WHERE f3 = f2 AND f1 > ANY ( SELECT 'foo');
+
+DROP TABLE t1, t2;
+SET NAMES default;
+
+--echo # End of 10.1 tests
+
+--echo #
+--echo # MDEV-12564: IN TO EXISTS transformation for rows after 
+--echo #             conversion an outer join to inner join
+--echo #
+
+CREATE TABLE t (
+pk int PRIMARY KEY, i int NOT NULL, c varchar(8), KEY(c)
+) ENGINE=MyISAM;
+INSERT INTO t VALUES (1,10,'foo'),(2,20,'bar');
+ 
+SELECT * FROM t t1 RIGHT JOIN t t2 ON (t2.pk = t1.pk)
+  WHERE (t2.i, t2.pk) NOT IN ( SELECT t3.i, t3.i FROM t t3, t t4 ) AND t1.c = 'foo';
+
+DROP TABLE t;
+
+--echo #
+--echo # MDEV-25002: Outer reference in ON clause of subselect
+--echo #
+
+create table t1 (
+  pk int primary key,
+  a int
+) engine=myisam;
+insert into t1 values (1,1), (2,2);
+
+create table t2 (
+  pk int primary key,
+  b int
+) engine=myisam;
+insert into t2 values (1,1), (2,3);
+
+create table t3 (a int);
+insert into t3 values (1),(2);
+
+select a,
+       (select count(*) from t1, t2
+          where t2.pk=t3.a and t1.pk=1) as sq
+from t3;
+select a,
+       (select count(*) from t1 join t2 on t2.pk=t3.a
+          where t1.pk=1) as sq
+from t3;
+
+select a from t3
+  where a in (select t2.b from t1,t2 where t2.pk=t3.a and t1.pk=1);
+select a from t3
+  where a in (select t2.b from t1 join t2 on t2.pk=t3.a where t1.pk=1);
+
+drop table t1,t2,t3;
+
+--echo # End of 10.2 tests

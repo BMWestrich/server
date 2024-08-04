@@ -14,7 +14,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /* subselect Item */
 
@@ -32,6 +32,7 @@ class subselect_engine;
 class subselect_hash_sj_engine;
 class Item_bool_func2;
 class Comp_creator;
+class With_element;
 
 typedef class st_select_lex SELECT_LEX;
 
@@ -47,7 +48,11 @@ class Cached_item;
 class Item_subselect :public Item_result_field,
                       protected Used_tables_and_const_cache
 {
-  bool value_assigned;   /* value already assigned to subselect */
+  /*
+    Set to TRUE if the value is assigned for the subselect
+    FALSE: subquery not executed or the subquery returns an empty result
+  */
+  bool value_assigned;
   bool own_engine;  /* the engine was not taken from other Item_subselect */
 protected:
   /* thread handler, will be assigned in fix_fields only */
@@ -95,6 +100,9 @@ public:
   subselect_engine *engine;
   /* unit of subquery */
   st_select_lex_unit *unit;
+  /* Cached buffers used when calling filesort in sub queries */
+  Filesort_buffer filesort_buffer;
+  LEX_STRING sortbuffer;
   /* A reference from inside subquery predicate to somewhere outside of it */
   class Ref_to_outside : public Sql_alloc
   {
@@ -123,7 +131,17 @@ public:
   bool changed;
 
   /* TRUE <=> The underlying SELECT is correlated w.r.t some ancestor select */
-  bool is_correlated; 
+  bool is_correlated;
+
+  /* 
+    TRUE <=> the subquery contains a recursive reference in the FROM list
+    of one of its selects. In this case some of subquery optimization
+    strategies cannot be applied for the subquery;
+  */
+  bool with_recursive_reference; 
+
+  /* To link Item_subselects containing references to the same recursive CTE */ 
+  Item_subselect *next_with_rec_ref;
 
   enum subs_type {UNKNOWN_SUBS, SINGLEROW_SUBS,
 		  EXISTS_SUBS, IN_SUBS, ALL_SUBS, ANY_SUBS};
@@ -131,6 +149,10 @@ public:
   Item_subselect(THD *thd);
 
   virtual subs_type substype() { return UNKNOWN_SUBS; }
+  bool is_exists_predicate()
+  {
+    return substype() == Item_subselect::EXISTS_SUBS;
+  }
   bool is_in_predicate()
   {
     return (substype() == Item_subselect::IN_SUBS ||
@@ -169,7 +191,7 @@ public:
   }
   bool fix_fields(THD *thd, Item **ref);
   bool mark_as_dependent(THD *thd, st_select_lex *select, Item *item);
-  void fix_after_pullout(st_select_lex *new_parent, Item **ref);
+  void fix_after_pullout(st_select_lex *new_parent, Item **ref, bool merge);
   void recalc_used_tables(st_select_lex *new_parent, bool after_pullout);
   virtual bool exec();
   /*
@@ -182,7 +204,7 @@ public:
     const_item_cache= 0;
     forced_const= TRUE; 
   }
-  virtual void fix_length_and_dec();
+  virtual bool fix_length_and_dec();
   table_map used_tables() const;
   table_map not_null_tables() const { return 0; }
   bool const_item() const;
@@ -212,14 +234,14 @@ public:
   */
   virtual void reset_value_registration() {}
   enum_parsing_place place() { return parsing_place; }
-  bool walk(Item_processor processor, bool walk_subquery, uchar *arg);
-  bool mark_as_eliminated_processor(uchar *arg);
-  bool eliminate_subselect_processor(uchar *arg);
-  bool set_fake_select_as_master_processor(uchar *arg);
-  bool enumerate_field_refs_processor(uchar *arg);
-  bool check_vcol_func_processor(uchar *int_arg) 
+  bool walk(Item_processor processor, bool walk_subquery, void *arg);
+  bool mark_as_eliminated_processor(void *arg);
+  bool eliminate_subselect_processor(void *arg);
+  bool set_fake_select_as_master_processor(void *arg);
+  bool enumerate_field_refs_processor(void *arg);
+  bool check_vcol_func_processor(void *arg) 
   {
-    return trace_unsupported_by_check_vcol_func_processor("subselect");
+    return mark_unsupported_function("select ...", arg, VCOL_IMPOSSIBLE);
   }
   /**
     Callback to test if an IN predicate is expensive.
@@ -230,7 +252,8 @@ public:
     @retval TRUE  if the predicate is expensive
     @retval FALSE otherwise
   */
-  bool is_expensive_processor(uchar *arg) { return is_expensive(); }
+  bool is_expensive_processor(void *arg) { return is_expensive(); }
+  bool update_table_bitmaps_processor(void *arg);
 
   /**
     Get the SELECT_LEX structure associated with this Item.
@@ -239,14 +262,18 @@ public:
   st_select_lex* get_select_lex();
   virtual bool expr_cache_is_needed(THD *);
   virtual void get_cache_parameters(List<Item> &parameters);
-  virtual bool is_subquery_processor (uchar *opt_arg) { return 1; }
-  bool exists2in_processor(uchar *opt_arg) { return 0; }
-  bool limit_index_condition_pushdown_processor(uchar *opt_arg) 
+  virtual bool is_subquery_processor (void *opt_arg) { return 1; }
+  bool exists2in_processor(void *opt_arg) { return 0; }
+  bool limit_index_condition_pushdown_processor(void *opt_arg) 
   {
     return TRUE;
   }
 
+  void register_as_with_rec_ref(With_element *with_elem);
   void init_expr_cache_tracker(THD *thd);
+  
+  Item* build_clone(THD *thd, MEM_ROOT *mem_root) { return 0; }
+  Item* get_copy(THD *thd, MEM_ROOT *mem_root) { return 0; }
 
 
   friend class select_result_interceptor;
@@ -256,7 +283,8 @@ public:
   friend bool Item_ref::fix_fields(THD *, Item **);
   friend void mark_select_range_as_dependent(THD*,
                                              st_select_lex*, st_select_lex*,
-                                             Field*, Item*, Item_ident*);
+                                             Field*, Item*, Item_ident*,
+                                             bool);
   friend bool convert_join_subqueries_to_semijoins(JOIN *join);
 };
 
@@ -288,7 +316,7 @@ public:
   enum Item_result result_type() const;
   enum Item_result cmp_type() const;
   enum_field_types field_type() const;
-  void fix_length_and_dec();
+  bool fix_length_and_dec();
 
   uint cols();
   Item* element_index(uint i) { return reinterpret_cast<Item*>(row[i]); }
@@ -385,12 +413,12 @@ public:
   my_decimal *val_decimal(my_decimal *);
   bool val_bool();
   bool fix_fields(THD *thd, Item **ref);
-  void fix_length_and_dec();
-  virtual void print(String *str, enum_query_type query_type);
+  bool fix_length_and_dec();
+  void print(String *str, enum_query_type query_type);
   bool select_transformer(JOIN *join);
   void top_level_item() { abort_on_null=1; }
   inline bool is_top_level_item() { return abort_on_null; }
-  bool exists2in_processor(uchar *opt_arg);
+  bool exists2in_processor(void *opt_arg);
 
   Item* expr_cache_insert_transformer(THD *thd, uchar *unused);
 
@@ -490,6 +518,8 @@ public:
   Item *left_expr_orig;
   /* Priority of this predicate in the convert-to-semi-join-nest process. */
   int sj_convert_priority;
+  /* May be TRUE only for the candidates to semi-join conversion */
+  bool do_not_convert_to_sj; 
   /*
     Types of left_expr and subquery's select list allow to perform subquery
     materialization. Currently, we set this to FALSE when it as well could
@@ -540,7 +570,7 @@ public:
   bool jtbm_const_row_found;
   
   /*
-    TRUE<=>this is a flattenable semi-join, false overwise.
+    TRUE<=>this is a flattenable semi-join, false otherwise.
   */
   bool is_flattenable_semijoin;
 
@@ -580,8 +610,8 @@ public:
   Item_in_subselect(THD *thd_arg):
     Item_exists_subselect(thd_arg), left_expr_cache(0), first_execution(TRUE),
     in_strategy(SUBS_NOT_TRANSFORMED),
-    pushed_cond_guards(NULL), func(NULL), is_jtbm_merged(FALSE),
-    is_jtbm_const_tab(FALSE), upper_item(0) {}
+    pushed_cond_guards(NULL), func(NULL), do_not_convert_to_sj(FALSE),
+    is_jtbm_merged(FALSE), is_jtbm_const_tab(FALSE), upper_item(0) {}
   void cleanup();
   subs_type substype() { return IN_SUBS; }
   void reset() 
@@ -603,10 +633,11 @@ public:
   void update_null_value () { (void) val_bool(); }
   bool val_bool();
   bool test_limit(st_select_lex_unit *unit);
-  virtual void print(String *str, enum_query_type query_type);
+  void print(String *str, enum_query_type query_type);
+  enum precedence precedence() const { return IN_PRECEDENCE; }
   bool fix_fields(THD *thd, Item **ref);
-  void fix_length_and_dec();
-  void fix_after_pullout(st_select_lex *new_parent, Item **ref);
+  bool fix_length_and_dec();
+  void fix_after_pullout(st_select_lex *new_parent, Item **ref, bool merge);
   bool const_item() const
   {
     return Item_subselect::const_item() && left_expr->const_item();
@@ -619,12 +650,23 @@ public:
   bool expr_cache_is_needed(THD *thd);
   inline bool left_expr_has_null();
 
+  void disable_cond_guard_for_const_null_left_expr(int i)
+  {
+    if (left_expr->const_item() && !left_expr->is_expensive())
+    {
+      if (left_expr->element_index(i)->is_null())
+        set_cond_guard_var(i,FALSE);
+    }
+  }
+
   int optimize(double *out_rows, double *cost);
   /*
     Return the identifier that we could use to identify the subquery for the
     user.
   */
   int get_identifier();
+
+  void block_conversion_to_sj () { do_not_convert_to_sj= TRUE; }
 
   bool test_strategy(uchar strategy)
   { return MY_TEST(in_strategy & strategy); }
@@ -696,7 +738,14 @@ public:
     in_strategy= (SUBS_STRATEGY_CHOSEN | strategy);
     DBUG_VOID_RETURN;
   }
-  bool exists2in_processor(uchar *opt_arg __attribute__((unused)))
+
+  bool walk(Item_processor processor, bool walk_subquery, void *arg)
+  {
+    return left_expr->walk(processor, walk_subquery, arg) ||
+           Item_subselect::walk(processor, walk_subquery, arg);
+  }
+
+  bool exists2in_processor(void *opt_arg __attribute__((unused)))
   {
     return 0;
   };
@@ -727,7 +776,7 @@ public:
   subs_type substype() { return all?ALL_SUBS:ANY_SUBS; }
   bool select_transformer(JOIN *join);
   void create_comp_func(bool invert) { func= func_creator(invert); }
-  virtual void print(String *str, enum_query_type query_type);
+  void print(String *str, enum_query_type query_type);
   bool is_maxmin_applicable(JOIN *join);
   bool transform_into_max_min(JOIN *join);
   void no_rows_in_result();
@@ -751,15 +800,15 @@ public:
                          INDEXSUBQUERY_ENGINE, HASH_SJ_ENGINE,
                          ROWID_MERGE_ENGINE, TABLE_SCAN_ENGINE};
 
-  subselect_engine(THD *thd_arg, Item_subselect *si,
-                   select_result_interceptor *res)
+  subselect_engine(Item_subselect *si,
+                   select_result_interceptor *res):
+    thd(NULL)
   {
     result= res;
     item= si;
     cmp_type= res_type= STRING_RESULT;
     res_field_type= MYSQL_TYPE_VAR_STRING;
     maybe_null= 0;
-    set_thd(thd_arg);
   }
   virtual ~subselect_engine() {}; // to satisfy compiler
   virtual void cleanup()= 0;
@@ -769,9 +818,9 @@ public:
     Should be called before prepare().
   */
   void set_thd(THD *thd_arg);
-  THD * get_thd() { return thd; }
-  virtual int prepare()= 0;
-  virtual void fix_length_and_dec(Item_cache** row)= 0;
+  THD * get_thd() { return thd ? thd : current_thd; }
+  virtual int prepare(THD *)= 0;
+  virtual bool fix_length_and_dec(Item_cache** row)= 0;
   /*
     Execute the engine
 
@@ -813,8 +862,9 @@ public:
   virtual bool no_rows() = 0;
   virtual enum_engine_type engine_type() { return ABSTRACT_ENGINE; }
   virtual int get_identifier() { DBUG_ASSERT(0); return 0; }
+  virtual void force_reexecution() {}
 protected:
-  void set_row(List<Item> &item_list, Item_cache **row);
+  bool set_row(List<Item> &item_list, Item_cache **row);
 };
 
 
@@ -825,18 +875,18 @@ class subselect_single_select_engine: public subselect_engine
   st_select_lex *select_lex; /* corresponding select_lex */
   JOIN * join; /* corresponding JOIN structure */
 public:
-  subselect_single_select_engine(THD *thd_arg, st_select_lex *select,
+  subselect_single_select_engine(st_select_lex *select,
 				 select_result_interceptor *result,
 				 Item_subselect *item);
   void cleanup();
-  int prepare();
-  void fix_length_and_dec(Item_cache** row);
+  int prepare(THD *thd);
+  bool fix_length_and_dec(Item_cache** row);
   int exec();
   uint cols();
   uint8 uncacheable();
   void exclude();
   table_map upper_select_const_tables();
-  virtual void print (String *str, enum_query_type query_type);
+  void print (String *str, enum_query_type query_type);
   bool change_result(Item_subselect *si,
                      select_result_interceptor *result,
                      bool temp);
@@ -846,6 +896,7 @@ public:
   bool no_rows();
   virtual enum_engine_type engine_type() { return SINGLE_SELECT_ENGINE; }
   int get_identifier();
+  void force_reexecution();
 
   friend class subselect_hash_sj_engine;
   friend class Item_in_subselect;
@@ -859,23 +910,24 @@ class subselect_union_engine: public subselect_engine
 {
   st_select_lex_unit *unit;  /* corresponding unit structure */
 public:
-  subselect_union_engine(THD *thd_arg, st_select_lex_unit *u,
+  subselect_union_engine(st_select_lex_unit *u,
 			 select_result_interceptor *result,
 			 Item_subselect *item);
   void cleanup();
-  int prepare();
-  void fix_length_and_dec(Item_cache** row);
+  int prepare(THD *);
+  bool fix_length_and_dec(Item_cache** row);
   int exec();
   uint cols();
   uint8 uncacheable();
   void exclude();
   table_map upper_select_const_tables();
-  virtual void print (String *str, enum_query_type query_type);
+  void print (String *str, enum_query_type query_type);
   bool change_result(Item_subselect *si,
                      select_result_interceptor *result,
                      bool temp= FALSE);
   bool no_tables();
   bool is_executed() const;
+  void force_reexecution();
   bool no_rows();
   virtual enum_engine_type engine_type() { return UNION_ENGINE; }
 };
@@ -916,18 +968,18 @@ public:
   // constructor can assign THD because it will be called after JOIN::prepare
   subselect_uniquesubquery_engine(THD *thd_arg, st_join_table *tab_arg,
 				  Item_subselect *subs, Item *where)
-    :subselect_engine(thd_arg, subs, 0), tab(tab_arg), cond(where)
+    :subselect_engine(subs, 0), tab(tab_arg), cond(where)
   {}
   ~subselect_uniquesubquery_engine();
   void cleanup();
-  int prepare();
-  void fix_length_and_dec(Item_cache** row);
+  int prepare(THD *);
+  bool fix_length_and_dec(Item_cache** row);
   int exec();
   uint cols() { return 1; }
   uint8 uncacheable() { return UNCACHEABLE_DEPENDENT_INJECTED; }
   void exclude();
   table_map upper_select_const_tables() { return 0; }
-  virtual void print (String *str, enum_query_type query_type);
+  void print (String *str, enum_query_type query_type);
   bool change_result(Item_subselect *si,
                      select_result_interceptor *result,
                      bool temp= FALSE);
@@ -945,7 +997,7 @@ class subselect_indexsubquery_engine: public subselect_uniquesubquery_engine
   /* FALSE for 'ref', TRUE for 'ref-or-null'. */
   bool check_null;
   /* 
-    The "having" clause. This clause (further reffered to as "artificial
+    The "having" clause. This clause (further referred to as "artificial
     having") was inserted by subquery transformation code. It contains 
     Item(s) that have a side-effect: they record whether the subquery has 
     produced a row with NULL certain components. We need to use it for cases
@@ -966,7 +1018,7 @@ class subselect_indexsubquery_engine: public subselect_uniquesubquery_engine
     However, subqueries like the above are currently not handled by index
     lookup-based subquery engines, the engine applicability check misses
     them: it doesn't switch the engine for case of artificial having and
-    [eq_]ref access (only for artifical having + ref_or_null or no having).
+    [eq_]ref access (only for artificial having + ref_or_null or no having).
     The above example subquery is handled as a full-blown SELECT with eq_ref
     access to one table.
 
@@ -985,7 +1037,7 @@ public:
      having(having_arg)
   {}
   int exec();
-  virtual void print (String *str, enum_query_type query_type);
+  void print (String *str, enum_query_type query_type);
   virtual enum_engine_type engine_type() { return INDEXSUBQUERY_ENGINE; }
 };
 
@@ -1037,7 +1089,7 @@ public:
   */
   JOIN *materialize_join;
   /*
-    A conjunction of all the equality condtions between all pairs of expressions
+    A conjunction of all the equality conditions between all pairs of expressions
     that are arguments of an IN predicate. We need these to post-filter some
     IN results because index lookups sometimes match values that are actually
     not equal to the search key in SQL terms.
@@ -1048,7 +1100,7 @@ public:
 
   subselect_hash_sj_engine(THD *thd_arg, Item_subselect *in_predicate,
                            subselect_single_select_engine *old_engine)
-    : subselect_engine(thd_arg, in_predicate, NULL), 
+    : subselect_engine(in_predicate, NULL),
       tmp_table(NULL), is_materialized(FALSE), materialize_engine(old_engine),
       materialize_join(NULL),  semi_join_conds(NULL), lookup_engine(NULL),
       count_partial_match_columns(0), count_null_only_columns(0),
@@ -1058,13 +1110,10 @@ public:
 
   bool init(List<Item> *tmp_columns, uint subquery_id);
   void cleanup();
-  int prepare();
+  int prepare(THD *);
   int exec();
-  virtual void print(String *str, enum_query_type query_type);
-  uint cols()
-  {
-    return materialize_engine->cols();
-  }
+  void print(String *str, enum_query_type query_type);
+  uint cols() { return materialize_engine->cols(); }
   uint8 uncacheable() { return materialize_engine->uncacheable(); }
   table_map upper_select_const_tables() { return 0; }
   bool no_rows() { return !tmp_table->file->stats.records; }
@@ -1073,7 +1122,7 @@ public:
     TODO: factor out all these methods in a base subselect_index_engine class
     because all of them have dummy implementations and should never be called.
   */
-  void fix_length_and_dec(Item_cache** row);//=>base class
+  bool fix_length_and_dec(Item_cache** row);//=>base class
   void exclude(); //=>base class
   //=>base class
   bool change_result(Item_subselect *si,
@@ -1223,10 +1272,10 @@ public:
 
   uint get_column_count() { return key_column_count; }
   uint get_keyid() { return keyid; }
-  uint get_field_idx(uint i)
+  Field *get_field(uint i)
   {
     DBUG_ASSERT(i < key_column_count);
-    return key_columns[i]->field->field_index;
+    return key_columns[i]->field;
   }
   rownum_t get_min_null_row() { return min_null_row; }
   rownum_t get_max_null_row() { return max_null_row; }
@@ -1248,7 +1297,7 @@ public:
     ++cur_key_idx;
   }
 
-  void sort_keys();
+  bool sort_keys();
   double null_selectivity();
 
   /*
@@ -1337,17 +1386,16 @@ protected:
 protected:
   virtual bool partial_match()= 0;
 public:
-  subselect_partial_match_engine(THD *thd_arg,
-                                 subselect_uniquesubquery_engine *engine_arg,
+  subselect_partial_match_engine(subselect_uniquesubquery_engine *engine_arg,
                                  TABLE *tmp_table_arg, Item_subselect *item_arg,
                                  select_result_interceptor *result_arg,
                                  List<Item> *equi_join_conds_arg,
                                  bool has_covering_null_row_arg,
                                  bool has_covering_null_columns_arg,
                                  uint count_columns_with_nulls_arg);
-  int prepare() { return 0; }
+  int prepare(THD *thd_arg) { set_thd(thd_arg); return 0; }
   int exec();
-  void fix_length_and_dec(Item_cache**) {}
+  bool fix_length_and_dec(Item_cache**) { return FALSE; }
   uint cols() { /* TODO: what is the correct value? */ return 1; }
   uint8 uncacheable() { return UNCACHEABLE_DEPENDENT; }
   void exclude() {}
@@ -1432,8 +1480,7 @@ protected:
   bool exists_complementing_null_row(MY_BITMAP *keys_to_complement);
   bool partial_match();
 public:
-  subselect_rowid_merge_engine(THD *thd_arg,
-                               subselect_uniquesubquery_engine *engine_arg,
+  subselect_rowid_merge_engine(subselect_uniquesubquery_engine *engine_arg,
                                TABLE *tmp_table_arg, uint merge_keys_count_arg,
                                bool has_covering_null_row_arg,
                                bool has_covering_null_columns_arg,
@@ -1441,7 +1488,7 @@ public:
                                Item_subselect *item_arg,
                                select_result_interceptor *result_arg,
                                List<Item> *equi_join_conds_arg)
-    :subselect_partial_match_engine(thd_arg, engine_arg, tmp_table_arg,
+    :subselect_partial_match_engine(engine_arg, tmp_table_arg,
                                     item_arg, result_arg, equi_join_conds_arg,
                                     has_covering_null_row_arg,
                                     has_covering_null_columns_arg,
@@ -1460,8 +1507,7 @@ class subselect_table_scan_engine: public subselect_partial_match_engine
 protected:
   bool partial_match();
 public:
-  subselect_table_scan_engine(THD *thd_arg,
-                              subselect_uniquesubquery_engine *engine_arg,
+  subselect_table_scan_engine(subselect_uniquesubquery_engine *engine_arg,
                               TABLE *tmp_table_arg, Item_subselect *item_arg,
                               select_result_interceptor *result_arg,
                               List<Item> *equi_join_conds_arg,

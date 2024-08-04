@@ -1,7 +1,8 @@
 /*****************************************************************************
 
-Copyright (c) 1996, 2012, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1996, 2016, Oracle and/or its affiliates. All Rights Reserved.
 Copyright (c) 2008, Google Inc.
+Copyright (c) 2018, MariaDB Corporation.
 
 Portions of this file contain modifications contributed and copyrighted by
 Google, Inc. Those modifications are gratefully acknowledged and are described
@@ -19,7 +20,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -53,17 +54,10 @@ UNIV_INTERN ulint		btr_search_index_num;
 /** A dummy variable to fool the compiler */
 UNIV_INTERN ulint		btr_search_this_is_zero = 0;
 
-#ifdef UNIV_SEARCH_PERF_STAT
-/** Number of successful adaptive hash index lookups */
-UNIV_INTERN ulint		btr_search_n_succ	= 0;
-/** Number of failed adaptive hash index lookups */
-UNIV_INTERN ulint		btr_search_n_hash_fail	= 0;
-#endif /* UNIV_SEARCH_PERF_STAT */
-
 /** padding to prevent other memory update
 hotspots from residing on the same memory
 cache line as btr_search_latch */
-UNIV_INTERN byte		btr_sea_pad1[64];
+UNIV_INTERN byte		btr_sea_pad1[CACHE_LINE_SIZE];
 
 /** Array of latches protecting individual AHI partitions. The latches
 protect: (1) positions of records on those pages where a hash index from the
@@ -76,7 +70,7 @@ UNIV_INTERN prio_rw_lock_t*	btr_search_latch_arr;
 
 /** padding to prevent other memory update hotspots from residing on
 the same memory cache line */
-UNIV_INTERN byte		btr_sea_pad2[64];
+UNIV_INTERN byte		btr_sea_pad2[CACHE_LINE_SIZE];
 
 /** The adaptive hash index */
 UNIV_INTERN btr_search_sys_t*	btr_search_sys;
@@ -199,7 +193,7 @@ btr_search_sys_create(
 				&btr_search_latch_arr[i], SYNC_SEARCH_SYS);
 
 		btr_search_sys->hash_tables[i]
-			= ha_create(hash_size, 0, MEM_HEAP_FOR_BTR_SEARCH, 0);
+			= ib_create(hash_size, 0, MEM_HEAP_FOR_BTR_SEARCH, 0);
 
 #if defined UNIV_AHI_DEBUG || defined UNIV_DEBUG
 		btr_search_sys->hash_tables[i]->adaptive = TRUE;
@@ -512,7 +506,7 @@ btr_search_update_block_hash_info(
 /*==============================*/
 	btr_search_t*	info,	/*!< in: search info */
 	buf_block_t*	block,	/*!< in: buffer block */
-	btr_cur_t*	cursor __attribute__((unused)))
+	btr_cur_t*	cursor MY_ATTRIBUTE((unused)))
 				/*!< in: cursor */
 {
 #ifdef UNIV_SYNC_DEBUG
@@ -697,10 +691,6 @@ btr_search_info_update_slow(
 
 	if (cursor->flag == BTR_CUR_HASH_FAIL) {
 		/* Update the hash node reference, if appropriate */
-
-#ifdef UNIV_SEARCH_PERF_STAT
-		btr_search_n_hash_fail++;
-#endif /* UNIV_SEARCH_PERF_STAT */
 
 		rw_lock_x_lock(btr_search_get_latch(cursor->index));
 
@@ -1059,7 +1049,6 @@ btr_search_guess_on_hash(
 	info->last_hash_succ = TRUE;
 
 #ifdef UNIV_SEARCH_PERF_STAT
-	btr_search_n_succ++;
 #endif
 	if (UNIV_LIKELY(!has_search_latch)
 	    && buf_page_peek_if_too_old(&block->page)) {
@@ -1299,17 +1288,11 @@ cleanup:
 	mem_free(folds);
 }
 
-/********************************************************************//**
-Drops a possible page hash index when a page is evicted from the buffer pool
-or freed in a file segment. */
+/** Drop possible adaptive hash index entries when a page is evicted
+from the buffer pool or freed in a file, or the index is being dropped. */
 UNIV_INTERN
 void
-btr_search_drop_page_hash_when_freed(
-/*=================================*/
-	ulint	space,		/*!< in: space id */
-	ulint	zip_size,	/*!< in: compressed page size in bytes
-				or 0 for uncompressed pages */
-	ulint	page_no)	/*!< in: page number */
+btr_search_drop_page_hash_when_freed(ulint space, ulint page_no)
 {
 	buf_block_t*	block;
 	mtr_t		mtr;
@@ -1322,7 +1305,7 @@ btr_search_drop_page_hash_when_freed(
 	are possibly holding, we cannot s-latch the page, but must
 	(recursively) x-latch it, even though we are only reading. */
 
-	block = buf_page_get_gen(space, zip_size, page_no, RW_X_LATCH, NULL,
+	block = buf_page_get_gen(space, 0, page_no, RW_X_LATCH, NULL,
 				 BUF_PEEK_IF_IN_POOL, __FILE__, __LINE__,
 				 &mtr);
 
@@ -2034,9 +2017,7 @@ btr_search_validate_one_table(
 					(ulong) block->curr_left_side);
 
 				if (n_page_dumps < 20) {
-					buf_page_print(
-						page, 0,
-						BUF_PAGE_PRINT_NO_CRASH);
+					buf_page_print(page, 0);
 					n_page_dumps++;
 				}
 			}

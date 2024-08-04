@@ -11,14 +11,12 @@
 #    executing statement. If difference is >0, then something was
 #    written to the binary log on the slave.
 
-connection slave;
+# On Connection Slave
 let $before = query_get_value("SHOW MASTER STATUS", Position, 1);
 
---echo [on master]
 connection master;
 eval $statement;
 
---echo [on slave]
 sync_slave_with_master;
 --echo # Expect 0
 SELECT COUNT(*) FROM t1;

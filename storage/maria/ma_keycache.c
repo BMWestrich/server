@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 /*
   Key cache assignments
@@ -54,8 +54,8 @@ int maria_assign_to_pagecache(MARIA_HA *info,
   MARIA_SHARE* share= info->s;
   DBUG_ENTER("maria_assign_to_pagecache");
   DBUG_PRINT("enter",
-             ("old_pagecache_handle: 0x%lx  new_pagecache_handle: 0x%lx",
-             (long) share->pagecache, (long) pagecache));
+             ("old_pagecache_handle:%p  new_pagecache_handle:%p",
+             share->pagecache, pagecache));
 
   /*
     Skip operation if we didn't change key cache. This can happen if we

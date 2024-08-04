@@ -12,7 +12,7 @@
 
   You should have received a copy of the GNU Lesser General Public
   License along with this library; if not, write to the Free Software
-  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA
 */
 
 #include "cursor-factory.hpp"
@@ -32,8 +32,6 @@ Cursor *CursorFactory::open(const Trie &trie,
                             UInt32 offset,
                             UInt32 limit,
                             UInt32 flags) {
-  GRN_DAT_THROW_IF(PARAM_ERROR, &trie == NULL);
-
   const UInt32 cursor_type = flags & CURSOR_TYPE_MASK;
   switch (cursor_type) {
     case ID_RANGE_CURSOR: {

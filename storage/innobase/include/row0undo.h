@@ -1,6 +1,7 @@
 /*****************************************************************************
 
-Copyright (c) 1997, 2009, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1997, 2016, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2017, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +13,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -26,20 +27,15 @@ Created 1/8/1997 Heikki Tuuri
 #ifndef row0undo_h
 #define row0undo_h
 
-#include "univ.i"
-#include "mtr0mtr.h"
 #include "trx0sys.h"
 #include "btr0types.h"
 #include "btr0pcur.h"
-#include "dict0types.h"
-#include "trx0types.h"
 #include "que0types.h"
 #include "row0types.h"
 
 /********************************************************************//**
 Creates a row undo node to a query graph.
-@return	own: undo node */
-UNIV_INTERN
+@return own: undo node */
 undo_node_t*
 row_undo_node_create(
 /*=================*/
@@ -51,18 +47,17 @@ Looks for the clustered index record when node has the row reference.
 The pcur in node is used in the search. If found, stores the row to node,
 and stores the position of pcur, and detaches it. The pcur must be closed
 by the caller in any case.
-@return TRUE if found; NOTE the node->pcur must be closed by the
+@return true if found; NOTE the node->pcur must be closed by the
 caller, regardless of the return value */
-UNIV_INTERN
-ibool
+bool
 row_undo_search_clust_to_pcur(
 /*==========================*/
-	undo_node_t*	node);	/*!< in: row undo node */
+	undo_node_t*	node)	/*!< in/out: row undo node */
+	MY_ATTRIBUTE((warn_unused_result));
 /***********************************************************//**
 Undoes a row operation in a table. This is a high-level function used
 in SQL execution graphs.
-@return	query thread to run next or NULL */
-UNIV_INTERN
+@return query thread to run next or NULL */
 que_thr_t*
 row_undo_step(
 /*==========*/
@@ -126,10 +121,5 @@ struct undo_node_t{
 				row; this must be emptied after undo is tried
 				on a row */
 };
-
-
-#ifndef UNIV_NONINL
-#include "row0undo.ic"
-#endif
 
 #endif

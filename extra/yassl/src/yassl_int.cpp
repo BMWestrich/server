@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2005, 2014, Oracle and/or its affiliates
+   Copyright (c) 2005, 2017, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
    You should have received a copy of the GNU General Public License
    along with this program; see the file COPYING. If not, write to the
    Free Software Foundation, Inc., 51 Franklin St, Fifth Floor, Boston,
-   MA  02110-1301  USA.
+   MA  02110-1335  USA.
 */
 
 
@@ -1399,12 +1399,17 @@ void SSL::matchSuite(const opaque* peer, uint length)
     // start with best, if a match we are good, Ciphers are at odd index
     // since all SSL and TLS ciphers have 0x00 first byte
     for (uint i = 1; i < secure_.get_parms().suites_size_; i += 2)
-        for (uint j = 1; j < length; j+= 2)
-            if (secure_.use_parms().suites_[i] == peer[j]) {
+        for (uint j = 0; (j + 1) < length; j+= 2) {
+            if (peer[j] != 0x00) {
+                continue; // only 0x00 first byte supported
+            }
+
+            if (secure_.use_parms().suites_[i] == peer[j + 1]) {
                 secure_.use_parms().suite_[0] = 0x00;
-                secure_.use_parms().suite_[1] = peer[j];
+                secure_.use_parms().suite_[1] = peer[j + 1];
                 return;
             }
+        }
 
     SetError(match_error);
 }
@@ -1554,8 +1559,9 @@ void SSL_SESSION::CopyX509(X509* x)
     ASN1_TIME* after  = x->GetAfter();
 
     peerX509_ = NEW_YS X509(issuer->GetName(), issuer->GetLength(),
-        subject->GetName(), subject->GetLength(),
-        before, after);
+        subject->GetName(), subject->GetLength(), before, after,
+        issuer->GetCnPosition(), issuer->GetCnLength(),
+        subject->GetCnPosition(), subject->GetCnLength());
 }
 
 
@@ -1686,6 +1692,11 @@ Errors& GetErrors()
     if (!errorsInstance)
         errorsInstance = NEW_YS Errors;
     return *errorsInstance;
+}
+
+bool HasErrors()
+{
+  return (errorsInstance != 0);
 }
 
 
@@ -2472,8 +2483,8 @@ void Security::set_resuming(bool b)
 }
 
 
-X509_NAME::X509_NAME(const char* n, size_t sz)
-    : name_(0), sz_(sz)
+X509_NAME::X509_NAME(const char* n, size_t sz, int pos, int len)
+    : name_(0), sz_(sz), cnPosition_(pos), cnLen_(len)
 {
     if (sz) {
         name_ = NEW_YS char[sz];
@@ -2503,8 +2514,10 @@ size_t X509_NAME::GetLength() const
 
 
 X509::X509(const char* i, size_t iSz, const char* s, size_t sSz,
-           ASN1_STRING *b, ASN1_STRING *a)
-    : issuer_(i, iSz), subject_(s, sSz),
+           ASN1_STRING *b, ASN1_STRING *a,
+           int issPos, int issLen,
+           int subPos, int subLen)
+    : issuer_(i, iSz, issPos, issLen), subject_(s, sSz, subPos, subLen),
       beforeDate_((char *) b->data, b->length, b->type),
       afterDate_((char *) a->data, a->length, a->type)
 {}
@@ -2539,17 +2552,19 @@ ASN1_STRING* X509_NAME::GetEntry(int i)
     if (i < 0 || i >= int(sz_))
         return 0;
 
+    if (i != cnPosition_ || cnLen_ <= 0)   // only entry currently supported
+        return 0;
+
+    if (cnLen_ > int(sz_-i))   // make sure there's room in read buffer
+        return 0;
+
     if (entry_.data)
         ysArrayDelete(entry_.data);
-    entry_.data = NEW_YS byte[sz_];       // max size;
+    entry_.data = NEW_YS byte[cnLen_+1];       // max size;
 
-    memcpy(entry_.data, &name_[i], sz_ - i);
-    if (entry_.data[sz_ -i - 1]) {
-        entry_.data[sz_ - i] = 0;
-        entry_.length = int(sz_) - i;
-    }
-    else
-        entry_.length = int(sz_) - i - 1;
+    memcpy(entry_.data, &name_[i], cnLen_);
+    entry_.data[cnLen_] = 0;
+    entry_.length = cnLen_;
     entry_.type = 0;
 
     return &entry_;
@@ -2692,4 +2707,3 @@ extern "C" void yaSSL_CleanUp()
     yaSSL::sessionsInstance = 0;
     yaSSL::errorsInstance = 0;
 }
-

@@ -1,7 +1,7 @@
 /*****************************************************************************
 
 Copyright (C) 2013, 2014, Fusion-io. All Rights Reserved.
-Copyright (C) 2013, 2015, MariaDB Corporation. All Rights Reserved.
+Copyright (C) 2013, 2017, MariaDB Corporation. All Rights Reserved.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -13,7 +13,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+51 Franklin St, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -486,14 +486,13 @@ buf_mtflu_handler_init(
 	mtflush_heap2 = mem_heap_create(0);
 	ut_a(mtflush_heap2 != NULL);
 
-	mtflush_ctx = (thread_sync_t *)mem_heap_alloc(mtflush_heap,
+	mtflush_ctx = (thread_sync_t *)mem_heap_zalloc(mtflush_heap,
 				sizeof(thread_sync_t));
-	memset(mtflush_ctx, 0, sizeof(thread_sync_t));
+
 	ut_a(mtflush_ctx != NULL);
-	mtflush_ctx->thread_data = (thread_data_t*)mem_heap_alloc(
+	mtflush_ctx->thread_data = (thread_data_t*)mem_heap_zalloc(
 		mtflush_heap, sizeof(thread_data_t) * n_threads);
 	ut_a(mtflush_ctx->thread_data);
-	memset(mtflush_ctx->thread_data, 0, sizeof(thread_data_t) * n_threads);
 
 	mtflush_ctx->n_threads = n_threads;
 	mtflush_ctx->wq = ib_wqueue_create();

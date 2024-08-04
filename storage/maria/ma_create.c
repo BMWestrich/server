@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 /* Create a MARIA table */
 
@@ -33,6 +33,27 @@
 
 static int compare_columns(MARIA_COLUMNDEF **a, MARIA_COLUMNDEF **b);
 
+
+static ulonglong update_tot_length(ulonglong tot_length, ulonglong max_rows, uint length)
+{
+  ulonglong tot_length_part;
+
+  if (tot_length == ULONGLONG_MAX)
+    return ULONGLONG_MAX;
+
+  tot_length_part= (max_rows/(ulong) ((maria_block_size -
+                    MAX_KEYPAGE_HEADER_SIZE - KEYPAGE_CHECKSUM_SIZE)/
+                    (length*2)));
+  if (tot_length_part >=  ULONGLONG_MAX / maria_block_size)
+    return ULONGLONG_MAX;
+
+  if (tot_length > ULONGLONG_MAX - tot_length_part * maria_block_size)
+    return ULONGLONG_MAX;
+
+  return tot_length + tot_length_part * maria_block_size;
+}
+
+
 /*
   Old options is used when recreating database, from maria_chk
 */
@@ -49,12 +70,13 @@ int maria_create(const char *name, enum data_file_type datafile_type,
   myf create_flag;
   uint length,max_key_length,packed,pack_bytes,pointer,real_length_diff,
        key_length,info_length,key_segs,options,min_key_length,
-       base_pos,long_varchar_count,varchar_length,
+       base_pos,long_varchar_count,
        unique_key_parts,fulltext_keys,offset, not_block_record_extra_length;
   uint max_field_lengths, extra_header_size, column_nr;
   uint internal_table= flags & HA_CREATE_INTERNAL_TABLE;
   ulong reclength, real_reclength,min_pack_length;
-  char filename[FN_REFLEN], linkname[FN_REFLEN], *linkname_ptr;
+  char kfilename[FN_REFLEN], klinkname[FN_REFLEN], *klinkname_ptr= NullS;
+  char dfilename[FN_REFLEN], dlinkname[FN_REFLEN], *dlinkname_ptr= 0;
   ulong pack_reclength;
   ulonglong tot_length,max_rows, tmp;
   enum en_fieldtype type;
@@ -122,9 +144,6 @@ int maria_create(const char *name, enum data_file_type datafile_type,
       datafile_type= BLOCK_RECORD;
   }
 
-  if (ci->reloc_rows > ci->max_rows)
-    ci->reloc_rows=ci->max_rows;		/* Check if wrong parameter */
-
   if (!(rec_per_key_part=
 	(double*) my_malloc((keys + uniques)*HA_MAX_KEY_SEG*sizeof(double) +
                             (keys + uniques)*HA_MAX_KEY_SEG*sizeof(ulong) +
@@ -138,7 +157,7 @@ int maria_create(const char *name, enum data_file_type datafile_type,
 
 
   /* Start by checking fields and field-types used */
-  varchar_length=long_varchar_count=packed= not_block_record_extra_length=
+  long_varchar_count=packed= not_block_record_extra_length=
     pack_reclength= max_field_lengths= 0;
   reclength= min_pack_length= ci->null_bytes;
   forced_packed= 0;
@@ -210,7 +229,6 @@ int maria_create(const char *name, enum data_file_type datafile_type,
       }
       else if (type == FIELD_VARCHAR)
       {
-	varchar_length+= column->length-1; /* Used for min_pack_length */
 	pack_reclength++;
         not_block_record_extra_length++;
         max_field_lengths++;
@@ -300,7 +318,7 @@ int maria_create(const char *name, enum data_file_type datafile_type,
   {
     options|= HA_OPTION_TMP_TABLE;
     tmp_table= TRUE;
-    create_mode|= O_NOFOLLOW;
+    create_mode|= O_NOFOLLOW | (internal_table ? 0 : O_EXCL);
     /* "CREATE TEMPORARY" tables are not crash-safe (dropped at restart) */
     ci->transactional= FALSE;
     flags&= ~HA_CREATE_PAGE_CHECKSUM;
@@ -346,6 +364,7 @@ int maria_create(const char *name, enum data_file_type datafile_type,
                                 pack_bytes);
   if (!ci->data_file_length && ci->max_rows)
   {
+    set_if_bigger(ci->max_rows, ci->reloc_rows);
     if (pack_reclength == INT_MAX32 ||
              (~(ulonglong) 0)/ci->max_rows < (ulonglong) pack_reclength)
       ci->data_file_length= ~(ulonglong) 0;
@@ -374,7 +393,7 @@ int maria_create(const char *name, enum data_file_type datafile_type,
       if (rows_per_page > 0)
       {
         set_if_smaller(rows_per_page, MAX_ROWS_PER_PAGE);
-        ci->max_rows= data_file_length / maria_block_size * rows_per_page;
+        ci->max_rows= (data_file_length / maria_block_size+1) * rows_per_page;
       }
       else
         ci->max_rows= data_file_length / (min_pack_length +
@@ -386,6 +405,7 @@ int maria_create(const char *name, enum data_file_type datafile_type,
                                                     ((options &
                                                       HA_OPTION_PACK_RECORD) ?
                                                      3 : 0)));
+    set_if_smaller(ci->reloc_rows, ci->max_rows);
   }
   max_rows= (ulonglong) ci->max_rows;
   if (datafile_type == BLOCK_RECORD)
@@ -659,11 +679,8 @@ int maria_create(const char *name, enum data_file_type datafile_type,
 
     if (length > max_key_length)
       max_key_length= length;
-    tot_length+= ((max_rows/(ulong) (((uint) maria_block_size -
-                                      MAX_KEYPAGE_HEADER_SIZE -
-                                      KEYPAGE_CHECKSUM_SIZE)/
-                                     (length*2))) *
-                  maria_block_size);
+
+    tot_length= update_tot_length(tot_length, max_rows, length);
   }
 
   unique_key_parts=0;
@@ -672,11 +689,8 @@ int maria_create(const char *name, enum data_file_type datafile_type,
     uniquedef->key=keys+i;
     unique_key_parts+=uniquedef->keysegs;
     share.state.key_root[keys+i]= HA_OFFSET_ERROR;
-    tot_length+= (max_rows/(ulong) (((uint) maria_block_size -
-                                     MAX_KEYPAGE_HEADER_SIZE -
-                                     KEYPAGE_CHECKSUM_SIZE) /
-                         ((MARIA_UNIQUE_HASH_LENGTH + pointer)*2)))*
-                         (ulong) maria_block_size;
+
+    tot_length= update_tot_length(tot_length, max_rows, MARIA_UNIQUE_HASH_LENGTH + pointer);
   }
   keys+=uniques;				/* Each unique has 1 key */
   key_segs+=uniques;				/* Each unique has 1 key seg */
@@ -702,9 +716,10 @@ int maria_create(const char *name, enum data_file_type datafile_type,
     share.base.extra_options|= MA_EXTRA_OPTIONS_INSERT_ORDER;
   }
 
+  share.state.state.key_file_length= MY_ALIGN(info_length, maria_block_size);
   DBUG_PRINT("info", ("info_length: %u", info_length));
   /* There are only 16 bits for the total header length. */
-  if (info_length > 65535)
+  if (share.state.state.key_file_length > 65535)
   {
     my_printf_error(HA_WRONG_CREATE_OPTION,
                     "Aria table '%s' has too many columns and/or "
@@ -725,8 +740,7 @@ int maria_create(const char *name, enum data_file_type datafile_type,
   mi_int2store(share.state.header.base_pos,base_pos);
   share.state.header.data_file_type= share.data_file_type= datafile_type;
   share.state.header.org_data_file_type= org_datafile_type;
-  share.state.header.language= (ci->language ?
-				ci->language : default_charset_info->number);
+  share.state.header.not_used= 0;
 
   share.state.dellink = HA_OFFSET_ERROR;
   share.state.first_bitmap_with_space= 0;
@@ -739,13 +753,14 @@ int maria_create(const char *name, enum data_file_type datafile_type,
   share.options=options;
   share.base.rec_reflength=pointer;
   share.base.block_size= maria_block_size;
+  share.base.language= (ci->language ? ci->language :
+                        default_charset_info->number);
 
   /*
     Get estimate for index file length (this may be wrong for FT keys)
     This is used for pointers to other key pages.
   */
-  tmp= (tot_length + maria_block_size * keys *
-	MARIA_INDEX_BLOCK_MARGIN) / maria_block_size;
+  tmp= (tot_length / maria_block_size + keys * MARIA_INDEX_BLOCK_MARGIN);
 
   /*
     use maximum of key_file_length we calculated and key_file_length value we
@@ -761,8 +776,7 @@ int maria_create(const char *name, enum data_file_type datafile_type,
 
   maria_set_all_keys_active(share.state.key_map, keys);
 
-  share.base.keystart = share.state.state.key_file_length=
-    MY_ALIGN(info_length, maria_block_size);
+  share.base.keystart = share.state.state.key_file_length;
   share.base.max_key_block_length= maria_block_size;
   share.base.max_key_length=ALIGN_SIZE(max_key_length+4);
   share.base.records=ci->max_rows;
@@ -784,6 +798,7 @@ int maria_create(const char *name, enum data_file_type datafile_type,
     share.state.state.data_file_length= maria_block_size;
     /* Add length of packed fields + length */
     share.base.pack_reclength+= share.base.max_field_lengths+3;
+    share.base.max_pack_length= share.base.pack_reclength;
 
     /* Adjust max_pack_length, to be used if we have short rows */
     if (share.base.max_pack_length < maria_block_size)
@@ -845,19 +860,19 @@ int maria_create(const char *name, enum data_file_type datafile_type,
       /* chop off the table name, tempory tables use generated name */
       if ((path= strrchr(ci->index_file_name, FN_LIBCHAR)))
         *path= '\0';
-      fn_format(filename, name, ci->index_file_name, MARIA_NAME_IEXT,
+      fn_format(kfilename, name, ci->index_file_name, MARIA_NAME_IEXT,
                 MY_REPLACE_DIR | MY_UNPACK_FILENAME |
                 MY_RETURN_REAL_PATH | MY_APPEND_EXT);
     }
     else
     {
-      fn_format(filename, ci->index_file_name, "", MARIA_NAME_IEXT,
+      fn_format(kfilename, ci->index_file_name, "", MARIA_NAME_IEXT,
                 MY_UNPACK_FILENAME | MY_RETURN_REAL_PATH |
                 (have_iext ? MY_REPLACE_EXT : MY_APPEND_EXT));
     }
-    fn_format(linkname, name, "", MARIA_NAME_IEXT,
+    fn_format(klinkname, name, "", MARIA_NAME_IEXT,
               MY_UNPACK_FILENAME|MY_APPEND_EXT);
-    linkname_ptr= linkname;
+    klinkname_ptr= klinkname;
     /*
       Don't create the table if the link or file exists to ensure that one
       doesn't accidently destroy another table.
@@ -871,10 +886,9 @@ int maria_create(const char *name, enum data_file_type datafile_type,
   {
     char *iext= strrchr(name, '.');
     int have_iext= iext && !strcmp(iext, MARIA_NAME_IEXT);
-    fn_format(filename, name, "", MARIA_NAME_IEXT,
-              MY_UNPACK_FILENAME | MY_RETURN_REAL_PATH |
+    fn_format(kfilename, name, "", MARIA_NAME_IEXT, MY_UNPACK_FILENAME |
+              (internal_table ? 0 : MY_RETURN_REAL_PATH) |
               (have_iext ? MY_REPLACE_EXT : MY_APPEND_EXT));
-    linkname_ptr= NullS;
     /*
       Replace the current file.
       Don't sync dir now if the data file has the same path.
@@ -894,7 +908,7 @@ int maria_create(const char *name, enum data_file_type datafile_type,
     NOTE: The filename is compared against unique_file_name of every
     open table. Hence we need a real path here.
   */
-  if (!internal_table && _ma_test_if_reopen(filename))
+  if (!internal_table && _ma_test_if_reopen(kfilename))
   {
     my_printf_error(HA_ERR_TABLE_EXIST, "Aria table '%s' is in use "
                     "(most likely by a MERGE table). Try FLUSH TABLES.",
@@ -903,8 +917,8 @@ int maria_create(const char *name, enum data_file_type datafile_type,
     goto err;
   }
 
-  if ((file= mysql_file_create_with_symlink(key_file_kfile, linkname_ptr,
-                                            filename, 0, create_mode,
+  if ((file= mysql_file_create_with_symlink(key_file_kfile, klinkname_ptr,
+                                            kfilename, 0, create_mode,
                                             MYF(MY_WME|create_flag))) < 0)
     goto err;
   errpos=1;
@@ -937,7 +951,6 @@ int maria_create(const char *name, enum data_file_type datafile_type,
       sseg.language= 7;                         /* Binary */
       sseg.null_bit=0;
       sseg.bit_start=0;
-      sseg.bit_end=0;
       sseg.bit_length= 0;
       sseg.bit_pos= 0;
       sseg.length=SPLEN;
@@ -1165,30 +1178,29 @@ int maria_create(const char *name, enum data_file_type datafile_type,
         /* chop off the table name, tempory tables use generated name */
         if ((path= strrchr(ci->data_file_name, FN_LIBCHAR)))
           *path= '\0';
-        fn_format(filename, name, ci->data_file_name, MARIA_NAME_DEXT,
+        fn_format(dfilename, name, ci->data_file_name, MARIA_NAME_DEXT,
                   MY_REPLACE_DIR | MY_UNPACK_FILENAME | MY_APPEND_EXT);
       }
       else
       {
-        fn_format(filename, ci->data_file_name, "", MARIA_NAME_DEXT,
+        fn_format(dfilename, ci->data_file_name, "", MARIA_NAME_DEXT,
                   MY_UNPACK_FILENAME |
                   (have_dext ? MY_REPLACE_EXT : MY_APPEND_EXT));
       }
-      fn_format(linkname, name, "",MARIA_NAME_DEXT,
+      fn_format(dlinkname, name, "",MARIA_NAME_DEXT,
                 MY_UNPACK_FILENAME | MY_APPEND_EXT);
-      linkname_ptr= linkname;
+      dlinkname_ptr= dlinkname;
       create_flag=0;
     }
     else
     {
-      fn_format(filename,name,"", MARIA_NAME_DEXT,
+      fn_format(dfilename,name,"", MARIA_NAME_DEXT,
                 MY_UNPACK_FILENAME | MY_APPEND_EXT);
-      linkname_ptr= NullS;
       create_flag= (flags & HA_CREATE_KEEP_FILES) ? 0 : MY_DELETE_OLD;
     }
     if ((dfile=
-         mysql_file_create_with_symlink(key_file_dfile, linkname_ptr,
-                                        filename, 0, create_mode,
+         mysql_file_create_with_symlink(key_file_dfile, dlinkname_ptr,
+                                        dfilename, 0, create_mode,
                                         MYF(MY_WME | create_flag | sync_dir))) < 0)
       goto err;
     errpos=3;
@@ -1203,7 +1215,7 @@ int maria_create(const char *name, enum data_file_type datafile_type,
   if (mysql_file_chsize(file,(ulong) share.base.keystart,0,MYF(0)))
     goto err;
 
-  if (sync_dir && mysql_file_sync(file, MYF(0)))
+  if (!internal_table && sync_dir && mysql_file_sync(file, MYF(0)))
     goto err;
 
   if (! (flags & HA_DONT_TOUCH_DATA))
@@ -1213,7 +1225,7 @@ int maria_create(const char *name, enum data_file_type datafile_type,
                           share.base.min_pack_length*ci->reloc_rows,0,MYF(0)))
       goto err;
 #endif
-    if (sync_dir && mysql_file_sync(dfile, MYF(0)))
+    if (!internal_table && sync_dir && mysql_file_sync(dfile, MYF(0)))
       goto err;
     if (mysql_file_close(dfile,MYF(0)))
       goto err;
@@ -1237,21 +1249,21 @@ err_no_lock:
   switch (errpos) {
   case 3:
     mysql_file_close(dfile, MYF(0));
-    /* fall through */
-  case 2:
-  if (! (flags & HA_DONT_TOUCH_DATA))
-    mysql_file_delete_with_symlink(key_file_dfile,
-                                   fn_format(filename,name,"",MARIA_NAME_DEXT,
-                                     MY_UNPACK_FILENAME | MY_APPEND_EXT),
-			   sync_dir);
+    if (! (flags & HA_DONT_TOUCH_DATA))
+    {
+      mysql_file_delete(key_file_dfile, dfilename, MYF(sync_dir));
+      if (dlinkname_ptr)
+        mysql_file_delete(key_file_dfile, dlinkname_ptr, MYF(sync_dir));
+    }
     /* fall through */
   case 1:
     mysql_file_close(file, MYF(0));
     if (! (flags & HA_DONT_TOUCH_DATA))
-      mysql_file_delete_with_symlink(key_file_kfile,
-                                     fn_format(filename,name,"",MARIA_NAME_IEXT,
-                                       MY_UNPACK_FILENAME | MY_APPEND_EXT),
-			     sync_dir);
+    {
+      mysql_file_delete(key_file_kfile, kfilename, MYF(sync_dir));
+      if (klinkname_ptr)
+        mysql_file_delete(key_file_kfile, klinkname_ptr, MYF(sync_dir));
+    }
   }
   ma_crypt_free(&share);
   my_free(log_data);

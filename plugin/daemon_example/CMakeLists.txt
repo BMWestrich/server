@@ -11,9 +11,10 @@
 # 
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335 USA
 
-MYSQL_ADD_PLUGIN(daemon_example daemon_example.cc
+MYSQL_ADD_PLUGIN(daemon_example daemon_example.cc RECOMPILE_FOR_EMBEDDED
   MODULE_ONLY MODULE_OUTPUT_NAME "libdaemon_example" COMPONENT Test)
 
-INSTALL(FILES daemon_example.ini DESTINATION ${INSTALL_PLUGINDIR} COMPONENT Test)
+INSTALL(FILES daemon_example.ini DESTINATION ${INSTALL_PLUGINDIR}
+        COMPONENT Test)

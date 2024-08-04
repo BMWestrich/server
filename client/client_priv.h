@@ -1,5 +1,6 @@
 /*
    Copyright (c) 2001, 2012, Oracle and/or its affiliates.
+   Copyright (c) 2009, 2016, MariaDB
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -12,7 +13,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA
 */
 
 /* Common defines for all clients */
@@ -23,6 +24,7 @@
 #include <mysql.h>
 #include <errmsg.h>
 #include <my_getopt.h>
+#include <mysql_version.h>
 
 #ifndef WEXITSTATUS
 # ifdef __WIN__
@@ -64,6 +66,10 @@ enum options_client
   OPT_MYSQLDUMP_SLAVE_APPLY,
   OPT_MYSQLDUMP_SLAVE_DATA,
   OPT_MYSQLDUMP_INCLUDE_MASTER_HOST_PORT,
+#ifdef WHEN_FLASHBACK_REVIEW_READY
+  OPT_REVIEW,
+  OPT_REVIEW_DBNAME, OPT_REVIEW_TABLENAME,
+#endif
   OPT_SLAP_CSV, OPT_SLAP_CREATE_STRING,
   OPT_SLAP_AUTO_GENERATE_SQL_LOAD_TYPE, OPT_SLAP_AUTO_GENERATE_WRITE_NUM,
   OPT_SLAP_AUTO_GENERATE_ADD_AUTO,
@@ -92,6 +98,8 @@ enum options_client
   OPT_REPORT_PROGRESS,
   OPT_SKIP_ANNOTATE_ROWS_EVENTS,
   OPT_SSL_CRL, OPT_SSL_CRLPATH,
+  OPT_IGNORE_DATA,
+  OPT_CHECK_IF_UPGRADE_NEEDED,
   OPT_MAX_CLIENT_OPTION /* should be always the last */
 };
 
@@ -114,4 +122,3 @@ enum options_client
   Name of the performance schema database.
 */
 #define PERFORMANCE_SCHEMA_DB_NAME "performance_schema"
-

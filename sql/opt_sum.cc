@@ -1,5 +1,5 @@
 /* Copyright (c) 2000, 2011, Oracle and/or its affiliates.
-   Copyright (c) 2008-2011 Monty Program Ab
+   Copyright (c) 2008, 2017, MariaDB Corporation.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 
 /**
@@ -254,6 +254,8 @@ int opt_sum_query(THD *thd,
   int error= 0;
   DBUG_ENTER("opt_sum_query");
 
+  thd->lex->current_select->min_max_opt_list.empty();
+
   if (conds)
     where_tables= conds->used_tables();
 
@@ -406,7 +408,7 @@ int opt_sum_query(THD *thd,
 	  if (!error && reckey_in_range(is_max, &ref, item_field->field, 
 			                conds, range_fl, prefix_len))
 	    error= HA_ERR_KEY_NOT_FOUND;
-          table->disable_keyread();
+          table->file->ha_end_keyread();
           table->file->ha_index_end();
           if (error)
 	  {
@@ -447,7 +449,14 @@ int opt_sum_query(THD *thd,
           item_sum->aggregator_clear();
         }
         else
+        {
           item_sum->reset_and_add();
+          /*
+            Save a reference to the item for possible rollback
+            of the min/max optimizations for this select
+          */
+	  thd->lex->current_select->min_max_opt_list.push_back(item_sum);
+        }
         item_sum->make_const();
         recalc_const_item= 1;
         break;
@@ -461,7 +470,7 @@ int opt_sum_query(THD *thd,
     {
       if (recalc_const_item)
         item->update_used_tables();
-      if (!item->const_item())
+      if (!item->const_item() && item->type() != Item::WINDOW_FUNC_ITEM)
         const_result= 0;
     }
   }
@@ -759,12 +768,12 @@ static bool matching_cond(bool max_fl, TABLE_REF *ref, KEY *keyinfo,
   key_part_map org_key_part_used= *key_part_used;
   if (eq_type || between || max_fl == less_fl)
   {
-    uint length= (key_ptr-ref->key_buff)+part->store_length;
+    uint length= (uint)(key_ptr-ref->key_buff)+part->store_length;
     if (ref->key_length < length)
     {
     /* Ultimately ref->key_length will contain the length of the search key */
       ref->key_length= length;      
-      ref->key_parts= (part - keyinfo->key_part) + 1;
+      ref->key_parts= (uint)(part - keyinfo->key_part) + 1;
     }
     if (!*prefix_len && part+1 == field_part)       
       *prefix_len= length;
@@ -821,7 +830,10 @@ static bool matching_cond(bool max_fl, TABLE_REF *ref, KEY *keyinfo,
     if (is_field_part)
     {
       if (between || eq_type)
+      {
         *range_fl&= ~(NO_MAX_RANGE | NO_MIN_RANGE);
+        *range_fl&= ~(max_fl ? NEAR_MAX : NEAR_MIN);
+      }
       else
       {
         *range_fl&= ~(max_fl ? NO_MAX_RANGE : NO_MIN_RANGE);
@@ -968,7 +980,7 @@ static bool find_key_for_maxmin(bool max_fl, TABLE_REF *ref,
             converted (for example to upper case)
           */
           if (field->part_of_key.is_set(idx))
-            table->enable_keyread();
+            table->file->ha_start_keyread(idx);
           DBUG_RETURN(TRUE);
         }
       }
@@ -1042,6 +1054,7 @@ static int maxmin_in_range(bool max_fl, Field* field, COND *cond)
   case Item_func::LT_FUNC:
   case Item_func::LE_FUNC:
     less_fl= 1;
+    /* fall through */
   case Item_func::GT_FUNC:
   case Item_func::GE_FUNC:
   {

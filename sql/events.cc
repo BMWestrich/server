@@ -1,5 +1,6 @@
 /*
    Copyright (c) 2005, 2013, Oracle and/or its affiliates.
+   Copyright (c) 2017, MariaDB Corporation.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -12,7 +13,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #include <my_global.h>
 #include "sql_priv.h"
@@ -102,7 +103,7 @@ ulong Events::inited;
 int sortcmp_lex_string(LEX_STRING s, LEX_STRING t, CHARSET_INFO *cs)
 {
  return cs->coll->strnncollsp(cs, (uchar *) s.str,s.length,
-                                  (uchar *) t.str,t.length, 0);
+                                  (uchar *) t.str,t.length);
 }
 
 
@@ -127,7 +128,7 @@ bool Events::check_if_system_tables_error()
 
 /**
   Reconstructs interval expression from interval type and expression
-  value that is in form of a value of the smalles entity:
+  value that is in form of a value of the smallest entity:
   For
     YEAR_MONTH - expression is in months
     DAY_MINUTE - expression is in minutes
@@ -187,8 +188,8 @@ common_1_lev_code:
 
     expr= tmp_expr - (tmp_expr/60)*60;
     /* the code after the switch will finish */
-  }
     break;
+  }
   case INTERVAL_HOUR_SECOND:
   {
     ulonglong tmp_expr= expr;
@@ -204,8 +205,8 @@ common_1_lev_code:
 
     expr= tmp_expr - (tmp_expr/60)*60;
     /* the code after the switch will finish */
-  }
     break;
+  }
   case INTERVAL_DAY_SECOND:
   {
     ulonglong tmp_expr= expr;
@@ -227,8 +228,8 @@ common_1_lev_code:
 
     expr= tmp_expr - (tmp_expr/60)*60;
     /* the code after the switch will finish */
-  }
     break;
+  }
   case INTERVAL_DAY_MICROSECOND:
   case INTERVAL_HOUR_MICROSECOND:
   case INTERVAL_MINUTE_MICROSECOND:
@@ -242,6 +243,8 @@ common_1_lev_code:
     break;
   case INTERVAL_WEEK:
     expr/= 7;
+    close_quote= FALSE;
+    break;
   default:
     close_quote= FALSE;
     break;
@@ -332,6 +335,11 @@ Events::create_event(THD *thd, Event_parse_data *parse_data)
 
   if (check_access(thd, EVENT_ACL, parse_data->dbname.str, NULL, NULL, 0, 0))
     DBUG_RETURN(TRUE);
+  WSREP_TO_ISOLATION_BEGIN(WSREP_MYSQL_DB, NULL, NULL)
+
+  if (lock_object_name(thd, MDL_key::EVENT,
+                       parse_data->dbname.str, parse_data->name.str))
+    DBUG_RETURN(TRUE);
 
   if (check_db_dir_existence(parse_data->dbname.str))
   {
@@ -346,10 +354,6 @@ Events::create_event(THD *thd, Event_parse_data *parse_data)
     so that all supporting tables are updated for CREATE EVENT command.
   */
   save_binlog_format= thd->set_current_stmt_binlog_format_stmt();
-
-  if (lock_object_name(thd, MDL_key::EVENT,
-                       parse_data->dbname.str, parse_data->name.str))
-    DBUG_RETURN(TRUE);
 
   if (thd->lex->create_info.or_replace() && event_queue)
     event_queue->drop_event(thd, parse_data->dbname, parse_data->name);
@@ -413,7 +417,17 @@ Events::create_event(THD *thd, Event_parse_data *parse_data)
 
   thd->restore_stmt_binlog_format(save_binlog_format);
 
+  if (!ret && Events::opt_event_scheduler == Events::EVENTS_OFF)
+  {
+    push_warning(thd, Sql_condition::WARN_LEVEL_WARN, ER_UNKNOWN_ERROR, 
+      "Event scheduler is switched off, use SET GLOBAL event_scheduler=ON to enable it.");
+  }
+
   DBUG_RETURN(ret);
+
+WSREP_ERROR_LABEL:
+  DBUG_RETURN(TRUE);
+
 }
 
 
@@ -455,6 +469,19 @@ Events::update_event(THD *thd, Event_parse_data *parse_data,
   if (check_access(thd, EVENT_ACL, parse_data->dbname.str, NULL, NULL, 0, 0))
     DBUG_RETURN(TRUE);
 
+  WSREP_TO_ISOLATION_BEGIN(WSREP_MYSQL_DB, NULL, NULL);
+
+  if (lock_object_name(thd, MDL_key::EVENT,
+                       parse_data->dbname.str, parse_data->name.str))
+    DBUG_RETURN(TRUE);
+
+  if (check_db_dir_existence(parse_data->dbname.str))
+  {
+    my_error(ER_BAD_DB_ERROR, MYF(0), parse_data->dbname.str);
+    DBUG_RETURN(TRUE);
+  }
+
+
   if (new_dbname)                               /* It's a rename */
   {
     /* Check that the new and the old names differ. */
@@ -476,6 +503,13 @@ Events::update_event(THD *thd, Event_parse_data *parse_data,
     if (check_access(thd, EVENT_ACL, new_dbname->str, NULL, NULL, 0, 0))
       DBUG_RETURN(TRUE);
 
+    /*
+     Acquire mdl exclusive lock on target database name.
+    */
+    if (lock_object_name(thd, MDL_key::EVENT,
+                         new_dbname->str, new_name->str))
+      DBUG_RETURN(TRUE);
+
     /* Check that the target database exists */
     if (check_db_dir_existence(new_dbname->str))
     {
@@ -489,10 +523,6 @@ Events::update_event(THD *thd, Event_parse_data *parse_data,
     so that all supporting tables are updated for UPDATE EVENT command.
   */
   save_binlog_format= thd->set_current_stmt_binlog_format_stmt();
-
-  if (lock_object_name(thd, MDL_key::EVENT,
-                       parse_data->dbname.str, parse_data->name.str))
-    DBUG_RETURN(TRUE);
 
   /* On error conditions my_error() is called so no need to handle here */
   if (!(ret= db_repository->update_event(thd, parse_data,
@@ -525,6 +555,9 @@ Events::update_event(THD *thd, Event_parse_data *parse_data,
 
   thd->restore_stmt_binlog_format(save_binlog_format);
   DBUG_RETURN(ret);
+
+WSREP_ERROR_LABEL:
+  DBUG_RETURN(TRUE);
 }
 
 
@@ -565,6 +598,8 @@ Events::drop_event(THD *thd, LEX_STRING dbname, LEX_STRING name, bool if_exists)
   if (check_access(thd, EVENT_ACL, dbname.str, NULL, NULL, 0, 0))
     DBUG_RETURN(TRUE);
 
+  WSREP_TO_ISOLATION_BEGIN(WSREP_MYSQL_DB, NULL, NULL);
+
   /*
     Turn off row binlogging of this statement and use statement-based so
     that all supporting tables are updated for DROP EVENT command.
@@ -586,6 +621,9 @@ Events::drop_event(THD *thd, LEX_STRING dbname, LEX_STRING name, bool if_exists)
 
   thd->restore_stmt_binlog_format(save_binlog_format);
   DBUG_RETURN(ret);
+
+WSREP_ERROR_LABEL:
+  DBUG_RETURN(TRUE);
 }
 
 
@@ -841,7 +879,7 @@ Events::init(THD *thd, bool opt_noacl_or_bootstrap)
   if (!thd)
   {
 
-    if (!(thd= new THD()))
+    if (!(thd= new THD(0)))
     {
       res= TRUE;
       goto end;
@@ -1105,7 +1143,7 @@ Events::load_events_from_db(THD *thd)
   uint count= 0;
   ulong saved_master_access;
   DBUG_ENTER("Events::load_events_from_db");
-  DBUG_PRINT("enter", ("thd: 0x%lx", (long) thd));
+  DBUG_PRINT("enter", ("thd: %p", thd));
 
   /*
     NOTE: even if we run in read-only mode, we should be able to lock the
@@ -1134,7 +1172,7 @@ Events::load_events_from_db(THD *thd)
     DBUG_RETURN(TRUE);
   }
 
-  if (init_read_record(&read_record_info, thd, table, NULL, 0, 1, FALSE))
+  if (init_read_record(&read_record_info, thd, table, NULL, NULL, 0, 1, FALSE))
   {
     close_thread_tables(thd);
     DBUG_RETURN(TRUE);
@@ -1160,6 +1198,46 @@ Events::load_events_from_db(THD *thd)
       delete et;
       goto end;
     }
+
+#ifdef WITH_WSREP
+    /**
+      If SST is done from a galera node that is also acting as MASTER
+      newly synced node in galera eco-system will also copy-over the
+      event state enabling duplicate event in galera eco-system.
+      DISABLE such events if the current node is not event orginator.
+      (Also, make sure you skip disabling it if is already disabled to avoid
+       creation of redundant action)
+      NOTE:
+      This complete system relies on server-id. Ideally server-id should be
+      same for all nodes of galera eco-system but they aren't same.
+      Infact, based on galera use-case it seems like it recommends to have each
+      node with different server-id.
+    */
+    if (WSREP(thd) && et->originator != thd->variables.server_id)
+    {
+        if (et->status == Event_parse_data::SLAVESIDE_DISABLED)
+          continue;
+
+        store_record(table, record[1]);
+        table->field[ET_FIELD_STATUS]->
+                store((longlong) Event_parse_data::SLAVESIDE_DISABLED,
+                      TRUE);
+
+	/* All the dmls to mysql.events tables are stmt bin-logged. */
+        bool save_binlog_row_based;
+        if ((save_binlog_row_based= thd->is_current_stmt_binlog_format_row()))
+	  thd->set_current_stmt_binlog_format_stmt();
+
+        (void) table->file->ha_update_row(table->record[1], table->record[0]);
+
+        if (save_binlog_row_based)
+          thd->set_current_stmt_binlog_format_row();
+
+        delete et;
+        continue;
+    }
+#endif /* WITH_WSREP */
+
     /**
       Since the Event_queue_element object could be deleted inside
       Event_queue::create_event we should save the value of dropped flag

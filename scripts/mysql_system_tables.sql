@@ -1,4 +1,4 @@
--- Copyright (c) 2007, 2013, Oracle and/or its affiliates.
+-- Copyright (c) 2007, 2018, Oracle and/or its affiliates.
 -- Copyright (c) 2008, 2014, Monty Program Ab & SkySQL Ab
 -- 
 -- This program is free software; you can redistribute it and/or modify
@@ -12,7 +12,7 @@
 --
 -- You should have received a copy of the GNU General Public License
 -- along with this program; if not, write to the Free Software
--- Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
+-- Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA
 
 --
 -- The system tables of MySQL Server
@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS func (  name char(64) binary DEFAULT '' NOT NULL, ret
 CREATE TABLE IF NOT EXISTS plugin ( name varchar(64) DEFAULT '' NOT NULL, dl varchar(128) DEFAULT '' NOT NULL, PRIMARY KEY (name) ) engine=MyISAM CHARACTER SET utf8 COLLATE utf8_general_ci comment='MySQL plugins';
 
 
-CREATE TABLE IF NOT EXISTS servers ( Server_name char(64) NOT NULL DEFAULT '', Host char(64) NOT NULL DEFAULT '', Db char(64) NOT NULL DEFAULT '', Username char(80) NOT NULL DEFAULT '', Password char(64) NOT NULL DEFAULT '', Port INT(4) NOT NULL DEFAULT '0', Socket char(64) NOT NULL DEFAULT '', Wrapper char(64) NOT NULL DEFAULT '', Owner char(64) NOT NULL DEFAULT '', PRIMARY KEY (Server_name)) CHARACTER SET utf8 comment='MySQL Foreign Servers table';
+CREATE TABLE IF NOT EXISTS servers ( Server_name char(64) NOT NULL DEFAULT '', Host varchar(2048) NOT NULL DEFAULT '', Db char(64) NOT NULL DEFAULT '', Username char(80) NOT NULL DEFAULT '', Password char(64) NOT NULL DEFAULT '', Port INT(4) NOT NULL DEFAULT '0', Socket char(64) NOT NULL DEFAULT '', Wrapper char(64) NOT NULL DEFAULT '', Owner varchar(512) NOT NULL DEFAULT '', PRIMARY KEY (Server_name)) CHARACTER SET utf8 comment='MySQL Foreign Servers table';
 
 
 CREATE TABLE IF NOT EXISTS tables_priv ( Host char(60) binary DEFAULT '' NOT NULL, Db char(64) binary DEFAULT '' NOT NULL, User char(80) binary DEFAULT '' NOT NULL, Table_name char(64) binary DEFAULT '' NOT NULL, Grantor char(141) DEFAULT '' NOT NULL, Timestamp timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, Table_priv set('Select','Insert','Update','Delete','Create','Drop','Grant','References','Index','Alter','Create View','Show view','Trigger') COLLATE utf8_general_ci DEFAULT '' NOT NULL, Column_priv set('Select','Insert','Update','References') COLLATE utf8_general_ci DEFAULT '' NOT NULL, PRIMARY KEY (Host,Db,User,Table_name), KEY Grantor (Grantor) ) engine=MyISAM CHARACTER SET utf8 COLLATE utf8_bin   comment='Table privileges';
@@ -105,7 +105,7 @@ CREATE TABLE IF NOT EXISTS event ( db char(64) CHARACTER SET utf8 COLLATE utf8_b
 
 SET @create_innodb_table_stats="CREATE TABLE IF NOT EXISTS innodb_table_stats (
 	database_name			VARCHAR(64) NOT NULL,
-	table_name			VARCHAR(64) NOT NULL,
+	table_name			VARCHAR(199) NOT NULL,
 	last_update			TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 	n_rows				BIGINT UNSIGNED NOT NULL,
 	clustered_index_size		BIGINT UNSIGNED NOT NULL,
@@ -115,7 +115,7 @@ SET @create_innodb_table_stats="CREATE TABLE IF NOT EXISTS innodb_table_stats (
 
 SET @create_innodb_index_stats="CREATE TABLE IF NOT EXISTS innodb_index_stats (
 	database_name			VARCHAR(64) NOT NULL,
-	table_name			VARCHAR(64) NOT NULL,
+	table_name			VARCHAR(199) NOT NULL,
 	index_name			VARCHAR(64) NOT NULL,
 	last_update			TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 	/* there are at least:
@@ -229,7 +229,7 @@ SET @cmd= "CREATE TABLE IF NOT EXISTS gtid_slave_pos (
   sub_id BIGINT UNSIGNED NOT NULL,
   server_id INT UNSIGNED NOT NULL,
   seq_no BIGINT UNSIGNED NOT NULL,
-  PRIMARY KEY (domain_id, sub_id))
+  PRIMARY KEY (domain_id, sub_id)) CHARSET=latin1
 COMMENT='Replication slave GTID position'";
 SET @str=CONCAT(@cmd, ' ENGINE=', @innodb_or_myisam);
 PREPARE stmt FROM @str;
@@ -237,3 +237,9 @@ EXECUTE stmt;
 DROP PREPARE stmt;
 
 set storage_engine=@orig_storage_engine;
+
+--
+-- Drop some tables not used anymore in MariaDB
+---
+
+drop table if exists mysql.ndb_binlog_index;

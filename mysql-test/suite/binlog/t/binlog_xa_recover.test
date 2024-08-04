@@ -1,7 +1,14 @@
+#
+# This include file is used by more than one test suite
+# (currently binlog and binlog_encryption).
+# Please check all dependent tests after modifying it
+#
+
 --source include/have_innodb.inc
 --source include/have_debug.inc
 --source include/have_debug_sync.inc
 --source include/have_binlog_format_row.inc
+--source include/have_perfschema.inc
 # Valgrind does not work well with test that crashes the server
 --source include/not_valgrind.inc
 
@@ -172,15 +179,13 @@ connection default;
 
 # We need to sync the test case with the background processing of the
 # commit checkpoint, otherwise we get nondeterministic results.
-SET @old_dbug= @@global.DEBUG_DBUG;
-SET GLOBAL debug_dbug="+d,binlog_background_checkpoint_processed";
+let $wait_condition= select count(*) = 1 from performance_schema.threads where processlist_state = "Waiting for background binlog tasks";
+--source include/wait_condition.inc
 
 SET DEBUG_SYNC= "now SIGNAL con12_cont";
 connection con12;
 reap;
 connection default;
-SET DEBUG_SYNC= "now WAIT_FOR binlog_background_checkpoint_processed";
-SET GLOBAL debug_dbug= @old_dbug;
 
 SET DEBUG_SYNC= "now SIGNAL con11_cont";
 connection con11;
@@ -193,9 +198,6 @@ connection default;
 --let $field= Info
 --let $condition= = "master-bin.000004"
 --source include/wait_show_condition.inc
-
---echo Checking that master-bin.000004 is the last binlog checkpoint
---source include/show_binlog_events.inc
 
 --echo Now crash the server
 # It is not too easy to test XA recovery, as it runs early during server

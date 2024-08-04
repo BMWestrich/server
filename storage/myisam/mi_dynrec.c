@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /*
   Functions to handle space-packed-records and blobs
@@ -95,7 +95,7 @@ my_bool mi_dynmap_file(MI_INFO *info, my_off_t size)
 #if defined(HAVE_MADVISE)
   madvise((char*) info->s->file_map, size, MADV_RANDOM);
 #endif
-  info->s->mmaped_length= size;
+  info->s->mmaped_length= (size_t) size;
   info->s->file_read= mi_mmap_pread;
   info->s->file_write= mi_mmap_pwrite;
   DBUG_RETURN(0);
@@ -118,8 +118,7 @@ int mi_munmap_file(MI_INFO *info)
 {
   int ret;
   DBUG_ENTER("mi_unmap_file");
-  if ((ret= my_munmap((void*) info->s->file_map,
-                      (size_t) info->s->mmaped_length)))
+  if ((ret= my_munmap((void*) info->s->file_map, info->s->mmaped_length)))
     DBUG_RETURN(ret);
   info->s->file_read= mi_nommap_pread;
   info->s->file_write= mi_nommap_pwrite;
@@ -886,8 +885,8 @@ static int update_dynamic_record(MI_INFO *info, my_off_t filepos, uchar *record,
 	  /*
 	    Check if next block is a deleted block
 	    Above we have MI_MIN_BLOCK_LENGTH to avoid the problem where
-	    the next block is so small it can't be splited which could
-	    casue problems
+	    the next block is so small it can't be split which could
+	    cause problems
 	  */
 
 	  MI_BLOCK_INFO del_block;
@@ -1344,8 +1343,8 @@ ulong _mi_rec_unpack(register MI_INFO *info, register uchar *to, uchar *from,
 
 err:
   my_errno= HA_ERR_WRONG_IN_RECORD;
-  DBUG_PRINT("error",("to_end: 0x%lx -> 0x%lx  from_end: 0x%lx -> 0x%lx",
-		      (long) to, (long) to_end, (long) from, (long) from_end));
+  DBUG_PRINT("error",("to_end: %p -> %p  from_end: %p -> %p",
+		      to, to_end, from, from_end));
   DBUG_DUMP("from",(uchar*) info->rec_buff,info->s->base.min_pack_length);
   DBUG_RETURN(MY_FILE_ERROR);
 } /* _mi_rec_unpack */

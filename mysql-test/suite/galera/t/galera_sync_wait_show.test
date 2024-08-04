@@ -4,9 +4,11 @@
 
 --source include/galera_cluster.inc
 --source include/have_innodb.inc
+--source include/have_debug.inc
 
 --connection node_2
-SET SESSION wsrep_sync_wait = 1;
+# MW-86 SHOW commands have now bitmap value 8
+SET SESSION wsrep_sync_wait = 8;
 
 
 --connection node_1
@@ -56,12 +58,15 @@ CREATE TABLE t1 (f1 INTEGER) ENGINE=InnoDB;
 CREATE TRIGGER tr1 BEFORE INSERT ON t1 FOR EACH ROW SET NEW.f1 = 'a';
 
 --connection node_2
+--replace_column 7 #
 SHOW CREATE TRIGGER tr1;
 DROP TABLE t1;
 
 
 --connection node_1
+--disable_warnings
 CREATE EVENT event1 ON SCHEDULE AT '2038-01-01 23:59:59' DO SELECT 1;
+--enable_warnings
 
 --connection node_2
 SHOW CREATE EVENT event1;

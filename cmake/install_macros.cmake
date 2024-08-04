@@ -11,7 +11,7 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA 
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335  USA 
 
 INCLUDE(CMakeParseArguments)
 
@@ -32,40 +32,20 @@ FUNCTION (INSTALL_DEBUG_SYMBOLS)
   ENDIF()
   SET(targets ${ARG_UNPARSED_ARGUMENTS})
   FOREACH(target ${targets})
-    GET_TARGET_PROPERTY(type ${target} TYPE)
-    GET_TARGET_PROPERTY(location ${target} LOCATION)
-    STRING(REPLACE ".exe" ".pdb" pdb_location ${location})
-    STRING(REPLACE ".dll" ".pdb" pdb_location ${pdb_location})
-    STRING(REPLACE ".lib" ".pdb" pdb_location ${pdb_location})
-    IF(CMAKE_GENERATOR MATCHES "Visual Studio")
-      STRING(REPLACE
-        "${CMAKE_CFG_INTDIR}" "\${CMAKE_INSTALL_CONFIG_NAME}"
-        pdb_location ${pdb_location})
+    GET_TARGET_PROPERTY(target_type ${target} TYPE)
+    IF(target_type MATCHES "STATIC")
+      RETURN()
     ENDIF()
-	
     set(comp "")
-   
-    IF(target MATCHES "mysqld" OR type MATCHES "MODULE")
-      #MESSAGE("PDB: ${targets}")
+
+    IF((target STREQUAL "mysqld"))
       SET(comp Server)
     ENDIF()
- 
-    IF(NOT comp MATCHES Server)
-      IF(ARG_COMPONENT MATCHES Development
-        OR ARG_COMPONENT MATCHES SharedLibraries
-        OR ARG_COMPONENT MATCHES Embedded)
-        SET(comp Debuginfo)
-      ENDIF()
-    ENDIF()
 
-    IF(NOT comp)
-      SET(comp Debuginfo_archive_only) # not in MSI
+    INSTALL(FILES $<TARGET_PDB_FILE:${target}> DESTINATION symbols COMPONENT Debuginfo)
+    IF(comp)
+      INSTALL(FILES $<TARGET_PDB_FILE:${target}> DESTINATION ${ARG_INSTALL_LOCATION} COMPONENT ${comp})
     ENDIF()
-	IF(type MATCHES "STATIC")
-	  # PDB for static libraries might be unsupported http://public.kitware.com/Bug/view.php?id=14600
-	  SET(opt OPTIONAL)
-	ENDIF()
-    INSTALL(FILES ${pdb_location} DESTINATION ${ARG_INSTALL_LOCATION} COMPONENT ${comp} ${opt})
   ENDFOREACH()
   ENDIF()
 ENDFUNCTION()
@@ -126,7 +106,12 @@ FUNCTION(INSTALL_SCRIPT)
     SET(COMP)
   ENDIF()
 
+  IF (COMP MATCHES ${SKIP_COMPONENTS})
+    RETURN()
+  ENDIF()
+
   INSTALL(PROGRAMS ${script} DESTINATION ${ARG_DESTINATION} ${COMP})
+
   INSTALL_MANPAGE(${script})
 ENDFUNCTION()
 
@@ -141,6 +126,10 @@ FUNCTION(INSTALL_DOCUMENTATION)
     SET(destination ${INSTALL_DOCREADMEDIR})
   ELSE()
     SET(destination ${INSTALL_DOCDIR})
+  ENDIF()
+
+  IF (ARG_COMPONENT MATCHES ${SKIP_COMPONENTS})
+    RETURN()
   ENDIF()
 
   STRING(TOUPPER ${ARG_COMPONENT} COMPUP)
@@ -165,17 +154,13 @@ ENDFUNCTION()
 # and extension will be the same as for target file.
 MACRO(INSTALL_SYMLINK linkname target destination component)
 IF(UNIX)
-  GET_TARGET_PROPERTY(location ${target} LOCATION)
-  GET_FILENAME_COMPONENT(path ${location} PATH)
-  GET_FILENAME_COMPONENT(name ${location} NAME)
-  SET(output ${path}/${linkname})
+  SET(output ${CMAKE_CURRENT_BINARY_DIR}/${linkname})
   ADD_CUSTOM_COMMAND(
     OUTPUT ${output}
-    COMMAND ${CMAKE_COMMAND} ARGS -E remove -f ${output}
+    COMMAND ${CMAKE_COMMAND} ARGS -E remove -f ${linkname}
     COMMAND ${CMAKE_COMMAND} ARGS -E create_symlink 
-      ${name} 
+      $<TARGET_FILE_NAME:${target}>
       ${linkname}
-    WORKING_DIRECTORY ${path}
     DEPENDS ${target}
     )
   
@@ -197,51 +182,41 @@ IF(WIN32)
   MARK_AS_ADVANCED(SIGNCODE)
   IF(SIGNCODE)
    SET(SIGNTOOL_PARAMETERS 
-     /a /t http://timestamp.verisign.com/scripts/timstamp.dll
+     /a /t http://timestamp.globalsign.com/?signature=sha2
      CACHE STRING "parameters for signtool (list)")
-    FIND_PROGRAM(SIGNTOOL_EXECUTABLE signtool 
-      PATHS "$ENV{ProgramFiles}/Microsoft SDKs/Windows/v7.0A/bin"
-      "$ENV{ProgramFiles}/Windows Kits/8.0/bin/x86"
-    )
     IF(NOT SIGNTOOL_EXECUTABLE)
-      MESSAGE(FATAL_ERROR 
-      "signtool is not found. Signing executables not possible")
+      FILE(GLOB path_list
+        "$ENV{ProgramFiles} (x86)/Windows Kits/*/bin/*/x64"
+        "$ENV{ProgramFiles} (x86)/Windows Kits/*/App Certification Kit"
+      )
+      FIND_PROGRAM(SIGNTOOL_EXECUTABLE signtool
+        PATHS ${path_list}
+      )
+      IF(NOT SIGNTOOL_EXECUTABLE)
+        MESSAGE(FATAL_ERROR
+        "signtool is not found. Signing executables not possible")
+      ENDIF()
+      MARK_AS_ADVANCED(SIGNTOOL_EXECUTABLE  SIGNTOOL_PARAMETERS)
     ENDIF()
-    MARK_AS_ADVANCED(SIGNTOOL_EXECUTABLE  SIGNTOOL_PARAMETERS)
   ENDIF()
 ENDIF()
 
-MACRO(SIGN_TARGET)
-  CMAKE_PARSE_ARGUMENTS(ARG "" "COMPONENT" "" ${ARGN})
- SET(target ${ARG_UNPARSED_ARGUMENTS})
- IF(ARG_COMPONENT)
-  SET(comp COMPONENT ${ARG_COMPONENT})
- ELSE()
-  SET(comp)
- ENDIF()
- GET_TARGET_PROPERTY(target_type ${target} TYPE)
- IF(target_type AND NOT target_type MATCHES "STATIC")
-   GET_TARGET_PROPERTY(target_location ${target}  LOCATION)
-   IF(CMAKE_GENERATOR MATCHES "Visual Studio")
-   STRING(REPLACE "${CMAKE_CFG_INTDIR}" "\${CMAKE_INSTALL_CONFIG_NAME}" 
-     target_location ${target_location})
-   ENDIF()
-   INSTALL(CODE
-   "EXECUTE_PROCESS(COMMAND 
-   \"${SIGNTOOL_EXECUTABLE}\" verify /pa /q \"${target_location}\"
-   RESULT_VARIABLE ERR)
-   IF(NOT \${ERR} EQUAL 0)
-     EXECUTE_PROCESS(COMMAND 
-     \"${SIGNTOOL_EXECUTABLE}\" sign ${SIGNTOOL_PARAMETERS} \"${target_location}\"
-     RESULT_VARIABLE ERR)
-   ENDIF()
-   IF(NOT \${ERR} EQUAL 0)
-    MESSAGE(FATAL_ERROR \"Error signing  '${target_location}'\")
-   ENDIF()
-   " ${comp})
- ENDIF()
-ENDMACRO()
 
+FUNCTION(SIGN_TARGET target)
+   IF(NOT SIGNCODE)
+     RETURN()
+   ENDIF()
+   GET_TARGET_PROPERTY(target_type ${target} TYPE)
+   IF((NOT target_type) OR (target_type MATCHES "STATIC"))
+     RETURN()
+   ENDIF()
+    # Mark executable for signing by creating empty *.signme file
+    # The actual signing happens in preinstall step
+    # (which traverses 
+    ADD_CUSTOM_COMMAND(TARGET ${target} POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E touch "$<TARGET_FILE:${target}>.signme"
+   )
+ENDFUNCTION()
 
 # Installs targets, also installs pdbs on Windows.
 #

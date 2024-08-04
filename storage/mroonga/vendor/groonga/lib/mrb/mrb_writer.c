@@ -13,7 +13,7 @@
 
   You should have received a copy of the GNU Lesser General Public
   License along with this library; if not, write to the Free Software
-  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA
 */
 
 #include "../grn_ctx_impl.h"
@@ -40,7 +40,11 @@ writer_write(mrb_state *mrb, mrb_value self)
 
   switch (mrb_type(target)) {
   case MRB_TT_FALSE :
-    GRN_OUTPUT_BOOL(GRN_FALSE);
+    if (mrb_nil_p(target)) {
+      GRN_OUTPUT_NULL();
+    } else {
+      GRN_OUTPUT_BOOL(GRN_FALSE);
+    }
     break;
   case MRB_TT_TRUE :
     GRN_OUTPUT_BOOL(GRN_TRUE);
@@ -51,12 +55,23 @@ writer_write(mrb_state *mrb, mrb_value self)
   case MRB_TT_FLOAT :
     GRN_OUTPUT_FLOAT(mrb_float(target));
     break;
+  case MRB_TT_SYMBOL :
+    {
+      const char *name;
+      mrb_int name_length;
+
+      name = mrb_sym2name_len(mrb, mrb_symbol(target), &name_length);
+      GRN_OUTPUT_STR(name, name_length);
+    }
+    break;
   case MRB_TT_STRING :
     GRN_OUTPUT_STR(RSTRING_PTR(target), RSTRING_LEN(target));
     break;
   default :
     mrb_raisef(mrb, E_ARGUMENT_ERROR,
-               "must be true, false, number, float or string: %S", target);
+               "must be nil, true, false, number, float, symbol or string: "
+               "%S",
+               target);
     break;
   }
 
@@ -198,7 +213,7 @@ static mrb_value
 writer_set_content_type(mrb_state *mrb, mrb_value self)
 {
   grn_ctx *ctx = (grn_ctx *)mrb->ud;
-  grn_content_type content_type;
+  mrb_int content_type;
 
   mrb_get_args(mrb, "i", &content_type);
 

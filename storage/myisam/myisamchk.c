@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA */
 
 /* Describe, check and repair of MyISAM tables */
 
@@ -28,7 +28,7 @@
 static uint decode_bits;
 static char **default_argv;
 static const char *load_default_groups[]= { "myisamchk", 0 };
-static const char *set_collation_name, *opt_tmpdir;
+static char *set_collation_name, *opt_tmpdir;
 static CHARSET_INFO *set_collation;
 static long opt_myisam_block_size;
 static long opt_key_cache_block_size;
@@ -94,11 +94,10 @@ int main(int argc, char **argv)
     (void) fflush(stderr);
     if ((check_param.error_printed | check_param.warning_printed) &&
 	(check_param.testflag & T_FORCE_CREATE) &&
-	(!(check_param.testflag & (T_REP | T_REP_BY_SORT | T_SORT_RECORDS |
-				   T_SORT_INDEX))))
+	(!(check_param.testflag & (T_REP_ANY | T_SORT_RECORDS | T_SORT_INDEX))))
     {
       ulonglong old_testflag=check_param.testflag;
-      if (!(check_param.testflag & T_REP))
+      if (!(check_param.testflag & T_REP_ANY))
 	check_param.testflag|= T_REP_BY_SORT;
       check_param.testflag&= ~T_EXTEND;			/* Don't needed  */
       error|=myisamchk(&check_param, argv[-1]);
@@ -379,7 +378,7 @@ static void usage(void)
 
   puts("Check options (check is the default action for myisamchk):\n\
   -c, --check	      Check table for errors.\n\
-  -e, --extend-check  Check the table VERY throughly.  Only use this in\n\
+  -e, --extend-check  Check the table VERY thoroughly.  Only use this in\n\
                       extreme cases as myisamchk should normally be able to\n\
                       find out if the table is ok even without this switch.\n\
   -F, --fast	      Check only tables that haven't been closed properly.\n\
@@ -753,9 +752,7 @@ static void get_options(register int *argc,register char ***argv)
 {
   int ho_error;
 
-  if (load_defaults("my", load_default_groups, argc, argv))
-    exit(1);
-
+  load_defaults_or_exit("my", load_default_groups, argc, argv);
   default_argv= *argv;
   if (isatty(fileno(stdout)))
     check_param.testflag|=T_WRITE_LOOP;
@@ -820,20 +817,22 @@ static int myisamchk(HA_CHECK *param, char * filename)
   char llbuff[22],llbuff2[22];
   my_bool state_updated=0;
   MYISAM_SHARE *share;
+  int open_mode;
+  uint open_flags= HA_OPEN_FOR_REPAIR;
   DBUG_ENTER("myisamchk");
 
   param->out_flag=error=param->warning_printed=param->error_printed=
     recreate=0;
   datafile=0;
   param->isam_file_name=filename;		/* For error messages */
-  if (!(info=mi_open(filename,
-		     (param->testflag & (T_DESCRIPT | T_READONLY)) ?
-		     O_RDONLY : O_RDWR,
-		     HA_OPEN_FOR_REPAIR |
-		     ((param->testflag & T_WAIT_FOREVER) ?
-		      HA_OPEN_WAIT_IF_LOCKED :
-		      (param->testflag & T_DESCRIPT) ?
-		      HA_OPEN_IGNORE_IF_LOCKED : HA_OPEN_ABORT_IF_LOCKED))))
+  open_mode= param->testflag & (T_DESCRIPT | T_READONLY) ? O_RDONLY : O_RDWR;
+  if (param->testflag & T_WAIT_FOREVER)
+    open_flags|= HA_OPEN_WAIT_IF_LOCKED;
+  else if (param->testflag & T_DESCRIPT)
+    open_flags|= HA_OPEN_IGNORE_IF_LOCKED | HA_OPEN_FROM_SQL_LAYER;
+  else
+    open_flags|= HA_OPEN_ABORT_IF_LOCKED;
+  if (!(info=mi_open(filename, open_mode, open_flags)))
   {
     /* Avoid twice printing of isam file name */
     param->error_printed=1;
@@ -1047,7 +1046,7 @@ static int myisamchk(HA_CHECK *param, char * filename)
                                   MYF(MY_WME)); /* Close new file */
 	  error|=change_to_newfile(filename, MI_NAME_DEXT, DATA_TMP_EXT, 
                                    0, MYF(0));
-	  if (mi_open_datafile(info,info->s, NULL, -1))
+	  if (mi_open_datafile(info, info->s))
 	    error=1;
 	  param->out_flag&= ~O_NEW_DATA; /* We are using new datafile */
 	  param->read_cache.file=info->dfile;
@@ -1067,7 +1066,7 @@ static int myisamchk(HA_CHECK *param, char * filename)
 
 	  error=mi_sort_records(param,info,filename,param->opt_sort_key,
                              /* what is the following parameter for ? */
-				(my_bool) !(param->testflag & T_REP),
+				(my_bool) !(param->testflag & T_REP_ANY),
 				update_index);
 	  datafile=info->dfile;	/* This is now locked */
 	  if (!error && !update_index)
@@ -1115,7 +1114,7 @@ static int myisamchk(HA_CHECK *param, char * filename)
       {
 	if (param->testflag & (T_EXTEND | T_MEDIUM))
 	  (void) init_key_cache(dflt_key_cache,opt_key_cache_block_size,
-                                param->use_buffers, 0, 0, 0, 0);
+                                (size_t)param->use_buffers, 0, 0, 0, 0);
 	(void) init_io_cache(&param->read_cache,datafile,
 			   (uint) param->read_buffer_length,
 			   READ_CACHE,
@@ -1406,8 +1405,8 @@ static void descript(HA_CHECK *param, register MI_INFO *info, char * name)
 	null_bit[0]=null_pos[0]=0;
 	if (keyseg->null_bit)
 	{
-	  sprintf(null_bit,"%d",keyseg->null_bit);
-	  sprintf(null_pos,"%ld",(long) keyseg->null_pos+1);
+	  my_snprintf(null_bit, sizeof(null_bit), "%d", keyseg->null_bit);
+	  my_snprintf(null_pos, sizeof(null_pos), "%ld", (long) keyseg->null_pos+1);
 	}
 	printf("%-7ld%-5d%-9s%-10s%-30s\n",
 	       (long) keyseg->start+1,keyseg->length,

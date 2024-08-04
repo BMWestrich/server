@@ -6,6 +6,11 @@
 # Like all other perfschema tests, we don't work on embedded server:
 --source include/not_embedded.inc
 
+# There is a query below that selects from P_S tables.
+# Remove possible history that could confuse it
+truncate table performance_schema.events_statements_history_long;
+truncate table performance_schema.events_stages_history_long;
+
 --disable_warnings
 drop table if exists t0, t1;
 --enable_warnings
@@ -33,7 +38,8 @@ let $wait_condition= select State='show_explain_trap' from information_schema.pr
 #
 connection con1;
 set @show_explain_probe_select_id=1;
-set debug_dbug='d,show_explain_probe_join_exec_start';
+SET @saved_dbug = @@SESSION.debug_dbug;
+SET debug_dbug='d,show_explain_probe_join_exec_start';
 send select count(*) from t0 where a < 100000;
 
 connection default;
@@ -42,10 +48,14 @@ evalp show explain for $thr2;
 connection con1;
 reap;
 
-set debug_dbug='';
+SET debug_dbug= @saved_dbug;
 
-select event_name
-from performance_schema.events_waits_history_long 
-where event_name='wait/synch/cond/sql/show_explain';
+evalp select event_name
+        from
+        performance_schema.events_stages_history_long join
+        performance_schema.threads using (thread_id)
+        where
+          event_name like '%show explain' and
+          processlist_id=$thr1;
 
 drop table t0;

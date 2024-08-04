@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 #ifndef SQL_EXPRESSION_CACHE_INCLUDED
 #define SQL_EXPRESSION_CACHE_INCLUDED
@@ -83,7 +83,11 @@ public:
     cache(c), hit(0), miss(0), state(UNINITED)
   {}
 
+private:
+  // This can be NULL if the cache is already deleted
   Expression_cache *cache;
+
+public:
   ulong hit, miss;
   enum expr_cache_state state;
 
@@ -91,6 +95,7 @@ public:
   void set(ulong h, ulong m, enum expr_cache_state s)
   {hit= h; miss= m; state= s;}
 
+  void detach_from_cache() { cache= NULL; }
   void fetch_current_stats()
   {
     if (cache)

@@ -1,17 +1,24 @@
 /* Copyright (c) 2008, 2014, Oracle and/or its affiliates. All rights reserved.
 
   This program is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; version 2 of the License.
+  it under the terms of the GNU General Public License, version 2.0,
+  as published by the Free Software Foundation.
+
+  This program is also distributed with certain software (including
+  but not limited to OpenSSL) that is licensed under separate terms,
+  as designated in a particular file or component or in included license
+  documentation.  The authors of MySQL hereby grant you an additional
+  permission to link the program and your derivative works with the
+  separately licensed software that they have included with MySQL.
 
   This program is distributed in the hope that it will be useful,
   but WITHOUT ANY WARRANTY; without even the implied warranty of
   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
+  GNU General Public License, version 2.0, for more details.
 
   You should have received a copy of the GNU General Public License
   along with this program; if not, write to the Free Software Foundation,
-  51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA */
+  51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 /**
   @file storage/perfschema/ha_perfschema.cc
@@ -225,7 +232,7 @@ maria_declare_plugin(perfschema)
   0x0001,
   pfs_status_vars,
   NULL,
-  "5.6.29",
+  "5.6.40",
   MariaDB_PLUGIN_MATURITY_STABLE
 }
 maria_declare_plugin_end;
@@ -271,7 +278,6 @@ int ha_perfschema::write_row(uchar *buf)
     DBUG_RETURN(HA_ERR_WRONG_COMMAND);
 
   DBUG_ASSERT(m_table_share);
-  ha_statistic_increment(&SSV::ha_write_count);
   result= m_table_share->write_row(table, buf, table->field);
   DBUG_RETURN(result);
 }
@@ -297,7 +303,6 @@ int ha_perfschema::update_row(const uchar *old_data, uchar *new_data)
     DBUG_RETURN(0);
 
   DBUG_ASSERT(m_table);
-  ha_statistic_increment(&SSV::ha_update_count);
   int result= m_table->update_row(table, old_data, new_data, table->field);
   DBUG_RETURN(result);
 }
@@ -309,7 +314,6 @@ int ha_perfschema::delete_row(const uchar *buf)
     DBUG_RETURN(HA_ERR_WRONG_COMMAND);
 
   DBUG_ASSERT(m_table);
-  ha_statistic_increment(&SSV::ha_delete_count);
   int result= m_table->delete_row(table, buf, table->field);
   DBUG_RETURN(result);
 }
@@ -354,7 +358,6 @@ int ha_perfschema::rnd_next(uchar *buf)
   }
 
   DBUG_ASSERT(m_table);
-  ha_statistic_increment(&SSV::ha_read_rnd_next_count);
 
   int result= m_table->rnd_next();
   if (result == 0)
@@ -386,7 +389,6 @@ int ha_perfschema::rnd_pos(uchar *buf, uchar *pos)
   }
 
   DBUG_ASSERT(m_table);
-  ha_statistic_increment(&SSV::ha_read_rnd_count);
   int result= m_table->rnd_pos(pos);
   if (result == 0)
     result= m_table->read_row(table, buf, table->field);

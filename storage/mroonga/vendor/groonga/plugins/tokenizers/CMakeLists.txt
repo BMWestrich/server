@@ -11,7 +11,7 @@
 #
 # You should have received a copy of the GNU Lesser General Public
 # License along with this library; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA
 
 include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/../../lib
@@ -22,6 +22,17 @@ if(GRN_WITH_MECAB)
   read_file_list(${CMAKE_CURRENT_SOURCE_DIR}/mecab_sources.am MECAB_SOURCES)
   include_directories(${MECAB_INCLUDE_DIRS})
   link_directories(${MECAB_LIBRARY_DIRS})
+  if(GRN_WITH_BUNDLED_MECAB)
+    set(GRN_BUNDLED_MECAB_RELATIVE_RC_PATH "${CONFIG_DIR}/mecabrc")
+    set(MECAB_COMPILE_DEFINITIONS
+      "GRN_WITH_BUNDLED_MECAB"
+      "GRN_BUNDLED_MECAB_RELATIVE_RC_PATH=\"${GRN_BUNDLED_MECAB_RELATIVE_RC_PATH}\""
+      "GRN_BUNDLED_MECAB_RC_PATH=\"${CMAKE_INSTALL_PREFIX}/${GRN_BUNDLED_MECAB_RELATIVE_RC_PATH}\"")
+    set_source_files_properties(${MECAB_SOURCES}
+      PROPERTIES
+      COMPILE_DEFINITIONS
+      "${MECAB_COMPILE_DEFINITIONS}")
+  endif()
   set_source_files_properties(${MECAB_SOURCES}
     PROPERTIES
     COMPILE_FLAGS "${GRN_C_COMPILE_FLAGS}")

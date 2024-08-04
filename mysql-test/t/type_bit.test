@@ -168,7 +168,7 @@ drop table t1;
 #
 
 create table t1 (a bit(8)) engine=heap;
-insert into t1 values ('1111100000');
+insert ignore into t1 values ('1111100000');
 select a+0 from t1;
 drop table t1;
 
@@ -257,7 +257,7 @@ drop table bug15583;
 #
 
 create table t1(a bit(1), b smallint unsigned);
-insert into t1 (b, a) values ('2', '1');
+insert ignore into t1 (b, a) values ('2', '1');
 select hex(a), b from t1;
 drop table t1;
 
@@ -324,7 +324,7 @@ DROP TABLE t2;
 
 CREATE TABLE t1(a BIT(13), KEY(a));
 --disable_warnings
-INSERT INTO t1(a) VALUES
+INSERT IGNORE INTO t1(a) VALUES
 (65535),(65525),(65535),(65535),(65535),(65535),(65535),(65535),(65535),(65535);
 --enable_warnings
 
@@ -439,3 +439,56 @@ SELECT SUM(a) FROM t1 GROUP BY c, b, a;
 DROP TABLE t1;
 
 --echo End of 5.1 tests
+
+--echo #
+--echo # Start of 10.1 tests
+--echo #
+
+--echo #
+--echo # MDEV-8867 Wrong field type or metadata for COALESCE(bit_column, 1)
+--echo #
+
+CREATE TABLE t1 (val bit(1));
+INSERT INTO t1 VALUES (0);
+CREATE TABLE t2 AS SELECT COALESCE(val, 1) AS c FROM t1;
+SELECT  * FROM t2;
+SHOW CREATE TABLE t2;
+DROP TABLE t2;
+--enable_metadata
+SELECT COALESCE(val, 1) FROM t1;
+--disable_metadata
+DROP TABLE t1;
+
+--echo #
+--echo # MDEV-18452 ASAN unknown-crash in Field::set_default upon SET bit_column = DEFAULT
+--echo #
+
+CREATE TABLE t1 (b BIT(20)) ENGINE=MyISAM;
+INSERT INTO t1 VALUES (0);
+UPDATE t1 SET b = DEFAULT;
+DROP TABLE t1;
+
+--echo #
+--echo # End of 10.1 tests
+--echo #
+
+
+--echo #
+--echo # Start of 10.2 tests
+--echo #
+
+--echo #
+--echo # MDEV-9334 ALTER from DECIMAL to BIGINT UNSIGNED returns a wrong result
+--echo #
+
+CREATE TABLE t1 (a DECIMAL(30,0));
+INSERT INTO t1 VALUES (CAST(0xFFFFFFFFFFFFFFFF AS UNSIGNED));
+ALTER TABLE t1 MODIFY a BIT(64);
+SELECT a+0 FROM t1;
+DROP TABLE IF EXISTS t1;
+
+
+--echo #
+--echo # End of 10.2 tests
+--echo #
+

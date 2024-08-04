@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #include <my_global.h>
 #include "sql_priv.h"
@@ -118,8 +118,23 @@ void mysql_audit_acquire_plugins(THD *thd, ulong *event_class_mask)
   {
     plugin_foreach(thd, acquire_plugins, MYSQL_AUDIT_PLUGIN, event_class_mask);
     add_audit_mask(thd->audit_class_mask, event_class_mask);
+    thd->audit_plugin_version= global_plugin_version;
   }
   DBUG_VOID_RETURN;
+}
+
+
+/**
+  Check if there were changes in the state of plugins
+  so we need to do the mysql_audit_release asap.
+
+  @param[in] thd
+
+*/
+
+my_bool mysql_audit_release_required(THD *thd)
+{
+  return thd && (thd->audit_plugin_version != global_plugin_version);
 }
 
 
@@ -158,6 +173,7 @@ void mysql_audit_release(THD *thd)
   /* Reset the state of thread values */
   reset_dynamic(&thd->audit_class_plugins);
   bzero(thd->audit_class_mask, sizeof(thd->audit_class_mask));
+  thd->audit_plugin_version= -1;
 }
 
 
@@ -240,7 +256,7 @@ void mysql_audit_finalize()
 
 /**
   Initialize an Audit plug-in
-  
+
   @param[in] plugin
 
   @retval FALSE  OK
@@ -250,15 +266,14 @@ void mysql_audit_finalize()
 int initialize_audit_plugin(st_plugin_int *plugin)
 {
   st_mysql_audit *data= (st_mysql_audit*) plugin->plugin->info;
-  
-  if (!data->class_mask || !data->event_notify ||
-      !data->class_mask[0])
+
+  if (!data->event_notify || !data->class_mask[0])
   {
     sql_print_error("Plugin '%s' has invalid data.",
                     plugin->name.str);
     return 1;
   }
-  
+
   if (plugin->plugin->init && plugin->plugin->init(NULL))
   {
     sql_print_error("Plugin '%s' init function returned error.",
@@ -268,7 +283,7 @@ int initialize_audit_plugin(st_plugin_int *plugin)
 
   /* Make the interface info more easily accessible */
   plugin->data= plugin->plugin->info;
-  
+
   /* Add the bits the plugin is interested in to the global mask */
   mysql_mutex_lock(&LOCK_audit_mask);
   add_audit_mask(mysql_global_audit_mask, data->class_mask);
@@ -460,5 +475,12 @@ void mysql_audit_release(THD *thd)
 {
 }
 
+void mysql_audit_init_thd(THD *thd)
+{
+}
+
+void mysql_audit_free_thd(THD *thd)
+{
+}
 
 #endif /* EMBEDDED_LIBRARY */

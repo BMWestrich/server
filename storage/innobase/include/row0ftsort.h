@@ -1,7 +1,7 @@
 /*****************************************************************************
 
-Copyright (c) 2010, 2012, Oracle and/or its affiliates. All Rights Reserved.
-Copyright (c) 2015, MariaDB Corporation.
+Copyright (c) 2010, 2016, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2015, 2018, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -13,7 +13,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -27,14 +27,12 @@ Created 10/13/2010 Jimmy Yang
 #ifndef row0ftsort_h
 #define row0ftsort_h
 
-#include "univ.i"
 #include "data0data.h"
-#include "dict0types.h"
-#include "row0mysql.h"
 #include "fts0fts.h"
-#include "fts0types.h"
 #include "fts0priv.h"
+#include "rem0types.h"
 #include "row0merge.h"
+#include "btr0bulk.h"
 
 /** This structure defineds information the scan thread will fetch
 and put to the linked list for parallel tokenization/sort threads
@@ -53,7 +51,6 @@ struct fts_doc_item {
 tokenization threads and sort threads. */
 typedef UT_LIST_BASE_NODE_T(fts_doc_item_t)     fts_doc_list_t;
 
-#define FTS_NUM_AUX_INDEX	6
 #define FTS_PLL_MERGE		1
 
 /** Sort information passed to each individual parallel sort thread */
@@ -72,7 +69,6 @@ struct fts_psort_common_t {
 						store Doc ID during sort, if
 						Doc ID will not be big enough
 						to use 8 bytes value */
-	fil_space_crypt_t*	crypt_data;	/*!< crypt data or NULL */
 };
 
 struct fts_psort_t {
@@ -99,6 +95,15 @@ struct fts_psort_t {
 	ib_mutex_t		mutex;		/*!< mutex for fts_doc_list */
 };
 
+/** Row fts token for plugin parser */
+struct row_fts_token_t {
+	fts_string_t*	text;		/*!< token */
+	UT_LIST_NODE_T(row_fts_token_t)
+			token_list;	/*!< next token link */
+};
+
+typedef UT_LIST_BASE_NODE_T(row_fts_token_t)     fts_token_list_t;
+
 /** Structure stores information from string tokenization operation */
 struct fts_tokenize_ctx {
 	ulint			processed_len;  /*!< processed string length */
@@ -112,6 +117,17 @@ struct fts_tokenize_ctx {
 	ib_rbt_t*		cached_stopword;/*!< in: stopword list */
 	dfield_t		sort_field[FTS_NUM_FIELDS_SORT];
 						/*!< in: sort field */
+	fts_token_list_t	fts_token_list;
+
+	fts_tokenize_ctx() :
+		processed_len(0), init_pos(0), buf_used(0),
+		rows_added(), cached_stopword(NULL), sort_field(),
+		fts_token_list()
+	{
+		memset(rows_added, 0, sizeof rows_added);
+		memset(sort_field, 0, sizeof sort_field);
+		UT_LIST_INIT(fts_token_list, &row_fts_token_t::token_list);
+	}
 };
 
 typedef struct fts_tokenize_ctx fts_tokenize_ctx_t;
@@ -119,13 +135,16 @@ typedef struct fts_tokenize_ctx fts_tokenize_ctx_t;
 /** Structure stores information needed for the insertion phase of FTS
 parallel sort. */
 struct fts_psort_insert {
-	trx_t*		trx;		/*!< Transaction used for insertion */
-	que_t**		ins_graph;	/*!< insert graph */
-	fts_table_t	fts_table;	/*!< auxiliary table */
 	CHARSET_INFO*	charset;	/*!< charset info */
 	mem_heap_t*	heap;		/*!< heap */
 	ibool		opt_doc_id_size;/*!< Whether to use smaller (4 bytes)
 					integer for Doc ID */
+	BtrBulk*	btr_bulk;	/*!< Bulk load instance */
+	dtuple_t*	tuple;		/*!< Tuple to insert */
+
+#ifdef UNIV_DEBUG
+	ulint		aux_index_id;	/*!< Auxiliary index id */
+#endif
 };
 
 typedef struct fts_psort_insert	fts_psort_insert_t;
@@ -159,7 +178,6 @@ tokenized doc string. The index has three "fields":
 3) Word's position in original 'doc'.
 
 @return dict_index_t structure for the fts sort index */
-UNIV_INTERN
 dict_index_t*
 row_merge_create_fts_sort_index(
 /*============================*/
@@ -176,7 +194,6 @@ row_merge_create_fts_sort_index(
 /********************************************************************//**
 Initialize FTS parallel sort structures.
 @return TRUE if all successful */
-UNIV_INTERN
 ibool
 row_fts_psort_info_init(
 /*====================*/
@@ -193,11 +210,10 @@ row_fts_psort_info_init(
 					instantiated */
 	fts_psort_t**		merge)	/*!< out: parallel merge info
 					to be instantiated */
-	__attribute__((nonnull));
+	MY_ATTRIBUTE((nonnull));
 /********************************************************************//**
 Clean up and deallocate FTS parallel sort structures, and close
 temparary merge sort files */
-UNIV_INTERN
 void
 row_fts_psort_info_destroy(
 /*=======================*/
@@ -205,60 +221,26 @@ row_fts_psort_info_destroy(
 	fts_psort_t*	merge_info);	/*!< parallel merge info */
 /********************************************************************//**
 Free up merge buffers when merge sort is done */
-UNIV_INTERN
 void
 row_fts_free_pll_merge_buf(
 /*=======================*/
 	fts_psort_t*	psort_info);	/*!< in: parallel sort info */
 
 /*********************************************************************//**
-Function performs parallel tokenization of the incoming doc strings.
-@return OS_THREAD_DUMMY_RETURN */
-UNIV_INTERN
-os_thread_ret_t
-fts_parallel_tokenization(
-/*======================*/
-	void*		arg);		/*!< in: psort_info for the thread */
-/*********************************************************************//**
 Start the parallel tokenization and parallel merge sort */
-UNIV_INTERN
 void
 row_fts_start_psort(
 /*================*/
 	fts_psort_t*	psort_info);	/*!< in: parallel sort info */
 /*********************************************************************//**
-Function performs the merge and insertion of the sorted records.
-@return OS_THREAD_DUMMY_RETURN */
-UNIV_INTERN
-os_thread_ret_t
-fts_parallel_merge(
-/*===============*/
-	void*		arg);		/*!< in: parallel merge info */
-/*********************************************************************//**
 Kick off the parallel merge and insert thread */
-UNIV_INTERN
 void
 row_fts_start_parallel_merge(
 /*=========================*/
 	fts_psort_t*	merge_info);	/*!< in: parallel sort info */
 /********************************************************************//**
-Read sorted FTS data files and insert data tuples to auxillary tables.
-@return DB_SUCCESS or error number */
-UNIV_INTERN
-void
-row_fts_insert_tuple(
-/*=================*/
-	fts_psort_insert_t*
-			ins_ctx,        /*!< in: insert context */
-	fts_tokenizer_word_t* word,	/*!< in: last processed
-					tokenized word */
-	ib_vector_t*	positions,	/*!< in: word position */
-	doc_id_t*	in_doc_id,	/*!< in: last item doc id */
-	dtuple_t*	dtuple);	/*!< in: entry to insert */
-/********************************************************************//**
 Propagate a newly added record up one level in the selection tree
 @return parent where this value propagated to */
-UNIV_INTERN
 int
 row_merge_fts_sel_propagate(
 /*========================*/
@@ -266,13 +248,12 @@ row_merge_fts_sel_propagate(
 	int*		sel_tree,	/*<! in: selection tree */
 	ulint		level,		/*<! in: selection tree level */
 	const mrec_t**	 mrec,		/*<! in: sort record */
-	ulint**		offsets,	/*<! in: record offsets */
+	rec_offs**	offsets,	/*<! in: record offsets */
 	dict_index_t*	index);		/*<! in: FTS index */
 /********************************************************************//**
 Read sorted file containing index data tuples and insert these data
 tuples to the index
 @return DB_SUCCESS or error number */
-UNIV_INTERN
 dberr_t
 row_fts_merge_insert(
 /*=================*/
@@ -281,5 +262,5 @@ row_fts_merge_insert(
 	fts_psort_t*	psort_info,	/*!< parallel sort info */
 	ulint		id)		/* !< in: which auxiliary table's data
 					to insert to */
-	__attribute__((nonnull));
+	MY_ATTRIBUTE((nonnull));
 #endif /* row0ftsort_h */

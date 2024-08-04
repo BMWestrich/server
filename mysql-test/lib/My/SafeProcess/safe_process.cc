@@ -1,4 +1,5 @@
 /* Copyright (c) 2008, 2012, Oracle and/or its affiliates
+   Copyright (c) 2019, MariaDB Corporation.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -11,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA */
 
 
 /*
@@ -89,16 +90,23 @@ static void die(const char* fmt, ...)
 }
 
 
-static void kill_child(bool was_killed)
+static int kill_child(bool was_killed)
 {
   int status= 0;
+  pid_t ret_pid= 0;
 
   message("Killing child: %d", child_pid);
   // Terminate whole process group
   if (! was_killed)
-    kill(-child_pid, SIGKILL);
+  {
+    kill(-child_pid, SIGTERM);
+    sleep(10); // will be interrupted by SIGCHLD
+    if (!(ret_pid= waitpid(child_pid, &status, WNOHANG)))
+      kill(-child_pid, SIGKILL);
+  }
 
-  pid_t ret_pid= waitpid(child_pid, &status, 0);
+  if (!ret_pid)
+    ret_pid= waitpid(child_pid, &status, 0);
   if (ret_pid == child_pid)
   {
     int exit_code= 1;
@@ -108,15 +116,15 @@ static void kill_child(bool was_killed)
       exit_code= WEXITSTATUS(status);
       message("Child exit: %d", exit_code);
       // Exit with exit status of the child
-      exit(exit_code);
+      return exit_code;
     }
 
     if (WIFSIGNALED(status))
       message("Child killed by signal: %d", WTERMSIG(status));
 
-    exit(exit_code);
+    return exit_code;
   }
-  exit(5);
+  return 5;
 }
 
 
@@ -136,7 +144,7 @@ extern "C" void handle_signal(int sig)
   terminated= 1;
 
   if (child_pid > 0)
-    kill_child(sig == SIGCHLD);
+    _exit(kill_child(sig == SIGCHLD));
 
   // Ignore further signals
   signal(SIGTERM, SIG_IGN);
@@ -169,6 +177,7 @@ int main(int argc, char* const argv[] )
   sigemptyset(&sa.sa_mask);
 
   sa_abort.sa_handler= handle_abort;
+  sa_abort.sa_flags= 0;
   sigemptyset(&sa_abort.sa_mask);
   /* Install signal handlers */
   sigaction(SIGTERM, &sa,NULL);
@@ -300,8 +309,6 @@ int main(int argc, char* const argv[] )
     /* Wait for parent or child to die */
     sleep(1);
   }
-  kill_child(0);
-
-  return 4;
+  return kill_child(0);
 }
 

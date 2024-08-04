@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -71,7 +71,7 @@ class ha_tina: public handler
   File update_temp_file;
   String buffer;
   /*
-    The chain contains "holes" in the file, occured because of
+    The chain contains "holes" in the file, occurred because of
     deletes/updates. It is used in rnd_end() to get rid of them
     in the end of the query.
   */

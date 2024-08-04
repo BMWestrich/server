@@ -28,7 +28,8 @@ CHANGE MASTER TO master_use_gtid=current_pos;
 --write_file $MYSQLTEST_VARDIR/tmp/mysqld.2.expect
 wait
 EOF
---shutdown_server 30
+FLUSH LOGS;
+--shutdown_server
 --source include/wait_until_disconnected.inc
 
 --connection server_1
@@ -69,7 +70,7 @@ SHOW BINLOG EVENTS IN 'master-bin.000004' LIMIT 1,1;
 --write_file $MYSQLTEST_VARDIR/tmp/mysqld.1.expect
 wait
 EOF
---shutdown_server 30
+--shutdown_server
 --source include/wait_until_disconnected.inc
 
 --append_file $MYSQLTEST_VARDIR/tmp/mysqld.1.expect
@@ -92,6 +93,7 @@ INSERT INTO t1 VALUES(5);
 
 --connection server_2
 --source include/sync_with_master_gtid.inc
+FLUSH NO_WRITE_TO_BINLOG TABLES;
 SELECT * FROM t1 ORDER BY a;
 
 --echo *** Test that @@gtid_slave_pos and @@gtid_current_pos are correctly loaded even if slave threads have not started. ***
@@ -101,7 +103,7 @@ SELECT * FROM t1 ORDER BY a;
 --write_file $MYSQLTEST_VARDIR/tmp/mysqld.2.expect
 wait
 EOF
---shutdown_server 30
+--shutdown_server
 --source include/wait_until_disconnected.inc
 
 --append_file $MYSQLTEST_VARDIR/tmp/mysqld.2.expect
@@ -136,6 +138,7 @@ INSERT INTO t1 VALUES (7);
 
 --connection server_2
 --sync_with_master
+FLUSH NO_WRITE_TO_BINLOG TABLES;
 SELECT * FROM t1 ORDER BY a;
 
 # Now we restart the slave server. When it restarts, there is nothing new
@@ -145,7 +148,7 @@ SELECT * FROM t1 ORDER BY a;
 --write_file $MYSQLTEST_VARDIR/tmp/mysqld.2.expect
 wait
 EOF
---shutdown_server 30
+--shutdown_server
 --source include/wait_until_disconnected.inc
 
 --append_file $MYSQLTEST_VARDIR/tmp/mysqld.2.expect
@@ -177,6 +180,7 @@ INSERT INTO t1 VALUES (8);
 
 --connection server_2
 --sync_with_master
+FLUSH NO_WRITE_TO_BINLOG TABLES;
 SELECT * FROM t1 ORDER BY a;
 --source include/stop_slave.inc
 
@@ -187,7 +191,7 @@ SET sql_log_bin= 1;
 --write_file $MYSQLTEST_VARDIR/tmp/mysqld.2.expect
 wait
 EOF
---shutdown_server 30
+--shutdown_server
 --source include/wait_until_disconnected.inc
 
 --append_file $MYSQLTEST_VARDIR/tmp/mysqld.2.expect
@@ -210,13 +214,14 @@ INSERT INTO t1 VALUES (9);
 
 --connection server_2
 --sync_with_master
+FLUSH NO_WRITE_TO_BINLOG TABLES;
 SELECT * FROM t1 ORDER BY a;
 
 # Put things back as they were.
 --write_file $MYSQLTEST_VARDIR/tmp/mysqld.2.expect
 wait
 EOF
---shutdown_server 30
+--shutdown_server
 --source include/wait_until_disconnected.inc
 
 --append_file $MYSQLTEST_VARDIR/tmp/mysqld.2.expect
@@ -248,12 +253,13 @@ INSERT INTO t1 VALUES (11);
 
 --connection server_2
 --sync_with_master
+FLUSH NO_WRITE_TO_BINLOG TABLES;
 SELECT domain_id, COUNT(*) FROM mysql.gtid_slave_pos GROUP BY domain_id;
 
 --write_file $MYSQLTEST_VARDIR/tmp/mysqld.2.expect
 wait
 EOF
---shutdown_server 30
+--shutdown_server
 --source include/wait_until_disconnected.inc
 
 --append_file $MYSQLTEST_VARDIR/tmp/mysqld.2.expect
@@ -270,6 +276,7 @@ INSERT INTO t1 VALUES (13);
 
 --connection server_2
 --sync_with_master
+FLUSH NO_WRITE_TO_BINLOG TABLES;
 SELECT domain_id, COUNT(*) FROM mysql.gtid_slave_pos GROUP BY domain_id;
 
 
@@ -284,7 +291,7 @@ SET sql_log_bin=1;
 --write_file $MYSQLTEST_VARDIR/tmp/mysqld.2.expect
 wait
 EOF
---shutdown_server 30
+--shutdown_server
 --source include/wait_until_disconnected.inc
 
 # Let the slave mysqld server start again.

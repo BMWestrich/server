@@ -1,17 +1,24 @@
-/* Copyright (c) 2008, 2015, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2008, 2017, Oracle and/or its affiliates. All rights reserved.
 
   This program is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; version 2 of the License.
+  it under the terms of the GNU General Public License, version 2.0,
+  as published by the Free Software Foundation.
+
+  This program is also distributed with certain software (including
+  but not limited to OpenSSL) that is licensed under separate terms,
+  as designated in a particular file or component or in included license
+  documentation.  The authors of MySQL hereby grant you an additional
+  permission to link the program and your derivative works with the
+  separately licensed software that they have included with MySQL.
 
   This program is distributed in the hope that it will be useful,
   but WITHOUT ANY WARRANTY; without even the implied warranty of
   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
+  GNU General Public License, version 2.0, for more details.
 
   You should have received a copy of the GNU General Public License
   along with this program; if not, write to the Free Software Foundation,
-  51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA */
+  51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 #include <my_global.h>
 #include <my_pthread.h>
@@ -355,6 +362,11 @@ void test_oom()
   rc= init_instruments(& param);
   ok(rc == 1, "oom (per thread wait)");
 
+  cleanup_sync_class();
+  cleanup_thread_class();
+  cleanup_file_class();
+  cleanup_instruments();
+
   param.m_enabled= true;
   param.m_mutex_class_sizing= 0;
   param.m_rwlock_class_sizing= 0;
@@ -432,6 +444,8 @@ void test_oom()
   init_event_name_sizing(& param);
   rc= init_instruments(& param);
   ok(rc == 1, "oom (thread stages history sizing)");
+
+  cleanup_thread_class();
   cleanup_instruments();
 
   param.m_enabled= true;
@@ -467,6 +481,9 @@ void test_oom()
   init_event_name_sizing(& param);
   rc= init_instruments(& param);
   ok(rc == 1, "oom (per thread stages)");
+  
+  cleanup_stage_class();
+  cleanup_thread_class();
   cleanup_instruments();
 
   param.m_enabled= true;
@@ -502,6 +519,8 @@ void test_oom()
   init_event_name_sizing(& param);
   rc= init_instruments(& param);
   ok(rc == 1, "oom (thread statements history sizing)");
+
+  cleanup_thread_class();
   cleanup_instruments();
 
   param.m_enabled= true;
@@ -537,6 +556,9 @@ void test_oom()
   init_event_name_sizing(& param);
   rc= init_instruments(& param);
   ok(rc == 1, "oom (per thread statements)");
+
+  cleanup_statement_class();
+  cleanup_thread_class();
   cleanup_instruments();
 
   param.m_enabled= true;
@@ -572,6 +594,8 @@ void test_oom()
   init_event_name_sizing(& param);
   rc= init_instruments(& param);
   ok(rc == 1, "oom (global waits)");
+
+  cleanup_sync_class();
   cleanup_instruments();
 
   param.m_enabled= true;
@@ -609,8 +633,10 @@ void test_oom()
   ok(rc == 0, "init stage class");
   rc= init_instruments(& param);
   ok(rc == 1, "oom (global stages)");
-  cleanup_instruments();
+
+  cleanup_sync_class();
   cleanup_stage_class();
+  cleanup_instruments();
 
   param.m_enabled= true;
   param.m_mutex_class_sizing= 10;
@@ -647,8 +673,10 @@ void test_oom()
   ok(rc == 0, "init statement class");
   rc= init_instruments(& param);
   ok(rc == 1, "oom (global statements)");
-  cleanup_instruments();
+
+  cleanup_sync_class();
   cleanup_statement_class();
+  cleanup_instruments();
 }
 
 void do_all_tests()
@@ -662,6 +690,6 @@ int main(int argc, char **argv)
   MY_INIT(argv[0]);
   do_all_tests();
   my_end(0);
-  return exit_status();
+  return (exit_status());
 }
 

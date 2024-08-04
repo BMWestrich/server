@@ -113,10 +113,14 @@ static void flusher_callback(int state, void* extra) {
     if ((state == flt_flush_before_split && !after_split) ||
         (state == flt_flush_during_split && after_split)) {
         checkpoint_called = true;
-        int r = toku_pthread_create(&checkpoint_tid, NULL, do_checkpoint, NULL); 
+        int r = toku_pthread_create(toku_uninstrumented,
+                                    &checkpoint_tid,
+                                    nullptr,
+                                    do_checkpoint,
+                                    nullptr);
         assert_zero(r);
         while (!checkpoint_callback_called) {
-            usleep(1*1024*1024);
+            usleep(1 * 1024 * 1024);
         }
     }
 }
@@ -256,7 +260,7 @@ doit (bool after_split) {
         true
         );
     assert(node->height == 1);
-    assert(!node->dirty);
+    assert(!node->dirty());
     BLOCKNUM left_child, right_child;
     if (after_split) {
         assert(node->n_children == 2);
@@ -283,7 +287,7 @@ doit (bool after_split) {
             true
             );
         assert(node->height == 0);
-        assert(!node->dirty);
+        assert(!node->dirty());
         assert(node->n_children == 1);
         assert(BLB_DATA(node, 0)->num_klpairs() == 1);
         toku_unpin_ftnode(c_ft->ft, node);
@@ -298,7 +302,7 @@ doit (bool after_split) {
             true
             );
         assert(node->height == 0);
-        assert(!node->dirty);
+        assert(!node->dirty());
         assert(node->n_children == 1);
         assert(BLB_DATA(node, 0)->num_klpairs() == 1);
         toku_unpin_ftnode(c_ft->ft, node);
@@ -314,7 +318,7 @@ doit (bool after_split) {
             true
             );
         assert(node->height == 0);
-        assert(!node->dirty);
+        assert(!node->dirty());
         assert(node->n_children == 1);
         assert(BLB_DATA(node, 0)->num_klpairs() == 2);
         toku_unpin_ftnode(c_ft->ft, node);

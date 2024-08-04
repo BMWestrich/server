@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /* Functions to create an item. Used by sql/sql_yacc.yy */
 
@@ -182,6 +182,12 @@ Item *create_temporal_literal(THD *thd, const String *str,
                                  str->ptr(), str->length(), str->charset(),
                                  type, send_error);
 }
+
+struct Native_func_registry
+{
+  LEX_STRING name;
+  Create_func *builder;
+};
 
 int item_create_init();
 void item_create_cleanup();

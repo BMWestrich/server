@@ -16,12 +16,15 @@ IF(NOT MFC_FOUND)
   ENDIF()
   RETURN()
 ENDIF()
-
-# MFC should be statically linked
-SET(CMAKE_MFC_FLAG 1)
-
+IF(MSVC_CRT_TYPE MATCHES "/MD")
+  # MFC should be dynamically linked
+  SET(CMAKE_MFC_FLAG 2)
+ELSE()
+  # MFC should be statically linked
+  SET(CMAKE_MFC_FLAG 1)
+ENDIF()
 # Enable exception handling (avoids warnings)
-SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /EHsc")
+SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /EHsc -DNO_WARN_MBCS_MFC_DEPRECATION")
 
 INCLUDE_DIRECTORIES(${CMAKE_SOURCE_DIR}/sql)
 MYSQL_ADD_EXECUTABLE(mysql_upgrade_wizard

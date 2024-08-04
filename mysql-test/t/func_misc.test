@@ -2,6 +2,7 @@
 # Testing of misc functions
 #
 
+--source include/default_optimizer_switch.inc
 --disable_warnings
 DROP TABLE IF EXISTS t1, t2;
 --enable_warnings
@@ -596,6 +597,27 @@ AND 57813X540X1723 = 'Test';
 
 drop table t1;
 
+#
+# Bug#12735545 - PARSER STACK OVERFLOW WITH NAME_CONST
+#                CONTAINING OR EXPRESSION
+#
+--error ER_WRONG_ARGUMENTS
+SELECT NAME_CONST('a', -(1 OR 2)) OR 1;
+--error ER_WRONG_ARGUMENTS
+SELECT NAME_CONST('a', -(1 AND 2)) OR 1;
+SELECT NAME_CONST('a', -(1)) OR 1;
+
+--echo #
+--echo # MDEV-15630 uuid() function evaluates at wrong time in query
+--echo #
+
+CREATE TABLE t1 (id INT);
+INSERT INTO t1 VALUES (1),(2),(3);
+--replace_column 2 xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+SELECT COUNT(1), UUID() as uid FROM t1 GROUP BY uid;
+DROP TABLE t1;
+
+
 --echo #
 --echo # End of 5.5 tests
 --echo #
@@ -617,7 +639,6 @@ select is_free_lock('test');
 select is_used_lock('test') = connection_id();
 
 connect (con1,localhost,root,,);
---echo # -> Switching to connection 'con1'
 connection con1;
 --echo # IS_USED_LOCK, IS_FREE_LOCK: the  lock is acquired in another
 --echo # connection
@@ -630,7 +651,6 @@ select get_lock('test', 0);
 --echo # RELEASE_LOCK returns 0 if the lock belongs to another connection 
 select release_lock('test');
 
---echo # -> Switching to connection 'default'
 connection default;
 
 --echo # RELEASE_LOCK returns 1 if it successfully releases a lock
@@ -640,23 +660,19 @@ select release_lock('test');
 
 --echo # Test that get_lock() returns NULL if error.
 select get_lock('test', 0);
---echo # -> Switching to connection 'con1'
 connection con1;
 create table t1 select connection_id() as id;
 send select get_lock('test', 7200);
 
---echo # -> Switching to connection 'default'
 connection default;
 let $wait_condition= SELECT count(*) > 0 FROM information_schema.processlist WHERE info LIKE 'select%' AND state='User lock';
 source include/wait_condition.inc;
 select (@id := id) - id from t1;
 kill query @id;
 
---echo # -> Switching to connection 'con1'
 connection con1;
 reap;
 
---echo # -> Switching to connection 'default'
 connection default;
 
 --echo # GET_LOCK() works recursively 
@@ -686,12 +702,10 @@ select release_lock('test3');
 --echo # Deadlocks are detected e.g. in case of a mutual wait
 select get_lock('test1', 0);
 
---echo # -> Switching to connection 'con1'
 connection con1;
 select get_lock('test2', 0);
 send select get_lock('test1', 7200);
 
---echo # -> Switching to connection 'default'
 connection default;
 let $wait_condition= SELECT count(*) > 0 FROM information_schema.processlist WHERE info LIKE 'select%' AND state='User lock';
 source include/wait_condition.inc;
@@ -700,13 +714,11 @@ select get_lock('test2', 7200);
 
 select release_lock('test1');
 
---echo # -> Switching to connection 'con1'
 connection con1;
 reap;
 select release_lock('test2');
 select release_lock('test1');
 
---echo # -> Switching to connection 'default'
 connection default;
 
 --echo # LOCK/UNLOCK TABLES works fine with a user lock.
@@ -738,12 +750,10 @@ select release_lock('test2');
 --echo # are detected OK.
 select get_lock('test', 0);
 
---echo # -> Switching to connection 'con1'
 connection con1;
 lock table t1 write;
 send select get_lock('test', 7200);
 
---echo # -> Switching to connection 'default'
 connection default;
 let $wait_condition= SELECT count(*) > 0 FROM information_schema.processlist WHERE info LIKE 'select%' AND state = 'User lock';
 source include/wait_condition.inc;
@@ -752,7 +762,6 @@ lock table t1 read;
 
 select release_lock('test');
 
---echo # -> Switching to connection 'con1'
 connection con1;
 reap;
 select release_lock('test');
@@ -1071,7 +1080,6 @@ DROP TABLE t2;
 --echo # MDEV-4018 : Microseconds in GET_LOCK()
 --echo #
 
---echo # -> Switching to connection 'default'
 connection default;
 select is_used_lock('test') = connection_id();
 
@@ -1079,7 +1087,6 @@ select is_used_lock('test') = connection_id();
 select get_lock('test', 0);
 
 connect (con1,localhost,root,,);
---echo # -> Switching to connection 'con1'
 connection con1;
 select is_used_lock('test') = connection_id();
 select get_lock('test', 0);
@@ -1089,7 +1096,6 @@ select get_lock('test', 0.1);
 select get_lock('test', 0.000001);
 select get_lock('test', 0.0000000000000001);
 
---echo # -> Switching to connection 'default'
 connection default;
 select is_used_lock('test') = connection_id();
 select release_lock('test');
@@ -1097,3 +1103,117 @@ select release_lock('test');
 --echo
 --echo # -- Done.
 --echo
+
+
+--echo #
+--echo # MDEV-13685 Can not replay binary log due to Illegal mix of collations (latin1_swedish_ci,IMPLICIT) and (utf8mb4_general_ci,COERCIBLE) for operation 'concat'
+--echo #
+SET NAMES utf8;
+SELECT COERCIBILITY(NAME_CONST('name','test'));
+SELECT COERCIBILITY(NAME_CONST('name',TIME'00:00:00'));
+SELECT COERCIBILITY(NAME_CONST('name',15));
+SELECT CONCAT(NAME_CONST('name',15),'오');
+SET NAMES latin1;
+
+--echo #
+--echo # MDEV-14116 INET6_NTOA output is set as null to varchar(39) variable
+--echo #
+
+DELIMITER $$;
+CREATE PROCEDURE p1()
+BEGIN
+  DECLARE ip_full_addr varchar(39) DEFAULT "";
+  SELECT INET6_NTOA(UNHEX('20000000000000000000000000000000')) into ip_full_addr;
+  SELECT ip_full_addr;
+END;
+$$
+DELIMITER ;$$
+CALL p1();
+DROP PROCEDURE p1;
+
+--echo #
+--echo # MDEV-18195 ASAN use-after-poison in my_strcasecmp_utf8 / Item::eq upon prepared statement with ORDER BY NAME_CONST
+--echo #
+
+PREPARE stmt FROM "SELECT 'x' ORDER BY NAME_CONST( 'f', 'foo' )";
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+--echo #
+--echo # MDEV-19680: Assertion `!table || (!table->read_set || bitmap_is_set(table->read_set, field_index) ||
+--echo #             (!(ptr >= table->record[0] && ptr < table->record[0] + table->s->reclength)))'
+--echo #             or alike failed upon SELECT with mix of functions from simple view
+--echo #
+
+CREATE TABLE t1 (a INT) ENGINE=MyISAM;
+INSERT INTO t1 VALUES (1),(2);
+CREATE VIEW v1 AS SELECT * FROM t1;
+
+SELECT ISNULL( BENCHMARK(1, MIN(a))) FROM v1;
+
+DROP VIEW v1;
+DROP TABLE t1;
+
+
+--echo #
+--echo # Start of 10.2 tests
+--echo #
+
+--echo #
+--echo # MDEV-10134 Add full support for DEFAULT
+--echo #
+
+CREATE TABLE t1 (
+  a VARCHAR(30),
+  b BIGINT DEFAULT INET_ATON(a),
+  a1 VARCHAR(30) DEFAULT INET_NTOA(b),
+  c INT DEFAULT IS_IPV4(a),
+  d INT DEFAULT IS_IPV6(a)
+);
+SHOW CREATE TABLE t1;
+INSERT INTO t1 (a) VALUES ('192.168.001.001'),('::1'),('xxx');
+SELECT * FROM t1;
+DROP TABLE t1;
+
+CREATE TABLE t1 (
+  str VARCHAR(128),
+  addr VARBINARY(16) DEFAULT INET6_ATON(str),
+  str1 VARCHAR(128) DEFAULT INET6_NTOA(addr),
+  b INT DEFAULT IS_IPV4_COMPAT(addr),
+  c INT DEFAULT IS_IPV4_MAPPED(addr)
+);
+SHOW CREATE TABLE t1;
+INSERT INTO t1 (str) VALUES ('::FFFF:192.168.0.1'),('::10.0.5.9');
+SELECT str, str1, b,c FROM t1;
+DROP TABLE t1;
+
+--echo #
+--echo # MDEV-14613: Assertion `fixed == 0' failed in Item_func::fix_fields
+--echo #
+
+CREATE TABLE `t1` (
+  `numgtfmt` char(10) COLLATE utf8_bin NOT NULL 
+) DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
+ 
+create view v1(numgtfmt)
+as
+select 'x' from t1
+union
+select 'x' from t1 ;
+ 
+SELECT * FROM v1 WHERE numgtfmt =  NAME_CONST('wnumgtfmt',_utf8'QEDITIONS' COLLATE 'utf8_bin');
+ 
+# Cleanup
+DROP VIEW v1;
+DROP TABLE t1;
+
+--echo #
+--echo # MDEV-20517 Assertion `!is_expensive()' failed in Item::value_depends_on_sql_mode_const_item
+--echo #
+
+SELECT ( 1 LIKE GET_LOCK( 'foo', 0 ) ) - 2;
+SELECT RELEASE_LOCK('foo');
+
+--echo #
+--echo # End of 10.2 tests
+--echo #

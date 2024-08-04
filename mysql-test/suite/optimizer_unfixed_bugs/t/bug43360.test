@@ -6,6 +6,7 @@
 --source include/have_debug.inc
 --source include/have_innodb.inc
 
+SET @saved_dbug = @@SESSION.debug_dbug;
 # crash requires this
 set session debug_dbug="+d,optimizer_innodb_icp";
 
@@ -28,7 +29,7 @@ INSERT INTO t1 VALUES
 ('IB','IBM- Inc.'),
 ('GO','Google Inc.');
 
-INSERT INTO t2 VALUES
+INSERT IGNORE INTO t2 VALUES
 ('AB','Sweden'),
 ('JA','USA'),
 ('MS','United States of America'),
@@ -42,3 +43,4 @@ SELECT * FROM t1;
 SELECT * FROM t2;
 
 DROP TABLE t1,t2;   
+SET debug_dbug= @saved_dbug;

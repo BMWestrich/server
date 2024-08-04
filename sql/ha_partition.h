@@ -3,7 +3,7 @@
 
 /*
    Copyright (c) 2005, 2012, Oracle and/or its affiliates.
-   Copyright (c) 2009, 2013, Monty Program Ab & SkySQL Ab.
+   Copyright (c) 2009, 2022, MariaDB Corporation.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -16,19 +16,22 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #include "sql_partition.h"      /* part_id_range, partition_element */
 #include "queues.h"             /* QUEUE */
 
-enum partition_keywords
+struct Ordered_blob_storage
 {
-  PKW_HASH= 0, PKW_RANGE, PKW_LIST, PKW_KEY, PKW_MAXVALUE, PKW_LINEAR,
-  PKW_COLUMNS, PKW_ALGORITHM
+  String blob;
+  bool set_read_value;
+  Ordered_blob_storage() : set_read_value(false)
+  {}
 };
 
-
 #define PARTITION_BYTES_IN_POS 2
+#define ORDERED_PART_NUM_OFFSET sizeof(Ordered_blob_storage **)
+#define ORDERED_REC_OFFSET (ORDERED_PART_NUM_OFFSET + PARTITION_BYTES_IN_POS)
 
 
 /** Struct used for partition_name_hash */
@@ -251,7 +254,6 @@ private:
   /*
     Variables for lock structures.
   */
-  THR_LOCK_DATA lock;                   /* MySQL lock */
 
   bool auto_increment_lock;             /**< lock reading/updating auto_inc */
   /**
@@ -293,7 +295,7 @@ public:
     -------------------------------------------------------------------------
     MODULE create/delete handler object
     -------------------------------------------------------------------------
-    Object create/delete methode. The normal called when a table object
+    Object create/delete method. Normally called when a table object
     exists. There is also a method to create the handler object with only
     partition information. This is used from mysql_create_table when the
     table is to be created and the engine type is deduced to be the
@@ -322,10 +324,6 @@ public:
     Meta data routines to CREATE, DROP, RENAME table and often used at
     ALTER TABLE (update_create_info used from ALTER TABLE and SHOW ..).
 
-    update_table_comment is used in SHOW TABLE commands to provide a
-    chance for the handler to add any interesting comments to the table
-    comments not provided by the users comment.
-
     create_partitioning_metadata is called before opening a new handler object
     with openfrm to call create. It is used to create any local handler
     object needed in opening the object in openfrm
@@ -338,7 +336,6 @@ public:
   virtual int create_partitioning_metadata(const char *name,
                                    const char *old_name, int action_flag);
   virtual void update_create_info(HA_CREATE_INFO *create_info);
-  virtual char *update_table_comment(const char *comment);
   virtual int change_partitions(HA_CREATE_INFO *create_info,
                                 const char *path,
                                 ulonglong * const copied,
@@ -356,6 +353,10 @@ public:
   virtual void change_table_ptr(TABLE *table_arg, TABLE_SHARE *share);
   virtual bool check_if_incompatible_data(HA_CREATE_INFO *create_info,
                                           uint table_changes);
+  void update_part_create_info(HA_CREATE_INFO *create_info, uint part_id)
+  {
+    m_file[part_id]->update_create_info(create_info);
+  }
 private:
   int copy_partitions(ulonglong * const copied, ulonglong * const deleted);
   void cleanup_new_partition(uint part_count);
@@ -587,7 +588,7 @@ public:
 
   /**
     @breif
-    Positions an index cursor to the index specified in the hanlde. Fetches the
+    Positions an index cursor to the index specified in the handle. Fetches the
     row if available. If the key value is null, begin at first key of the
     index.
   */
@@ -639,6 +640,7 @@ private:
   int handle_ordered_next(uchar * buf, bool next_same);
   int handle_ordered_prev(uchar * buf);
   void return_top_record(uchar * buf);
+  void swap_blobs(uchar* rec_buf, Ordered_blob_storage ** storage, bool restore);
 public:
   /*
     -------------------------------------------------------------------------
@@ -653,7 +655,7 @@ public:
   void get_dynamic_partition_info(PARTITION_STATS *stat_info,
                                   uint part_id);
   virtual int extra(enum ha_extra_function operation);
-  virtual int extra_opt(enum ha_extra_function operation, ulong cachesize);
+  virtual int extra_opt(enum ha_extra_function operation, ulong arg);
   virtual int reset(void);
   virtual uint count_query_cache_dependant_tables(uint8 *tables_type);
   virtual my_bool
@@ -663,6 +665,8 @@ public:
                                           uint *n);
 
 private:
+  typedef int handler_callback(handler *, void *);
+
   my_bool reg_query_cache_dependant_table(THD *thd,
                                           char *engine_key,
                                           uint engine_key_len,
@@ -673,7 +677,7 @@ private:
                                           **block_table,
                                           handler *file, uint *n);
   static const uint NO_CURRENT_PART_ID;
-  int loop_extra(enum ha_extra_function operation);
+  int loop_partitions(handler_callback callback, void *param);
   int loop_extra_alter(enum ha_extra_function operations);
   void late_extra_cache(uint partition_id);
   void late_extra_no_cache(uint partition_id);
@@ -789,10 +793,6 @@ public:
     NOTE: This cannot be cached since it can depend on TRANSACTION ISOLATION
     LEVEL which is dynamic, see bug#39084.
 
-    HA_READ_RND_SAME:
-    Not currently used. (Means that the handler supports the rnd_same() call)
-    (MyISAM, HEAP)
-
     HA_TABLE_SCAN_ON_INDEX:
     Used to avoid scanning full tables on an index. If this flag is set then
     the handler always has a primary key (hidden if not defined) and this
@@ -802,7 +802,7 @@ public:
 
     HA_REC_NOT_IN_SEQ:
     This flag is set for handlers that cannot guarantee that the rows are
-    returned accroding to incremental positions (0, 1, 2, 3...).
+    returned according to incremental positions (0, 1, 2, 3...).
     This also means that rnd_next() should return HA_ERR_RECORD_DELETED
     if it finds a deleted row.
     (MyISAM (not fixed length row), HEAP, InnoDB)
@@ -1009,12 +1009,6 @@ public:
   virtual uint max_supported_key_parts() const;
   virtual uint max_supported_key_length() const;
   virtual uint max_supported_key_part_length() const;
-
-  /*
-    The extra record buffer length is the maximum needed by all handlers.
-    The minimum record length is the maximum of all involved handlers.
-  */
-  virtual uint extra_rec_buf_length() const;
   virtual uint min_record_length(uint options) const;
 
   /*
@@ -1208,6 +1202,14 @@ public:
     virtual bool auto_repair(int error) const;
     virtual bool is_crashed() const;
     virtual int check_for_upgrade(HA_CHECK_OPT *check_opt);
+
+    /*
+      -----------------------------------------------------------------------
+      MODULE condition pushdown
+      -----------------------------------------------------------------------
+    */
+    virtual const COND *cond_push(const COND *cond);
+    virtual void cond_pop();
 
     private:
     int handle_opt_partitions(THD *thd, HA_CHECK_OPT *check_opt, uint flags);

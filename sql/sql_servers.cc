@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 
 /*
@@ -162,7 +162,7 @@ bool servers_init(bool dont_read_servers_table)
   /*
     To be able to run this from boot, we allocate a temporary THD
   */
-  if (!(thd=new THD))
+  if (!(thd=new THD(0)))
     DBUG_RETURN(TRUE);
   thd->thread_stack= (char*) &thd;
   thd->store_globals();
@@ -205,8 +205,8 @@ static bool servers_load(THD *thd, TABLE_LIST *tables)
   free_root(&mem, MYF(0));
   init_sql_alloc(&mem, ACL_ALLOC_BLOCK_SIZE, 0, MYF(0));
 
-  if (init_read_record(&read_record_info,thd,table=tables[0].table,NULL,1,0, 
-                       FALSE))
+  if (init_read_record(&read_record_info,thd,table=tables[0].table, NULL, NULL,
+                       1,0, FALSE))
     DBUG_RETURN(1);
   while (!(read_record_info.read_record(&read_record_info)))
   {
@@ -350,8 +350,8 @@ get_server_from_table_to_cache(TABLE *table)
   DBUG_PRINT("info", ("server->socket %s", server->socket));
   if (my_hash_insert(&servers_cache, (uchar*) server))
   {
-    DBUG_PRINT("info", ("had a problem inserting server %s at %lx",
-                        server->server_name, (long unsigned int) server));
+    DBUG_PRINT("info", ("had a problem inserting server %s at %p",
+                        server->server_name, server));
     // error handling needed here
     DBUG_RETURN(TRUE);
   }
@@ -431,13 +431,13 @@ insert_server_record_into_cache(FOREIGN_SERVER *server)
     We succeded in insertion of the server to the table, now insert
     the server to the cache
   */
-  DBUG_PRINT("info", ("inserting server %s at %lx, length %d",
-                        server->server_name, (long unsigned int) server,
+  DBUG_PRINT("info", ("inserting server %s at %p, length %d",
+                        server->server_name, server,
                         server->server_name_length));
   if (my_hash_insert(&servers_cache, (uchar*) server))
   {
-    DBUG_PRINT("info", ("had a problem inserting server %s at %lx",
-                        server->server_name, (long unsigned int) server));
+    DBUG_PRINT("info", ("had a problem inserting server %s at %p",
+                        server->server_name, server));
     // error handling needed here
     error= 1;
   }
@@ -804,8 +804,8 @@ int update_server_record_in_cache(FOREIGN_SERVER *existing,
   */
   if (my_hash_insert(&servers_cache, (uchar*)altered))
   {
-    DBUG_PRINT("info", ("had a problem inserting server %s at %lx",
-                        altered->server_name, (long unsigned int) altered));
+    DBUG_PRINT("info", ("had a problem inserting server %s at %p",
+                        altered->server_name,altered));
     error= ER_OUT_OF_RESOURCES;
   }
 

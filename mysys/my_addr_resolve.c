@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #include "mysys_priv.h"
 #include <m_string.h>
@@ -49,6 +49,25 @@ static const char *strip_path(const char *s)
 static bfd *bfdh= 0;
 static asymbol **symtable= 0;
 
+#if defined(HAVE_LINK_H) && defined(HAVE_DLOPEN)
+#include <link.h>
+static ElfW(Addr) offset= 0;
+#else
+#define offset 0
+#endif
+
+#ifndef bfd_get_section_flags
+#define bfd_get_section_flags(H, S) bfd_section_flags(S)
+#endif /* bfd_get_section_flags */
+
+#ifndef bfd_get_section_size
+#define bfd_get_section_size(S) bfd_section_size(S)
+#endif /* bfd_get_section_size */
+
+#ifndef bfd_get_section_vma
+#define bfd_get_section_vma(H, S) bfd_section_vma(S)
+#endif /* bfd_get_section_vma */
+
 /**
   finds a file name, a line number, and a function name corresponding to addr.
 
@@ -60,7 +79,7 @@ static asymbol **symtable= 0;
 */
 int my_addr_resolve(void *ptr, my_addr_loc *loc)
 {
-  bfd_vma addr= (intptr)ptr;
+  bfd_vma addr= (intptr)ptr - offset;
   asection *sec;
 
   for (sec= bfdh->sections; sec; sec= sec->next)
@@ -103,6 +122,12 @@ const char *my_addr_resolve_init()
     uint unused;
     char **matching;
 
+#if defined(HAVE_LINK_H) && defined(HAVE_DLOPEN)
+    struct link_map *lm = (struct link_map*) dlopen(0, RTLD_NOW);
+    if (lm)
+      offset= lm->l_addr;
+#endif
+
     bfdh= bfd_openr(my_progname, NULL);
     if (!bfdh)
       goto err;
@@ -132,17 +157,60 @@ err:
 
 #include <m_string.h>
 #include <ctype.h>
+#include <sys/wait.h>
 
-#if defined(HAVE_LINK_H) && defined(HAVE_DLOPEN)
-#include <link.h>
-static ptrdiff_t offset= 0;
-#else
-#define offset 0
-#endif
+#if defined(HAVE_POLL_H)
+#include <poll.h>
+#elif defined(HAVE_SYS_POLL_H)
+#include <sys/poll.h>
+#endif /* defined(HAVE_POLL_H) */
 
 static int in[2], out[2];
-static int initialized= 0;
+static pid_t pid;
+static char addr2line_binary[1024];
 static char output[1024];
+static struct pollfd poll_fds;
+static Dl_info info;
+
+int start_addr2line_fork(const char *binary_path)
+{
+
+  if (pid > 0)
+  {
+    /* Don't leak FDs */
+    close(in[1]);
+    close(out[0]);
+    /* Don't create zombie processes. */
+    waitpid(pid, NULL, 0);
+  }
+
+  if (pipe(in) < 0)
+    return 1;
+  if (pipe(out) < 0)
+    return 1;
+
+  pid = fork();
+  if (pid == -1)
+    return 1;
+
+  if (!pid) /* child */
+  {
+    dup2(in[0], 0);
+    dup2(out[1], 1);
+    close(in[0]);
+    close(in[1]);
+    close(out[0]);
+    close(out[1]);
+    execlp("addr2line", "addr2line", "-C", "-f", "-e", binary_path, NULL);
+    exit(1);
+  }
+
+  close(in[0]);
+  close(out[1]);
+
+  return 0;
+}
+
 int my_addr_resolve(void *ptr, my_addr_loc *loc)
 {
   char input[32];
@@ -150,69 +218,89 @@ int my_addr_resolve(void *ptr, my_addr_loc *loc)
 
   ssize_t total_bytes_read = 0;
   ssize_t extra_bytes_read = 0;
+  ssize_t parsed = 0;
 
-  fd_set set;
-  struct timeval timeout;
+  int ret;
 
   int filename_start = -1;
   int line_number_start = -1;
-  ssize_t i;
 
-  FD_ZERO(&set);
-  FD_SET(out[0], &set);
+  void *offset;
 
-  len= my_snprintf(input, sizeof(input), "%p\n", ptr - offset);
-  if (write(in[1], input, len) <= 0)
+  poll_fds.fd = out[0];
+  poll_fds.events = POLLIN | POLLRDBAND;
+
+  if (!dladdr(ptr, &info))
     return 1;
 
-  /* 10 ms should be plenty of time for addr2line to issue a response. */
-  timeout.tv_sec = 0;
-  timeout.tv_usec = 10000;
-  /* Read in a loop till all the output from addr2line is complete. */
-  while (select(out[0] + 1, &set, NULL, NULL, &timeout) > 0)
+  if (strcmp(addr2line_binary, info.dli_fname))
   {
+    /* We use dli_fname in case the path is longer than the length of our static
+       string. We don't want to allocate anything dynamicaly here as we are in
+       a "crashed" state. */
+    if (start_addr2line_fork(info.dli_fname))
+    {
+      addr2line_binary[0] = '\0';
+      return 2;
+    }
+    /* Save result for future comparisons. */
+    strnmov(addr2line_binary, info.dli_fname, sizeof(addr2line_binary));
+  }
+  offset = info.dli_fbase;
+  len= my_snprintf(input, sizeof(input), "%08x\n", (ulonglong)(ptr - offset));
+  if (write(in[1], input, len) <= 0)
+    return 3;
+
+
+  /* 500 ms should be plenty of time for addr2line to issue a response. */
+  /* Read in a loop till all the output from addr2line is complete. */
+  while (parsed == total_bytes_read &&
+         (ret= poll(&poll_fds, 1, 500)))
+  {
+    /* error during poll */
+    if (ret < 0)
+      return 1;
+
     extra_bytes_read= read(out[0], output + total_bytes_read,
                            sizeof(output) - total_bytes_read);
     if (extra_bytes_read < 0)
-      return 1;
+      return 4;
     /* Timeout or max bytes read. */
     if (extra_bytes_read == 0)
       break;
 
     total_bytes_read += extra_bytes_read;
+
+    /* Go through the addr2line response and get the required data.
+       The response is structured in 2 lines. The first line contains the function
+       name, while the second one contains <filename>:<line number> */
+    for (; parsed < total_bytes_read; parsed++)
+    {
+      if (output[parsed] == '\n')
+      {
+        filename_start = parsed + 1;
+        output[parsed] = '\0';
+      }
+      if (filename_start != -1 && output[parsed] == ':')
+      {
+        line_number_start = parsed + 1;
+        output[parsed] = '\0';
+        break;
+      }
+    }
   }
 
-  /* Failed starting addr2line. */
-  if (total_bytes_read == 0)
-    return 1;
-
-  /* Go through the addr2line response and get the required data.
-     The response is structured in 2 lines. The first line contains the function
-     name, while the second one contains <filename>:<line number> */
-  for (i = 0; i < total_bytes_read; i++) {
-    if (output[i] == '\n') {
-      filename_start = i + 1;
-      output[i] = '\0';
-    }
-    if (filename_start != -1 && output[i] == ':') {
-      line_number_start = i + 1;
-      output[i] = '\0';
-    }
-    if (line_number_start != -1) {
-      loc->line= atoi(output + line_number_start);
-      break;
-    }
-  }
   /* Response is malformed. */
   if (filename_start == -1 || line_number_start == -1)
-   return 1;
+   return 5;
 
   loc->func= output;
   loc->file= output + filename_start;
+  loc->line= atoi(output + line_number_start);
 
   /* Addr2line was unable to extract any meaningful information. */
   if (strcmp(loc->file, "??") == 0)
-    return 1;
+    return 6;
 
   loc->file= strip_path(loc->file);
 
@@ -221,41 +309,6 @@ int my_addr_resolve(void *ptr, my_addr_loc *loc)
 
 const char *my_addr_resolve_init()
 {
-  if (!initialized)
-  {
-    pid_t pid;
-
-#if defined(HAVE_LINK_H) && defined(HAVE_DLOPEN)
-    struct link_map *lm = (struct link_map*) dlopen(0, RTLD_NOW);
-    if (lm)
-      offset= lm->l_addr;
-#endif
-
-    if (pipe(in) < 0)
-      return "pipe(in)";
-    if (pipe(out) < 0)
-      return "pipe(out)";
-
-    pid = fork();
-    if (pid == -1)
-      return "fork";
-
-    if (!pid) /* child */
-    {
-      dup2(in[0], 0);
-      dup2(out[1], 1);
-      close(in[0]);
-      close(in[1]);
-      close(out[0]);
-      close(out[1]);
-      execlp("addr2line", "addr2line", "-C", "-f", "-e", my_progname, NULL);
-      exit(1);
-    }
-    
-    close(in[0]);
-    close(out[1]);
-    initialized= 1;
-  }
   return 0;
 }
 #endif

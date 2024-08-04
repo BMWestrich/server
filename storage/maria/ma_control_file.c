@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 /*
   WL#3234 Maria control file
@@ -146,6 +146,8 @@ static CONTROL_FILE_ERROR create_control_file(const char *name,
 {
   uint32 sum;
   uchar buffer[CF_CREATE_TIME_TOTAL_SIZE];
+  ulong rnd1,rnd2;
+
   DBUG_ENTER("maria_create_control_file");
 
   if ((control_file_fd= mysql_file_create(key_file_control, name, 0,
@@ -157,7 +159,9 @@ static CONTROL_FILE_ERROR create_control_file(const char *name,
   cf_changeable_size=  CF_CHANGEABLE_TOTAL_SIZE;
 
   /* Create unique uuid for the control file */
-  my_uuid_init((ulong) &buffer, (ulong) &maria_uuid);
+  my_random_bytes((uchar *)&rnd1, sizeof (rnd1));
+  my_random_bytes((uchar *)&rnd2, sizeof (rnd2));
+  my_uuid_init(rnd1, rnd2);
   my_uuid(maria_uuid);
 
   /* Prepare and write the file header */
@@ -273,7 +277,7 @@ CONTROL_FILE_ERROR ma_control_file_open(my_bool create_if_missing,
     " file is probably in use by another process";
   uint new_cf_create_time_size, new_cf_changeable_size, new_block_size;
   my_off_t file_size;
-  int open_flags= O_BINARY | /*O_DIRECT |*/ O_RDWR;
+  int open_flags= O_BINARY | /*O_DIRECT |*/ O_RDWR | O_CLOEXEC;
   int error= CONTROL_FILE_UNKNOWN_ERROR;
   DBUG_ENTER("ma_control_file_open");
 

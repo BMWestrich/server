@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /* This file is included in all heap-files */
 
@@ -86,8 +86,7 @@ extern ulong hp_mask(ulong hashnr,ulong buffmax,ulong maxlength);
 extern void hp_movelink(HASH_INFO *pos,HASH_INFO *next_link,
 			 HASH_INFO *newlink);
 extern int hp_rec_key_cmp(HP_KEYDEF *keydef,const uchar *rec1,
-			  const uchar *rec2,
-                          my_bool diff_if_only_endspace_difference);
+			  const uchar *rec2);
 extern int hp_key_cmp(HP_KEYDEF *keydef,const uchar *rec,
 		      const uchar *key);
 extern void hp_make_key(HP_KEYDEF *keydef,uchar *key,const uchar *rec);
@@ -97,7 +96,7 @@ extern uint hp_rb_key_length(HP_KEYDEF *keydef, const uchar *key);
 extern uint hp_rb_null_key_length(HP_KEYDEF *keydef, const uchar *key);
 extern uint hp_rb_var_key_length(HP_KEYDEF *keydef, const uchar *key);
 extern my_bool hp_if_null_in_key(HP_KEYDEF *keyinfo, const uchar *record);
-extern int hp_close(register HP_INFO *info);
+extern int hp_close(HP_INFO *info);
 extern void hp_clear(HP_SHARE *info);
 extern void hp_clear_keys(HP_SHARE *info);
 extern uint hp_rb_pack_key(HP_KEYDEF *keydef, uchar *key, const uchar *old,

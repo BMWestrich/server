@@ -739,6 +739,7 @@ show create table t1;
 drop table t1;
 
 select hex(concat(period_diff(200902, 200802)));
+SET STATEMENT sql_mode = 'NO_ENGINE_SUBSTITUTION' FOR
 create table t1 as select concat(period_add(200902, 200802)) as c1;
 show create table t1;
 drop table t1;
@@ -1817,6 +1818,12 @@ INSERT INTO t1 VALUES (0);
 SELECT f1() FROM t1 LEFT JOIN (SELECT 1 AS a FROM t1 LIMIT 0) AS d ON 1 GROUP BY a;
 DROP FUNCTION f1;
 DROP TABLE t1;
+
+--echo #
+--echo # MDEV-9662 Assertion `precision || !scale' failed in my_decimal_precision_to_length_no_truncation(uint, uint8, bool)
+--echo #
+SELECT @@collation_connection;
+SELECT CASE 1 WHEN 2 THEN ( - '3' ) END;
 
 --echo #
 --echo # MDEV-5702 Incorrect results are returned with NULLIF()

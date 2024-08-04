@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2015, MariaDB
+   Copyright (c) 2015, 2020, MariaDB
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /*************************************************************************
   Limitation of encrypted IO_CACHEs
@@ -49,15 +49,15 @@ static int my_b_encr_read(IO_CACHE *info, uchar *Buffer, size_t Count)
 
   if (pos_in_file == info->end_of_file)
   {
-    info->read_pos= info->read_end= info->buffer;
-    info->pos_in_file= pos_in_file;
+    /*  reading past EOF should not empty the cache */
+    info->read_pos= info->read_end;
     info->error= 0;
     DBUG_RETURN(MY_TEST(Count));
   }
 
   if (info->seek_not_done)
   {
-    size_t wpos;
+    my_off_t wpos;
 
     pos_offset= pos_in_file % info->buffer_length;
     pos_in_file-= pos_offset;
@@ -71,11 +71,20 @@ static int my_b_encr_read(IO_CACHE *info, uchar *Buffer, size_t Count)
       DBUG_RETURN(1);
     }
     info->seek_not_done= 0;
+    if (info->next_file_user)
+    {
+      IO_CACHE *c;
+      for (c= info->next_file_user;
+           c!= info;
+           c= c->next_file_user)
+      {
+        c->seek_not_done= 1;
+      }
+    }
   }
 
   do
   {
-    size_t copied;
     uint elength, wlength, length;
     uchar iv[MY_AES_BLOCK_SIZE]= {0};
 
@@ -92,7 +101,7 @@ static int my_b_encr_read(IO_CACHE *info, uchar *Buffer, size_t Count)
       DBUG_RETURN(1);
     }
 
-    elength= wlength - (ebuffer - wbuffer);
+    elength= wlength - (uint)(ebuffer - wbuffer);
     set_iv(iv, pos_in_file, crypt_data->inbuf_counter);
 
     if (encryption_crypt(ebuffer, elength, info->buffer, &length,
@@ -106,11 +115,13 @@ static int my_b_encr_read(IO_CACHE *info, uchar *Buffer, size_t Count)
 
     DBUG_ASSERT(length <= info->buffer_length);
 
-    copied= MY_MIN(Count, length - pos_offset);
-
-    memcpy(Buffer, info->buffer + pos_offset, copied);
-    Count-= copied;
-    Buffer+= copied;
+    size_t copied= MY_MIN(Count, (size_t)(length - pos_offset));
+    if (copied)
+    {
+      memcpy(Buffer, info->buffer + pos_offset, copied);
+      Count-= copied;
+      Buffer+= copied;
+    }
 
     info->read_pos= info->buffer + pos_offset + copied;
     info->read_end= info->buffer + length;
@@ -120,7 +131,7 @@ static int my_b_encr_read(IO_CACHE *info, uchar *Buffer, size_t Count)
 
     if (wlength < crypt_data->block_length && pos_in_file < info->end_of_file)
     {
-      info->error= pos_in_file - old_pos_in_file;
+      info->error= (int)(pos_in_file - old_pos_in_file);
       DBUG_RETURN(1);
     }
   } while (Count);
@@ -145,9 +156,10 @@ static int my_b_encr_write(IO_CACHE *info, const uchar *Buffer, size_t Count)
 
   if (info->seek_not_done)
   {
-    DBUG_ASSERT(info->pos_in_file == 0);
+    DBUG_ASSERT(info->pos_in_file % info->buffer_length == 0);
+    my_off_t wpos= info->pos_in_file / info->buffer_length * crypt_data->block_length;
 
-    if ((mysql_file_seek(info->file, 0, MY_SEEK_SET, MYF(0)) == MY_FILEPOS_ERROR))
+    if ((mysql_file_seek(info->file, wpos, MY_SEEK_SET, MYF(0)) == MY_FILEPOS_ERROR))
     {
       info->error= -1;
       DBUG_RETURN(1);
@@ -184,7 +196,7 @@ static int my_b_encr_write(IO_CACHE *info, const uchar *Buffer, size_t Count)
       my_errno= 1;
       DBUG_RETURN(info->error= -1);
     }
-    wlength= elength + ebuffer - wbuffer;
+    wlength= elength + (uint)(ebuffer - wbuffer);
 
     if (length == info->buffer_length)
     {

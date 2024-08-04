@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
  */
 
 //! @file some utility functions and classes not directly related to replication
@@ -19,6 +19,8 @@
 #include "wsrep_xid.h"
 #include "sql_class.h"
 #include "wsrep_mysqld.h" // for logging macros
+
+#include <algorithm> /* std::sort() */
 
 /*
  * WSREPXid
@@ -89,16 +91,17 @@ static my_bool set_SE_checkpoint(THD* unused, plugin_ref plugin, void* arg)
   return FALSE;
 }
 
-void wsrep_set_SE_checkpoint(XID& xid)
+bool wsrep_set_SE_checkpoint(XID& xid)
 {
-  plugin_foreach(NULL, set_SE_checkpoint, MYSQL_STORAGE_ENGINE_PLUGIN, &xid);
+  return plugin_foreach(NULL, set_SE_checkpoint, MYSQL_STORAGE_ENGINE_PLUGIN,
+                        &xid);
 }
 
-void wsrep_set_SE_checkpoint(const wsrep_uuid_t& uuid, wsrep_seqno_t seqno)
+bool wsrep_set_SE_checkpoint(const wsrep_uuid_t& uuid, wsrep_seqno_t seqno)
 {
   XID xid;
   wsrep_xid_init(&xid, uuid, seqno);
-  wsrep_set_SE_checkpoint(xid);
+  return wsrep_set_SE_checkpoint(xid);
 }
 
 static my_bool get_SE_checkpoint(THD* unused, plugin_ref plugin, void* arg)
@@ -118,30 +121,70 @@ static my_bool get_SE_checkpoint(THD* unused, plugin_ref plugin, void* arg)
   return FALSE;
 }
 
-void wsrep_get_SE_checkpoint(XID& xid)
+bool wsrep_get_SE_checkpoint(XID& xid)
 {
-  plugin_foreach(NULL, get_SE_checkpoint, MYSQL_STORAGE_ENGINE_PLUGIN, &xid);
+  return plugin_foreach(NULL, get_SE_checkpoint, MYSQL_STORAGE_ENGINE_PLUGIN,
+                        &xid);
 }
 
-void wsrep_get_SE_checkpoint(wsrep_uuid_t& uuid, wsrep_seqno_t& seqno)
+bool wsrep_get_SE_checkpoint(wsrep_uuid_t& uuid, wsrep_seqno_t& seqno)
 {
   uuid= WSREP_UUID_UNDEFINED;
   seqno= WSREP_SEQNO_UNDEFINED;
 
   XID xid;
-  memset(&xid, 0, sizeof(xid));
-  xid.formatID= -1;
+  xid.null();
 
-  wsrep_get_SE_checkpoint(xid);
+  if (wsrep_get_SE_checkpoint(xid))
+  {
+    return true;
+  }
 
-  if (xid.formatID == -1) return; // nil XID
+  if (xid.is_null())
+  {
+    return false;
+  }
 
   if (!wsrep_is_wsrep_xid(&xid))
   {
     WSREP_WARN("Read non-wsrep XID from storage engines.");
-    return;
+    return false;
   }
 
   uuid= *wsrep_xid_uuid(xid);
   seqno= wsrep_xid_seqno(xid);
+
+  return false;
+}
+
+/*
+  Sort order for XIDs. Wsrep XIDs are sorted according to
+  seqno in ascending order. Non-wsrep XIDs are considered
+  equal among themselves and greater than with respect
+  to wsrep XIDs.
+ */
+struct Wsrep_xid_cmp
+{
+  bool operator()(const XID& left, const XID& right) const
+  {
+    const bool left_is_wsrep= wsrep_is_wsrep_xid(&left);
+    const bool right_is_wsrep= wsrep_is_wsrep_xid(&right);
+    if (left_is_wsrep && right_is_wsrep)
+    {
+      return (wsrep_xid_seqno(left) < wsrep_xid_seqno(right));
+    }
+    else if (left_is_wsrep)
+    {
+      return true;
+    }
+    else
+    {
+      return false;
+    }
+  }
+};
+
+void wsrep_sort_xid_array(XID *array, int len)
+{
+  std::sort(array, array + len, Wsrep_xid_cmp());
 }

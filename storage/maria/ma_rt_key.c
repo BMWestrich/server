@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 #include "maria_def.h"
 #include "trnman.h"
@@ -58,7 +58,7 @@ int maria_rtree_add_key(const MARIA_KEY *key, MARIA_PAGE *page,
     page->size+= tot_key_length;
     page_store_size(share, page);
     if (share->now_transactional &&
-        _ma_log_add(page, key_pos - page->buff,
+        _ma_log_add(page, (uint)(key_pos - page->buff),
                     key_pos, tot_key_length, tot_key_length, 0,
                     KEY_OP_DEBUG_LOG_ADD_1))
       DBUG_RETURN(-1);

@@ -76,11 +76,30 @@ enum ft_type {
     FT_CHECKPOINT_INPROGRESS
 };
 
+extern "C" {
+extern uint force_recovery;
+}
+
+extern int writing_rollback;
+
 // The ft_header is not managed by the cachetable.  Instead, it hangs off the cachefile as userdata.
 struct ft_header {
     enum ft_type type;
 
-    int dirty;
+    int dirty_;
+
+    void set_dirty() {
+        if(force_recovery) assert(writing_rollback);
+        dirty_ = 1;
+    }
+
+    void clear_dirty() {
+        dirty_ = 0;
+    }
+
+    bool dirty() {
+        return dirty_;
+    }
 
     // Free-running counter incremented once per checkpoint (toggling LSB).
     // LSB indicates which header location is used on disk so this
@@ -143,6 +162,10 @@ struct ft_header {
     MSN msn_at_start_of_last_completed_optimize;
 
     STAT64INFO_S on_disk_stats;
+
+    // This represents the balance of inserts - deletes and should be
+    // closer to a logical representation of the number of records in an index
+    uint64_t on_disk_logical_rows;
 };
 typedef struct ft_header *FT_HEADER;
 
@@ -176,6 +199,7 @@ struct ft {
 
     // protected by atomic builtins
     STAT64INFO_S in_memory_stats;
+    uint64_t in_memory_logical_rows;
 
     // transient, not serialized to disk.  updated when we do write to
     // disk.  tells us whether we can do partial eviction (we can't if

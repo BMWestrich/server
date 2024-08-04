@@ -1,6 +1,7 @@
 /*****************************************************************************
 
 Copyright (c) 2011, 2012, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2017, 2020, MariaDB Corporation.
 
 Portions of this file contain modifications contributed and copyrighted by
 Google, Inc. Those modifications are gratefully acknowledged and are described
@@ -25,7 +26,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -79,7 +80,9 @@ typedef UT_LIST_NODE_T(struct srv_conc_slot_t)	srv_conc_node_t;
 
 /** Slot for a thread waiting in the concurrency control queue. */
 struct srv_conc_slot_t{
-	os_event_t	event;		/*!< event to wait */
+	os_event_t	event;		/*!< event to wait for;
+					os_event_set() and os_event_reset()
+					are protected by srv_conc_mutex */
 	ibool		reserved;	/*!< TRUE if slot
 					reserved */
 	ibool		wait_ended;	/*!< TRUE when another thread has
@@ -110,7 +113,7 @@ UNIV_INTERN mysql_pfs_key_t	srv_conc_mutex_key;
 
 /** Variables tracking the active and waiting threads. */
 struct srv_conc_t {
-	char		pad[64  - (sizeof(ulint) + sizeof(lint))];
+	char		pad[CACHE_LINE_SIZE  - (sizeof(ulint) + sizeof(lint))];
 
 	/** Number of transactions that have declared_to_be_inside_innodb set.
 	It used to be a non-error for this value to drop below zero temporarily.
@@ -165,6 +168,10 @@ srv_conc_free(void)
 {
 #ifndef HAVE_ATOMIC_BUILTINS
 	os_fast_mutex_free(&srv_conc_mutex);
+
+	for (ulint i = 0; i < OS_THREAD_MAX_N; i++)
+		os_event_free(srv_conc_slots[i].event);
+
 	mem_free(srv_conc_slots);
 	srv_conc_slots = NULL;
 #endif /* !HAVE_ATOMIC_BUILTINS */
@@ -211,8 +218,7 @@ srv_conc_enter_innodb_with_atomics(
 	for (;;) {
 		ulint	sleep_in_us;
 #ifdef WITH_WSREP
-		if (wsrep_on(trx->mysql_thd) && 
-		    wsrep_trx_is_aborting(trx->mysql_thd)) {
+		if (trx->is_wsrep() && wsrep_trx_is_aborting(trx->mysql_thd)) {
 			if (wsrep_debug)
 		  		fprintf(stderr,	
 					"srv_conc_enter due to MUST_ABORT");
@@ -278,6 +284,7 @@ srv_conc_enter_innodb_with_atomics(
 			notified_mysql = TRUE;
 		}
 
+		DEBUG_SYNC_C("user_thread_waiting");
 		trx->op_info = "sleeping before entering InnoDB";
 
 		sleep_in_us = srv_thread_sleep_delay;
@@ -374,11 +381,11 @@ srv_conc_exit_innodb_without_atomics(
 		}
 	}
 
-	os_fast_mutex_unlock(&srv_conc_mutex);
-
 	if (slot != NULL) {
 		os_event_set(slot->event);
 	}
+
+	os_fast_mutex_unlock(&srv_conc_mutex);
 }
 
 /*********************************************************************//**
@@ -393,8 +400,6 @@ srv_conc_enter_innodb_without_atomics(
 	ulint			i;
 	srv_conc_slot_t*	slot = NULL;
 	ibool			has_slept = FALSE;
-	ib_uint64_t		start_time = 0L;
-	ib_uint64_t		finish_time = 0L;
 	ulint			sec;
 	ulint			ms;
 
@@ -424,8 +429,7 @@ retry:
 		return;
 	}
 #ifdef WITH_WSREP
-	if (wsrep_on(trx->mysql_thd) && 
-	    wsrep_thd_is_brute_force(trx->mysql_thd)) {
+	if (trx->is_wsrep() && wsrep_thd_is_brute_force(trx->mysql_thd)) {
 		srv_conc_force_enter_innodb(trx);
 		return;
 	}
@@ -508,8 +512,7 @@ retry:
 	srv_conc.n_waiting++;
 
 #ifdef WITH_WSREP
-	if (wsrep_on(trx->mysql_thd) && 
-	    wsrep_trx_is_aborting(trx->mysql_thd)) {
+	if (trx->is_wsrep() && wsrep_trx_is_aborting(trx->mysql_thd)) {
 		os_fast_mutex_unlock(&srv_conc_mutex);
 		if (wsrep_debug)
 			fprintf(stderr, "srv_conc_enter due to MUST_ABORT");
@@ -529,12 +532,9 @@ retry:
 	ut_ad(!sync_thread_levels_nonempty_trx(trx->has_search_latch));
 #endif /* UNIV_SYNC_DEBUG */
 
-	if (UNIV_UNLIKELY(trx->take_stats)) {
-		ut_usectime(&sec, &ms);
-		start_time = (ib_uint64_t)sec * 1000000 + ms;
-	} else {
-		start_time = 0;
-	}
+	const ulonglong start_time = UNIV_UNLIKELY(trx->take_stats)
+		? my_interval_timer()
+		: 0;
 
 	trx->op_info = "waiting in InnoDB queue";
 
@@ -549,9 +549,8 @@ retry:
 	trx->op_info = "";
 
 	if (UNIV_UNLIKELY(start_time != 0)) {
-		ut_usectime(&sec, &ms);
-		finish_time = (ib_uint64_t)sec * 1000000 + ms;
-		trx->innodb_que_wait_timer += (ulint)(finish_time - start_time);
+		trx->innodb_que_wait_timer += ulint((my_interval_timer()
+						     - start_time) / 1000);
 	}
 
 	os_fast_mutex_lock(&srv_conc_mutex);

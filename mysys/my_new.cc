@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /*
   This is a replacement of new/delete operators to be used when compiling
@@ -47,12 +47,22 @@ void* operator new[](std::size_t sz, const std::nothrow_t&) throw()
   return (void *) my_malloc (sz ? sz : 1, MYF(0));
 }
 
+void operator delete (void *ptr, std::size_t)
+{
+  my_free(ptr);
+}
+
 void operator delete (void *ptr)
 {
   my_free(ptr);
 }
 
 void operator delete[] (void *ptr) throw ()
+{
+  my_free(ptr);
+}
+
+void operator delete[] (void *ptr, std::size_t) throw ()
 {
   my_free(ptr);
 }

@@ -36,6 +36,7 @@ Copyright (c) 2006, 2015, Percona and/or its affiliates. All rights reserved.
 
 #ident "Copyright (c) 2006, 2015, Percona and/or its affiliates. All rights reserved."
 
+#include <my_global.h>
 #include "ft/ft.h"
 #include "ft/ft-cachetable-wrappers.h"
 #include "ft/ft-internal.h"
@@ -138,7 +139,7 @@ maybe_destroy_child_blbs(FTNODE node, FTNODE child, FT ft)
     // up to date.
     if (child->n_children > 1 && 
         child->height == 0 && 
-        !child->dirty) {
+        !child->dirty()) {
         for (int i = 0; i < child->n_children; ++i) {
             if (BP_STATE(child, i) == PT_AVAIL &&
                 node->max_msn_applied_to_node_on_disk.msn < BLB_MAX_MSN_APPLIED(child, i).msn) 
@@ -479,7 +480,7 @@ handle_split_of_child(
         }
     )
 
-    node->dirty = 1;
+    node->set_dirty();
 
     XREALLOC_N(node->n_children+1, node->bp);
     // Slide the children over.
@@ -496,7 +497,7 @@ handle_split_of_child(
 
     // We never set the rightmost blocknum to be the root.
     // Instead, we wait for the root to split and let promotion initialize the rightmost
-    // blocknum to be the first non-root leaf node on the right extreme to recieve an insert.
+    // blocknum to be the first non-root leaf node on the right extreme to receive an insert.
     BLOCKNUM rightmost_blocknum = toku_unsafe_fetch(&ft->rightmost_blocknum);
     invariant(ft->h->root_blocknum.b != rightmost_blocknum.b);
     if (childa->blocknum.b == rightmost_blocknum.b) {
@@ -661,8 +662,8 @@ static void ftnode_finalize_split(FTNODE node, FTNODE B, MSN max_msn_applied_to_
     // The new node in the split inherits the oldest known reference xid
     B->oldest_referenced_xid_known = node->oldest_referenced_xid_known;
 
-    node->dirty = 1;
-    B->dirty = 1;
+    node->set_dirty();
+    B->set_dirty();
 }
 
 void
@@ -1002,8 +1003,8 @@ flush_this_child(
     paranoid_invariant(child->blocknum.b!=0);
     // VERIFY_NODE does not work off client thread as of now
     //VERIFY_NODE(t, child);
-    node->dirty = 1;
-    child->dirty = 1;
+    node->set_dirty();
+    child->set_dirty();
 
     BP_WORKDONE(node, childnum) = 0;  // this buffer is drained, no work has been done by its contents
     NONLEAF_CHILDINFO bnc = BNC(node, childnum);
@@ -1033,8 +1034,8 @@ merge_leaf_nodes(FTNODE a, FTNODE b)
     // TODO(leif): this is no longer the way in_memory_stats is
     // maintained. verify that it's ok to move this just before the unpin
     // and then do that.
-    a->dirty = 1;
-    b->dirty = 1;
+    a->set_dirty();
+    b->set_dirty();
 
     bn_data* a_last_bd = BLB_DATA(a, a->n_children-1);
     // this bool states if the last basement node in a has any items or not
@@ -1166,8 +1167,8 @@ maybe_merge_pinned_nonleaf_nodes(
     a->n_children = new_n_children;
     b->n_children = 0;
 
-    a->dirty = 1;
-    b->dirty = 1;
+    a->set_dirty();
+    b->set_dirty();
 
     *did_merge = true;
     *did_rebalance = false;
@@ -1210,7 +1211,7 @@ maybe_merge_pinned_nodes(
     toku_ftnode_assert_fully_in_memory(parent);
     toku_ftnode_assert_fully_in_memory(a);
     toku_ftnode_assert_fully_in_memory(b);
-    parent->dirty = 1;   // just to make sure
+    parent->set_dirty();   // just to make sure
     {
         MSN msna = a->max_msn_applied_to_node_on_disk;
         MSN msnb = b->max_msn_applied_to_node_on_disk;
@@ -1334,8 +1335,8 @@ ft_merge_child(
             }
 
             paranoid_invariant(BP_BLOCKNUM(node, childnuma).b == childa->blocknum.b);
-            childa->dirty = 1;  // just to make sure
-            childb->dirty = 1;  // just to make sure
+            childa->set_dirty();  // just to make sure
+            childb->set_dirty();  // just to make sure
         } else {
             // flow will be inaccurate for a while, oh well.  the children
             // are leaves in this case so it's not a huge deal (we're
@@ -1344,7 +1345,7 @@ ft_merge_child(
             // If we didn't merge the nodes, then we need the correct pivot.
             invariant_notnull(splitk.data);
             node->pivotkeys.replace_at(&splitk, childnuma);
-            node->dirty = 1;
+            node->set_dirty();
         }
         toku_destroy_dbt(&splitk);
     }
@@ -1368,7 +1369,7 @@ ft_merge_child(
         call_flusher_thread_callback(ft_flush_aflter_merge);
 
         // unlock the parent
-        paranoid_invariant(node->dirty);
+        paranoid_invariant(node->dirty());
         toku_unpin_ftnode(ft, node);
     }
     else {
@@ -1376,7 +1377,7 @@ ft_merge_child(
         call_flusher_thread_callback(ft_flush_aflter_rebalance);
 
         // unlock the parent
-        paranoid_invariant(node->dirty);
+        paranoid_invariant(node->dirty());
         toku_unpin_ftnode(ft, node);
         toku_unpin_ftnode(ft, childb);
     }
@@ -1438,9 +1439,9 @@ void toku_ft_flush_some_child(FT ft, FTNODE parent, struct flusher_advice *fa)
 
     // only do the following work if there is a flush to perform
     if (toku_bnc_n_entries(BNC(parent, childnum)) > 0 || parent->height == 1) {
-        if (!parent->dirty) {
+        if (!parent->dirty()) {
             dirtied++;
-            parent->dirty = 1;
+            parent->set_dirty();
         }
         // detach buffer
         BP_WORKDONE(parent, childnum) = 0;  // this buffer is drained, no work has been done by its contents
@@ -1470,7 +1471,7 @@ void toku_ft_flush_some_child(FT ft, FTNODE parent, struct flusher_advice *fa)
     // It is possible after reading in the entire child,
     // that we now know that the child is not reactive
     // if so, we can unpin parent right now
-    // we wont be splitting/merging child
+    // we won't be splitting/merging child
     // and we have already replaced the bnc
     // for the root with a fresh one
     enum reactivity child_re = toku_ftnode_get_reactivity(ft, child);
@@ -1485,9 +1486,9 @@ void toku_ft_flush_some_child(FT ft, FTNODE parent, struct flusher_advice *fa)
     // in the buffer to flush, and as a result, flushing is not necessary
     // and bnc is NULL
     if (bnc != NULL) {
-        if (!child->dirty) {
+        if (!child->dirty()) {
             dirtied++;
-            child->dirty = 1;
+            child->set_dirty();
         }
         // do the actual flush
         toku_bnc_flush_to_child(
@@ -1572,6 +1573,7 @@ void toku_bnc_flush_to_child(FT ft, NONLEAF_CHILDINFO bnc, FTNODE child, TXNID p
         txn_gc_info *gc_info;
 
         STAT64INFO_S stats_delta;
+        int64_t logical_rows_delta = 0;
         size_t remaining_memsize = bnc->msg_buffer.buffer_size_in_use();
 
         flush_msg_fn(FT t, FTNODE n, NONLEAF_CHILDINFO nl, txn_gc_info *g) :
@@ -1599,8 +1601,8 @@ void toku_bnc_flush_to_child(FT ft, NONLEAF_CHILDINFO bnc, FTNODE child, TXNID p
                 is_fresh,
                 gc_info,
                 flow_deltas,
-                &stats_delta
-                );
+                &stats_delta,
+                &logical_rows_delta);
             remaining_memsize -= memsize_in_buffer;
             return 0;
         }
@@ -1613,6 +1615,7 @@ void toku_bnc_flush_to_child(FT ft, NONLEAF_CHILDINFO bnc, FTNODE child, TXNID p
     if (flush_fn.stats_delta.numbytes || flush_fn.stats_delta.numrows) {
         toku_ft_update_stats(&ft->in_memory_stats, flush_fn.stats_delta);
     }
+    toku_ft_adjust_logical_row_count(ft, flush_fn.logical_rows_delta);
     if (do_garbage_collection) {
         size_t buffsize = bnc->msg_buffer.buffer_size_in_use();
         // may be misleading if there's a broadcast message in there
@@ -1784,7 +1787,7 @@ static void flush_node_fun(void *fe_v)
     // read them back in, or just do the regular partial fetch.  If we
     // don't, that means fe->node is a parent, so we need to do this anyway.
     bring_node_fully_into_memory(fe->node,fe->ft);
-    fe->node->dirty = 1;
+    fe->node->set_dirty();
 
     struct flusher_advice fa;
     struct flush_status_update_extra fste;
@@ -1890,7 +1893,7 @@ void toku_ft_flush_node_on_background_thread(FT ft, FTNODE parent)
             //
             // can detach buffer and unpin root here
             //
-            parent->dirty = 1;
+            parent->set_dirty();
             BP_WORKDONE(parent, childnum) = 0;  // this buffer is drained, no work has been done by its contents
             NONLEAF_CHILDINFO bnc = BNC(parent, childnum);
             NONLEAF_CHILDINFO new_bnc = toku_create_empty_nl();

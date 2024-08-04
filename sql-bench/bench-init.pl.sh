@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 # Copyright (c) 2000-2003, 2005-2007 MySQL AB, 2009 Sun Microsystems, Inc.
 # Use is subject to license terms.
 #
@@ -15,7 +15,7 @@
 # You should have received a copy of the GNU Library General Public
 # License along with this library; if not, write to the Free
 # Software Foundation, Inc., 51 Franklin St, Fifth Floor, Boston,
-# MA 02110-1301, USA
+# MA 02110-1335  USA
 #
 ##########################################################
 # this is the base file every test is using ....
@@ -265,7 +265,7 @@ sub fetch_all_rows
   if (!($sth= $dbh->prepare($query)))
   {
     print "\n" if ($opt_debug);
-    die "Error occured with prepare($query)\n -> $DBI::errstr\n";
+    die "Error occurred with prepare($query)\n -> $DBI::errstr\n";
     return undef;
   }
   if (!$sth->execute)
@@ -282,7 +282,7 @@ sub fetch_all_rows
       print "0\n" if ($opt_debug);
       return 0;
     }
-    die "Error occured with execute($query)\n -> $DBI::errstr\n";
+    die "Error occurred with execute($query)\n -> $DBI::errstr\n";
     $sth->finish;
     return undef;
   }

@@ -12,7 +12,7 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA 
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335  USA 
 
 IF(CMAKE_SYSTEM_NAME MATCHES "SunOS")
  # On Solaris, /opt/csw often contains a newer bison 
@@ -20,7 +20,16 @@ IF(CMAKE_SYSTEM_NAME MATCHES "SunOS")
    SET(BISON_EXECUTABLE /opt/csw/bin/bison)
  ENDIF()
 ENDIF()
-FIND_PROGRAM(BISON_EXECUTABLE bison DOC "path to the bison executable")
+IF(WIN32)
+  SET(BISON_PATH_HINTS
+    HINTS
+    C:/gnuwin32/bin
+    C:/cygwin64/bin
+    C:/cygwin/bin)
+ENDIF()
+FIND_PROGRAM(BISON_EXECUTABLE NAMES bison win_bison
+  ${BISON_PATH_HINTS}
+  DOC "path to the bison executable")
 MARK_AS_ADVANCED(BISON_EXECUTABLE "")
 IF(NOT BISON_EXECUTABLE)
   MESSAGE("Warning: Bison executable not found in PATH")
@@ -47,6 +56,21 @@ MACRO (RUN_BISON input_yy output_cc output_h)
     ENDIF()
   ENDIF()
   IF(BISON_USABLE)
+    # Workaround for VS regenerating output even
+    # when outputs are up-to-date. At least, fix output timestamp
+    # after build so that files that depend on generated header are
+    # not rebuilt.
+    IF(CMAKE_GENERATOR MATCHES "Visual Studio")
+      FIND_PROGRAM(TOUCH_EXECUTABLE touch DOC "Path to touch executable"
+        PATHS "C:/Program Files/Git/usr/bin"
+              "C:/Program Files (x86)/Git/usr/bin")
+      IF(TOUCH_EXECUTABLE)
+        SET(VS_FIX_OUTPUT_TIMESTAMPS
+          COMMAND ${TOUCH_EXECUTABLE} -r ${input_yy} ${output_cc}
+          COMMAND ${TOUCH_EXECUTABLE} -r ${input_yy} ${output_h})
+      ENDIF()
+    ENDIF()
+
     ADD_CUSTOM_COMMAND(
       OUTPUT ${output_cc}
              ${output_h}
@@ -54,8 +78,9 @@ MACRO (RUN_BISON input_yy output_cc output_h)
        --output=${output_cc}
        --defines=${output_h}
         ${input_yy}
-        DEPENDS ${input_yy}
-	)
+      ${VS_FIX_OUTPUT_TIMESTAMPS}
+      DEPENDS ${input_yy}
+    )
   ELSE()
     # Bison is missing or not usable, e.g too old
     IF(EXISTS  ${output_cc} AND EXISTS ${output_h})

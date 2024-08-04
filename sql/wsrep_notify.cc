@@ -11,13 +11,12 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 #include <mysqld.h>
 #include "wsrep_priv.h"
 #include "wsrep_utils.h"
 
-const char* wsrep_notify_cmd="";
 
 static const char* _status_str(wsrep_member_status_t status)
 {
@@ -41,10 +40,12 @@ void wsrep_notify_status (wsrep_member_status_t    status,
     return;
   }
 
-  char  cmd_buf[1 << 16]; // this can be long
-  long  cmd_len = sizeof(cmd_buf) - 1;
-  char* cmd_ptr = cmd_buf;
+  const long  cmd_len = (1 << 16) - 1;
+  char* cmd_ptr = (char*) my_malloc(cmd_len + 1, MYF(MY_WME));
   long  cmd_off = 0;
+
+  if (!cmd_ptr)
+    return; // the warning is in the log
 
   cmd_off += snprintf (cmd_ptr + cmd_off, cmd_len - cmd_off, "%s",
                        wsrep_notify_cmd);
@@ -94,6 +95,7 @@ void wsrep_notify_status (wsrep_member_status_t    status,
   {
     WSREP_ERROR("Notification buffer too short (%ld). Aborting notification.",
                cmd_len);
+    my_free(cmd_ptr);
     return;
   }
 
@@ -107,5 +109,6 @@ void wsrep_notify_status (wsrep_member_status_t    status,
     WSREP_ERROR("Notification command failed: %d (%s): \"%s\"",
                 err, strerror(err), cmd_ptr);
   }
+  my_free(cmd_ptr);
 }
 

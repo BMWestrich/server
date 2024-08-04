@@ -36,7 +36,7 @@
 ########################################################################
 
 SET @start_value = @@global.general_log_file;
-SELECT @start_value;
+SELECT length(@start_value) > 0;
 
 
 --echo '#---------------------FN_DYNVARS_004_01-------------------------#'
@@ -45,7 +45,7 @@ SELECT @start_value;
 ############################################### 
 
 SET @@global.general_log_file = DEFAULT;
-SELECT @@global.general_log_file;
+SELECT length(@@global.general_log_file) > 0;
 
 
 --echo '#--------------------FN_DYNVARS_004_02------------------------#'
@@ -57,6 +57,20 @@ SELECT @@global.general_log_file;
 SET @@global.general_log_file = mytest.log;
 --error ER_WRONG_TYPE_FOR_VAR
 SET @@global.general_log_file = 12;
+
+#
+# MDEV-10465
+#
+--error ER_WRONG_VALUE_FOR_VAR
+SET @@global.general_log_file = 'my.cnf';
+--error ER_WRONG_VALUE_FOR_VAR
+SET @@global.general_log_file = '/tmp/my.cnf';
+--error ER_WRONG_VALUE_FOR_VAR
+SET @@global.general_log_file = '.my.cnf';
+--error ER_WRONG_VALUE_FOR_VAR
+SET @@global.general_log_file = 'my.cnf\0foo';
+--error ER_WRONG_VALUE_FOR_VAR
+SET @@global.general_log_file = 'my.ini';
 
 
 --echo '#----------------------FN_DYNVARS_004_03------------------------#'

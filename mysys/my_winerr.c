@@ -12,7 +12,7 @@ GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /*
   Convert Windows API error (GetLastError() to Posix equivalent (errno)
@@ -75,7 +75,9 @@ static struct errentry errtable[]= {
   {  ERROR_ALREADY_EXISTS,         EEXIST    },  /* 183 */
   {  ERROR_FILENAME_EXCED_RANGE,   ENOENT    },  /* 206 */
   {  ERROR_NESTING_NOT_ALLOWED,    EAGAIN    },  /* 215 */
-  {  ERROR_NOT_ENOUGH_QUOTA,       ENOMEM    }    /* 1816 */
+  {  ERROR_FILE_SYSTEM_LIMITATION, EFBIG     },  /* 665 */
+  {  ERROR_NO_SYSTEM_RESOURCES,    ENOMEM    },  /* 1450 */
+  {  ERROR_NOT_ENOUGH_QUOTA,       ENOMEM    }   /* 1816 */
 };
 
 /* size of the table */
@@ -117,7 +119,7 @@ static int get_errno_from_oserr(unsigned long oserrno)
     return EINVAL;
 }
 
-/* Set errno corresponsing to GetLastError() value */
+/* Set errno corresponding to GetLastError() value */
 void my_osmaperr ( unsigned long oserrno)
 {
     errno= get_errno_from_oserr(oserrno);

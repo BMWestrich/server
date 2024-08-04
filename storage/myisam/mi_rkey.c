@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /* Read record based on a key */
 
@@ -32,8 +32,8 @@ int mi_rkey(MI_INFO *info, uchar *buf, int inx, const uchar *key,
   uint pack_key_length, use_key_length, nextflag;
   ICP_RESULT res= ICP_NO_MATCH;
   DBUG_ENTER("mi_rkey");
-  DBUG_PRINT("enter", ("base: 0x%lx  buf: 0x%lx  inx: %d  search_flag: %d",
-                       (long) info, (long) buf, inx, search_flag));
+  DBUG_PRINT("enter", ("base: %p  buf: %p  inx: %d  search_flag: %d",
+                       info, buf, inx, search_flag));
 
   if ((inx = _mi_check_index(info,inx)) < 0)
     DBUG_RETURN(my_errno);

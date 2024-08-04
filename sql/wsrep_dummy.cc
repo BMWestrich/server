@@ -1,4 +1,4 @@
-/* Copyright (C) 2014 SkySQL Ab.
+/* Copyright (C) 2014, 2020, MariaDB
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License along
    with this program; if not, write to the Free Software Foundation, Inc.,
-   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA. */
+   51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA. */
 
 #include <my_global.h>
 #include <sql_class.h>
@@ -101,8 +101,8 @@ enum wsrep_conflict_state wsrep_thd_get_conflict_state(THD *)
 my_bool wsrep_thd_is_wsrep(THD *)
 { return 0; }
 
-char *wsrep_thd_query(THD *)
-{ return 0; }
+const char *wsrep_thd_query(THD *)
+{ return "NULL"; }
 
 enum wsrep_query_state wsrep_thd_query_state(THD *)
 { return QUERY_IDLE; }
@@ -125,8 +125,28 @@ longlong wsrep_thd_trx_seqno(THD *)
 struct wsrep_ws_handle* wsrep_thd_ws_handle(THD *)
 { return 0; }
 
+void wsrep_set_load_multi_commit(THD *thd, bool split)
+{ }
+
+bool wsrep_is_load_multi_commit(THD *thd)
+{ return false; }
+
 int wsrep_trx_is_aborting(THD *)
 { return 0; }
 
 void wsrep_unlock_rollback()
 { }
+
+void wsrep_set_data_home_dir(const char *)
+{ }
+
+void wsrep_log(void (*)(const char *, ...), const char *, ...)
+{
+}
+
+my_bool wsrep_thd_is_applier(MYSQL_THD thd)
+{ return false; }
+
+void wsrep_report_bf_lock_wait(MYSQL_THD thd,
+                               unsigned long long id)
+{}

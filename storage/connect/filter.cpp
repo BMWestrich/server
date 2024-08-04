@@ -1,7 +1,7 @@
 /***************** Filter C++ Class Filter Code (.CPP) *****************/
-/*  Name: FILTER.CPP  Version 3.9                                      */
+/*  Name: FILTER.CPP  Version 4.0                                      */
 /*                                                                     */
-/*  (C) Copyright to the author Olivier BERTRAND          1998-2014    */
+/*  (C) Copyright to the author Olivier BERTRAND          1998-2017    */
 /*                                                                     */
 /*  This file contains the class FILTER function code.                 */
 /***********************************************************************/
@@ -10,16 +10,16 @@
 /*  Include relevant MariaDB header file.                              */
 /***********************************************************************/
 #include "my_global.h"
-#include "sql_class.h"
+//#include "sql_class.h"
 //#include "sql_time.h"
 
-#if defined(__WIN__)
+#if defined(_WIN32)
 //#include <windows.h>
-#else   // !__WIN__
+#else   // !_WIN32
 #include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#endif  // !__WIN__
+#endif  // !_WIN32
 
 
 /***********************************************************************/
@@ -33,10 +33,7 @@
 #include "tabcol.h"
 #include "xtable.h"
 #include "array.h"
-//#include "subquery.h"
 #include "filter.h"
-//#include "token.h"
-//#include "select.h"
 #include "xindex.h"
 
 /***********************************************************************/
@@ -87,8 +84,8 @@ BYTE OpBmp(PGLOBAL g, OPVAL opc)
     case OP_EXIST: bt = 0x00; break;
     default:
       sprintf(g->Message, MSG(BAD_FILTER_OP), opc);
-      longjmp(g->jumper[g->jump_level], TYPE_ARRAY);
-    } // endswitch opc
+			throw (int)TYPE_FILTER;
+	} // endswitch opc
 
   return bt;
   } // end of OpBmp
@@ -301,7 +298,7 @@ PFIL FILTER::Link(PGLOBAL g, PFIL fil2)
   {
   PFIL fil1;
 
-  if (trace)
+  if (trace(1))
     htrc("Linking filter %p with op=%d... to filter %p with op=%d\n",
                   this, Opc, fil2, (fil2) ? fil2->Opc : 0);
 
@@ -355,7 +352,7 @@ int FILTER::CheckColumn(PGLOBAL g, PSQL sqlp, PXOB &p, int &ag)
   char errmsg[MAX_STR] = "";
   int  agg, k, n = 0;
 
-  if (trace)
+  if (trace(1))
     htrc("FILTER CheckColumn: sqlp=%p ag=%d\n", sqlp, ag);
 
   switch (Opc) {
@@ -540,7 +537,7 @@ PFIL FILTER::SortJoin(PGLOBAL g)
 bool FILTER::FindJoinFilter(POPJOIN opj, PFIL fprec, bool teq, bool tek,
                             bool tk2, bool tc2, bool tix, bool thx)
   {
-  if (trace)
+  if (trace(1))
     htrc("FindJoinFilter: opj=%p fprec=%p tests=(%d,%d,%d,%d)\n",
                           opj, fprec, teq, tek, tk2, tc2);
 
@@ -867,7 +864,7 @@ bool FILTER::CheckLocal(PTDB tdbp)
   {
   bool local = TRUE;
 
-  if (trace) {
+  if (trace(1)) {
     if (tdbp)
       htrc("CheckLocal: filp=%p R%d\n", this, tdbp->GetTdb_No());
     else
@@ -877,7 +874,7 @@ bool FILTER::CheckLocal(PTDB tdbp)
   for (int i = 0; local && i < 2; i++)
     local = Arg(i)->CheckLocal(tdbp);
 
-  if (trace)
+  if (trace(1))
     htrc("FCL: returning %d\n", local);
 
   return (local);
@@ -983,7 +980,7 @@ bool FILTER::Convert(PGLOBAL g, bool having)
   {
   int i, comtype = TYPE_ERROR;
 
-  if (trace)
+  if (trace(1))
     htrc("converting(?) %s %p opc=%d\n",
           (having) ? "having" : "filter", this, Opc);
 
@@ -1014,7 +1011,7 @@ bool FILTER::Convert(PGLOBAL g, bool having)
         return TRUE;
       } // endswitch
 
-    if (trace)
+    if (trace(1))
       htrc("Filter(%d): Arg type=%d\n", i, GetArgType(i));
 
     // Set default values
@@ -1059,7 +1056,7 @@ bool FILTER::Convert(PGLOBAL g, bool having)
       return TRUE;
       } // endif
 
-    if (trace)
+    if (trace(1))
       htrc(" comtype=%d, B_T(%d)=%d Val(%d)=%p\n",
              comtype, i, Test[i].B_T, i, Val(i));
 
@@ -1067,7 +1064,7 @@ bool FILTER::Convert(PGLOBAL g, bool having)
 
   // Set or allocate the filter argument values and buffers
   for (i = 0; i < 2; i++) {
-    if (trace)
+    if (trace(1))
       htrc(" conv type %d ? i=%d B_T=%d comtype=%d\n",
             GetArgType(i), i, Test[i].B_T, comtype);
 
@@ -1144,7 +1141,7 @@ bool FILTER::Convert(PGLOBAL g, bool having)
 
  TEST: // Test for possible Eval optimization
 
-  if (trace)
+  if (trace(1))
     htrc("Filp %p op=%d argtypes=(%d,%d)\n",
           this, Opc, GetArgType(0), GetArgType(1));
 
@@ -1193,7 +1190,7 @@ bool FILTER::Convert(PGLOBAL g, bool having)
           Arg(0) = pXVOID;
           } // endif void
 
-        // pass thru
+        // fall through
       case OP_IN:
         // For IN operator do optimize if operand is an array
         if (GetArgType(1) != TYPE_ARRAY)
@@ -1233,7 +1230,7 @@ bool FILTER::Eval(PGLOBAL g)
       else if (Test[i].Conv)
         Val(i)->SetValue_pval(Arg(i)->GetValue());
 
-  if (trace)
+  if (trace(1))
     htrc(" Filter: op=%d type=%d %d B_T=%d %d val=%p %p\n",
           Opc, GetArgType(0), GetArgType(1), Test[0].B_T, Test[1].B_T,
           Val(0), Val(1));
@@ -1260,6 +1257,7 @@ bool FILTER::Eval(PGLOBAL g)
         } // endif Opm
 
       // For modified operators, pass thru
+      /* fall through */
     case OP_IN:
     case OP_EXIST:
       // For IN operations, special processing is done here
@@ -1272,7 +1270,7 @@ bool FILTER::Eval(PGLOBAL g)
           goto FilterError;
         } // endswitch Type
 
-      if (trace) {
+      if (trace(1)) {
         htrc(" IN filtering: ap=%p\n", ap);
 
         if (ap)
@@ -1362,7 +1360,7 @@ bool FILTER::Eval(PGLOBAL g)
       goto FilterError;
     } // endswitch Opc
 
-  if (trace)
+  if (trace(1))
     htrc("Eval: filter %p Opc=%d result=%d\n",
                 this, Opc, Value->GetIntValue());
 
@@ -1408,7 +1406,7 @@ PFIL FILTER::Copy(PTABS t)
 /*********************************************************************/
 /*  Make file output of FILTER contents.                             */
 /*********************************************************************/
-void FILTER::Print(PGLOBAL g, FILE *f, uint n)
+void FILTER::Printf(PGLOBAL g, FILE *f, uint n)
   {
   char m[64];
 
@@ -1430,18 +1428,18 @@ void FILTER::Print(PGLOBAL g, FILE *f, uint n)
       if (lin && fp->GetArgType(i) == TYPE_FILTER)
         fprintf(f, "%s  Filter at %p\n", m, fp->Arg(i));
       else
-        fp->Arg(i)->Print(g, f, n + 2);
+        fp->Arg(i)->Printf(g, f, n + 2);
 
       } // endfor i
 
     } // endfor fp
 
-  } // end of Print
+  } // end of Printf
 
 /***********************************************************************/
 /*  Make string output of TABLE contents (z should be checked).        */
 /***********************************************************************/
-void FILTER::Print(PGLOBAL g, char *ps, uint z)
+void FILTER::Prints(PGLOBAL g, char *ps, uint z)
   {
   #define FLEN 100
 
@@ -1469,7 +1467,7 @@ void FILTER::Print(PGLOBAL g, char *ps, uint z)
       bcp = bxp;
       p = bcp->Cold;
       n = FLEN;
-      fp->Arg(0)->Print(g, p, n);
+      fp->Arg(0)->Prints(g, p, n);
       n = FLEN - strlen(p);
 
       switch (fp->Opc) {
@@ -1515,7 +1513,7 @@ void FILTER::Print(PGLOBAL g, char *ps, uint z)
 
       n = FLEN - strlen(p);
       p += strlen(p);
-      fp->Arg(1)->Print(g, p, n);
+      fp->Arg(1)->Prints(g, p, n);
     } else
       if (!bcp) {
         strncat(ps, "???", z);
@@ -1578,7 +1576,7 @@ void FILTER::Print(PGLOBAL g, char *ps, uint z)
     bcp = bxp;
     } while (bcp); // enddo
 
-  } // end of Print
+  } // end of Prints
 
 
 /* -------------------- Derived Classes Functions -------------------- */
@@ -1694,10 +1692,8 @@ PFIL PrepareFilter(PGLOBAL g, PFIL fp, bool having)
   {
   PFIL filp = NULL;
 
-  if (trace)
+  if (trace(1))
     htrc("PrepareFilter: fp=%p having=%d\n", fp, having);
-//if (fp)
-//  fp->Print(g, debug, 0);
 
   while (fp) {
     if (fp->Opc == OP_SEP)
@@ -1711,17 +1707,15 @@ PFIL PrepareFilter(PGLOBAL g, PFIL fp, bool having)
         break;  // Remove eventual ending separator(s)
 
 //  if (fp->Convert(g, having))
-//    longjmp(g->jumper[g->jump_level], TYPE_FILTER);
+//			throw (int)TYPE_FILTER;
 
     filp = fp;
     fp = fp->Next;
     filp->Next = NULL;
     } // endwhile
 
-  if (trace)
+  if (trace(1))
     htrc(" returning filp=%p\n", filp);
-//if (filp)
-//  filp->Print(g, debug, 0);
 
   return filp;
   } // end of PrepareFilter
@@ -1744,9 +1738,9 @@ DllExport bool ApplyFilter(PGLOBAL g, PFIL filp)
 //  return TRUE;
 
   if (filp->Eval(g))
-    longjmp(g->jumper[g->jump_level], TYPE_FILTER);
+		throw (int)TYPE_FILTER;
 
-  if (trace > 1)
+  if (trace(2))
     htrc("PlugFilter filp=%p result=%d\n",
                      filp, filp->GetResult());
 

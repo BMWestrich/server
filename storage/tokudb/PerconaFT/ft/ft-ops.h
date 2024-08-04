@@ -48,6 +48,8 @@ Copyright (c) 2006, 2015, Percona and/or its affiliates. All rights reserved.
 #include "ft/msg.h"
 #include "util/dbt.h"
 
+#define OS_PATH_SEPARATOR '/'
+
 typedef struct ft_handle *FT_HANDLE;
 
 int toku_open_ft_handle (const char *fname, int is_create, FT_HANDLE *, int nodesize, int basementnodesize, enum toku_compression_method compression_method, CACHETABLE, TOKUTXN, int(*)(DB *,const DBT*,const DBT*)) __attribute__ ((warn_unused_result));
@@ -123,12 +125,12 @@ typedef int (*ft_update_func)(DB *db, const DBT *key, const DBT *old_val, const 
 void toku_ft_set_update(FT_HANDLE ft_h, ft_update_func update_fun);
 
 int toku_ft_handle_open(FT_HANDLE, const char *fname_in_env,
-		  int is_create, int only_create, CACHETABLE ct, TOKUTXN txn)  __attribute__ ((warn_unused_result));
+		  int is_create, int only_create, CACHETABLE ct, TOKUTXN txn, bool open_rw=true)  __attribute__ ((warn_unused_result));
 int toku_ft_handle_open_recovery(FT_HANDLE, const char *fname_in_env, int is_create, int only_create, CACHETABLE ct, TOKUTXN txn, 
 			   FILENUM use_filenum, LSN max_acceptable_lsn)  __attribute__ ((warn_unused_result));
 
 // clone an ft handle. the cloned handle has a new dict_id but refers to the same fractal tree
-int toku_ft_handle_clone(FT_HANDLE *cloned_ft_handle, FT_HANDLE ft_handle, TOKUTXN txn);
+int toku_ft_handle_clone(FT_HANDLE *cloned_ft_handle, FT_HANDLE ft_handle, TOKUTXN txn, bool open_rw=true);
 
 // close an ft handle during normal operation. the underlying ft may or may not close,
 // depending if there are still references. an lsn for this close will come from the logger.
@@ -207,6 +209,15 @@ extern int toku_ft_debug_mode;
 int toku_verify_ft (FT_HANDLE ft_h)  __attribute__ ((warn_unused_result));
 int toku_verify_ft_with_progress (FT_HANDLE ft_h, int (*progress_callback)(void *extra, float progress), void *extra, int verbose, int keep_going)  __attribute__ ((warn_unused_result));
 
+int toku_ft_recount_rows(
+    FT_HANDLE ft,
+    int (*progress_callback)(
+        uint64_t count,
+        uint64_t deleted,
+        void* progress_extra),
+    void* progress_extra);
+
+
 DICTIONARY_ID toku_ft_get_dictionary_id(FT_HANDLE);
 
 enum ft_flags {
@@ -277,3 +288,8 @@ void toku_ft_set_direct_io(bool direct_io_on);
 void toku_ft_set_compress_buffers_before_eviction(bool compress_buffers);
 
 void toku_note_deserialized_basement_node(bool fixed_key_size);
+
+// Creates all directories for the path if necessary,
+// returns true if all dirs are created successfully or
+// all dirs exist, false otherwise.
+bool toku_create_subdirs_if_needed(const char* path);

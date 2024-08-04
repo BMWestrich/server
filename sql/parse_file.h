@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #ifndef _PARSE_FILE_H_
 #define _PARSE_FILE_H_
@@ -42,9 +42,9 @@ enum file_opt_type {
 
 struct File_option
 {
-  LEX_STRING name;		/**< Name of the option */
-  int offset;			/**< offset to base address of value */
-  file_opt_type type;		/**< Option type */
+  LEX_STRING name;              /**< Name of the option */
+  my_ptrdiff_t offset;          /**< offset to base address of value */
+  file_opt_type type;           /**< Option type */
 };
 
 

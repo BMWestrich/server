@@ -1567,6 +1567,37 @@ EXECUTE stmt;
 DROP TABLE t1,t2,t3,t4,t5,t6;
 
 --echo #
+--echo # MDEV-10500 CASE/IF Statement returns multiple values and shifts further result values to the next column
+--echo #
+
+CREATE TABLE t1 (
+  id int not null AUTO_INCREMENT,
+  active bool not null,
+  data1 bigint,
+  data2 bigint,
+  data3 bigint,
+  primary key (id)
+);
+INSERT INTO t1 (active,data1,data2,data3) VALUES (1,null,100,200);
+SELECT
+  CASE WHEN active THEN SUM(data1) END AS C_1,
+  SUM(data2) AS C_2,
+  SUM(data3) AS C_3
+FROM t1;
+SELECT
+  IF(active, SUM(data1), 5) AS C_1,
+  SUM(data2) AS C_2,
+  SUM(data3) AS C_3
+FROM t1;
+DROP TABLE t1;
+
+--echo #
+--echo # MDEV-10468 Assertion `nr >= 0.0' failed in Item_sum_std::val_real()
+--echo #
+SELECT STDDEV_POP(f) FROM (SELECT "1e+309" AS f UNION SELECT "-1e+309" AS f) tbl;
+SELECT STDDEV(f) FROM (SELECT 1.7976931348623157e+308 AS f UNION SELECT -1.7976931348623157e+308 AS f) tbl;
+
+--echo #
 --echo # MDEV-8852 Implicit or explicit CAST from MAX(string) to INT,DOUBLE,DECIMAL does not produce warnings
 --echo #
 SELECT MAX('x') << 1, CAST(MAX('x') AS DOUBLE), CAST(MAX('x') AS DECIMAL);
@@ -1579,6 +1610,14 @@ CREATE TABLE t1 (id INT, a BIGINT);
 INSERT INTO t1 VALUES (1,0x7FFFFFFFFFFFFFFF),(2,0x7FFFFFFFFFFFFFFF);
 SELECT id, AVG(a) AS avg, CAST(MIN(a) AS SIGNED) AS cast_min FROM t1 GROUP BY id HAVING avg!=123 ORDER BY id;
 SELECT id, AVG(a) AS avg, CAST(AVG(a) AS SIGNED) AS cast_avg FROM t1 GROUP BY id HAVING avg!=123 ORDER BY id;
+DROP TABLE t1;
+
+--echo #
+--echo # MDEV-9656 Assertion `0' failed in Item_sum_field::get_tmp_table_field()
+--echo #
+CREATE TABLE t1 (i INT);
+INSERT INTO t1 VALUES (1),(2);
+SELECT DISTINCT VAR_POP(1) FROM t1 GROUP BY @a := 's';
 DROP TABLE t1;
 
 --echo #
@@ -1609,5 +1648,107 @@ SELECT companynr, AVG(fld1), AVG(fld1)<<0 AS avg1, CAST(AVG(fld1) AS UNSIGNED)<<
 DROP TABLE t1;
 
 --echo #
+--echo # case where aggregate resolved in the local SELECT
+--echo # but outer ones are checked
+--echo #
+create table t10 (a int , b int, c int);
+insert into t10 values (0,0,0),(1,1,1);
+create table t11 as select * from t10;
+create table t12 as select * from t10;
+explain extended select a from t10 where c<3 or a in (select c from t12 union select max(t10.b) from t11 group by t11.c);
+drop table t10,t11,t12;
+--echo #
+--echo # MDEV-10017: Get unexpected `Empty Set` for correlated subquery
+--echo # with aggregate functions
+--echo #
+
+create table t1(c1 int, c2 int, c3 int);
+insert into t1 values(1,1,1),(2,2,2),(3,3,3);
+select * from t1;
+create table t2(c1 int, c2 int);
+insert into t2 values(2,2);
+select * from t2;
+--error ER_INVALID_GROUP_FUNC_USE
+explain extended
+select c1 from t1 having c1 >= (select t.c1 as c from t2 t order by (select min(t1.c1+c) from t2 tt));
+--error ER_INVALID_GROUP_FUNC_USE
+select c1 from t1 having c1 >= (select t.c1 as c from t2 t order by (select min(t1.c1+c) from t2 tt));
+
+explain extended
+select c1 from t1 having c1 >= (select t.c1 as c from t2 t order by (select min(t1.c1+tt.c1) from t2 tt));
+select c1 from t1 having c1 >= (select t.c1 as c from t2 t order by (select min(t1.c1+tt.c1) from t2 tt));
+drop table t1,t2;
+
+--echo #
+--echo # MDEV-10556 Assertion `0' failed in virtual void Item_sum_field::set_result_field(Field*)
+--echo #
+
+CREATE TABLE t1 (i INT, KEY(i)) ENGINE=MyISAM;
+INSERT INTO t1 VALUES (10),(20),(30);
+SELECT DISTINCT STDDEV(1) FROM t1 GROUP BY i ORDER BY BENCHMARK(0, BIT_XOR(i));
+DROP TABLE t1;
+
+--echo #
 --echo # End of 10.1 tests
 --echo #
+
+--echo #
+--echo # MDEV-13064: assertion `n < m_size' fails in Item::split_sum_func2()
+--echo #
+
+create table t1 (i int) engine=MyISAM; 
+insert into t1 value (1),(2);
+
+select count(*)+sleep(0) from t1;
+
+drop table t1;
+ 
+--echo #
+--echo # MDEV-25112: MIN/MAX optimization for query containing BETWEEN in WHERE
+--echo #
+
+create table t1 (a int) engine=myisam;
+insert into t1 values (267), (273),  (287), (303), (308);
+
+let $q1=
+select max(a) from t1 where a < 303 and (a between 267 AND 287);
+let $q2=
+select min(a) from t1 where a > 267 and (a between 273 AND 303);
+
+eval $q1;
+eval explain $q1;
+eval $q2;
+eval explain $q2;
+
+create index idx on t1(a);
+
+eval $q1;
+eval explain $q1;
+eval $q2;
+eval explain $q2;
+
+drop table t1;
+
+--echo #
+--echo # MDEV-23809: Server crash in JOIN_CACHE::free or ...
+--echo #
+
+CREATE TABLE t1 (a INT);
+INSERT INTO t1 VALUES (1),(2);
+SELECT DISTINCT CASE CONVERT(EXPORT_SET(0, COLLATION(BENCHMARK(1, BIT_OR(0))),0),TIME) WHEN a THEN 1 END AS f FROM t1;
+DROP TABLE t1;
+
+
+CREATE TABLE t1 (a VARCHAR(8) NULL, b BIGINT);
+INSERT INTO t1 (a,b) VALUES (NULL,NULL),('foo',NULL);
+SELECT DISTINCT STRCMP((b > COLLATION(STDDEV_SAMP(15750))), a) AS f FROM t1;
+DROP TABLE t1;
+
+CREATE TABLE t1 (a BIGINT) AS SELECT 1 AS v3 UNION SELECT FALSE ;
+SELECT DISTINCT a IN ( COLLATION (AVG ('x'))) FROM t1 ;
+DROP TABLE t1;
+
+--echo #
+--echo # End of 10.2 tests
+--echo #
+

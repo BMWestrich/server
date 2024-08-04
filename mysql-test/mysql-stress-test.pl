@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 
 # Copyright (c) 2005, 2011, Oracle and/or its affiliates. All rights reserved.
 #
@@ -14,7 +14,7 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335  USA
 
 # ======================================================================
 #                     MySQL server stress test system 
@@ -1079,7 +1079,7 @@ sub log_session_errors
   {
     lock ($log_file_lock);
 
-    #header in the begining of log file
+    #header in the beginning of log file
     if (!-e $stress_log_file)
     {
       stress_log($stress_log_file, 

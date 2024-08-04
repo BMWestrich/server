@@ -1,5 +1,6 @@
 /*
    Copyright (c) 2004, 2011, Oracle and/or its affiliates.
+   Copyright (c) 2017, Monty Program Ab.
 
  This program is free software; you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by
@@ -12,7 +13,7 @@
 
  You should have received a copy of the GNU General Public License
  along with this program; if not, write to the Free Software
- Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /*
   This is a private header of sql-common library, containing
@@ -23,6 +24,7 @@
 #define _my_time_h_
 #include "my_global.h"
 #include "mysql_time.h"
+#include "my_decimal_limits.h"
 
 C_MODE_START
 
@@ -60,16 +62,16 @@ extern uchar days_in_month[];
   TIME_FUZZY_DATES is used for the result will only be used for comparison
   purposes. Conversion is as relaxed as possible.
 */
-#define TIME_FUZZY_DATES        1
-#define TIME_DATETIME_ONLY	2
-#define TIME_TIME_ONLY	        4
+#define TIME_FUZZY_DATES        1U
+#define TIME_DATETIME_ONLY	2U
+#define TIME_TIME_ONLY	        4U
 #define TIME_NO_ZERO_IN_DATE    (1UL << 23) /* == MODE_NO_ZERO_IN_DATE */
 #define TIME_NO_ZERO_DATE	(1UL << 24) /* == MODE_NO_ZERO_DATE    */
 #define TIME_INVALID_DATES	(1UL << 25) /* == MODE_INVALID_DATES   */
 
-#define MYSQL_TIME_WARN_TRUNCATED    1
-#define MYSQL_TIME_WARN_OUT_OF_RANGE 2
-#define MYSQL_TIME_NOTE_TRUNCATED    16
+#define MYSQL_TIME_WARN_TRUNCATED    1U
+#define MYSQL_TIME_WARN_OUT_OF_RANGE 2U
+#define MYSQL_TIME_NOTE_TRUNCATED    16U
 
 #define MYSQL_TIME_WARN_WARNINGS (MYSQL_TIME_WARN_TRUNCATED|MYSQL_TIME_WARN_OUT_OF_RANGE)
 #define MYSQL_TIME_WARN_NOTES    (MYSQL_TIME_NOTE_TRUNCATED)
@@ -118,7 +120,7 @@ longlong number_to_datetime(longlong nr, ulong sec_part, MYSQL_TIME *time_res,
 static inline
 longlong double_to_datetime(double nr, MYSQL_TIME *ltime, uint flags, int *cut)
 {
-  if (nr < 0 || nr > LONGLONG_MAX)
+  if (nr < 0 || nr > (double)LONGLONG_MAX)
     nr= (double)LONGLONG_MAX;
   return number_to_datetime((longlong) floor(nr),
                             (ulong)((nr-floor(nr))*TIME_SECOND_PART_FACTOR),
@@ -170,6 +172,12 @@ static inline my_bool validate_timestamp_range(const MYSQL_TIME *t)
   return TRUE;
 }
 
+/* Can't include mysqld_error.h, it needs mysys to build, thus hardcode 2 error values here. */
+#ifndef ER_WARN_DATA_OUT_OF_RANGE
+#define ER_WARN_DATA_OUT_OF_RANGE 1264
+#define ER_WARN_INVALID_TIMESTAMP 1299
+#endif
+
 my_time_t 
 my_system_gmt_sec(const MYSQL_TIME *t, long *my_timezone, uint *error_code);
 
@@ -184,7 +192,7 @@ void set_zero_time(MYSQL_TIME *tm, enum enum_mysql_timestamp_type time_type);
   sent using binary protocol fit in this buffer.
 */
 #define MAX_DATE_STRING_REP_LENGTH 30
-#define AUTO_SEC_PART_DIGITS 31 /* same as NOT_FIXED_DEC */
+#define AUTO_SEC_PART_DIGITS DECIMAL_NOT_SPECIFIED
 
 int my_time_to_str(const MYSQL_TIME *l_time, char *to, uint digits);
 int my_date_to_str(const MYSQL_TIME *l_time, char *to);
@@ -212,9 +220,12 @@ static inline void my_time_trunc(MYSQL_TIME *ltime, uint decimals)
 {
   ltime->second_part-= my_time_fraction_remainder(ltime->second_part, decimals);
 }
+#ifdef _WIN32
+#define suseconds_t long
+#endif
 static inline void my_timeval_trunc(struct timeval *tv, uint decimals)
 {
-  tv->tv_usec-= my_time_fraction_remainder(tv->tv_usec, decimals);
+  tv->tv_usec-= (suseconds_t) my_time_fraction_remainder(tv->tv_usec, decimals);
 }
 
 

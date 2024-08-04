@@ -1,6 +1,7 @@
 /*****************************************************************************
 
-Copyright (c) 2007, 2015, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2007, 2020, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2017, 2020, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +13,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -75,7 +76,7 @@ struct fts_query_t {
 
 	fts_table_t	fts_index_table;/*!< FTS auxiliary index table def */
 
-	ulint		total_size;	/*!< total memory size used by query */
+	size_t		total_size;	/*!< total memory size used by query */
 
 	fts_doc_ids_t*	deleted;	/*!< Deleted doc ids that need to be
 					filtered from the output */
@@ -145,6 +146,8 @@ struct fts_query_t {
 					fts_word_freq_t */
 
 	bool		multi_exist;	/*!< multiple FTS_EXIST oper */
+	byte		visiting_sub_exp; /*!< count of nested
+					fts_ast_visit_sub_exp() */
 };
 
 /** For phrase matching, first we collect the documents and the positions
@@ -287,7 +290,7 @@ fts_expand_query(
 	dict_index_t*	index,		/*!< in: FTS index to search */
 	fts_query_t*	query)		/*!< in: query result, to be freed
 					by the client */
-	__attribute__((nonnull, warn_unused_result));
+	MY_ATTRIBUTE((nonnull, warn_unused_result));
 /*************************************************************//**
 This function finds documents that contain all words in a
 phrase or proximity search. And if proximity search, verify
@@ -953,6 +956,18 @@ fts_query_free_doc_ids(
 	query->total_size -= SIZEOF_RBT_CREATE;
 }
 
+/**
+Free the query intersection
+@param[in] query	query instance */
+static
+void
+fts_query_free_intersection(
+	fts_query_t*	query)
+{
+	fts_query_free_doc_ids(query, query->intersection);
+	query->intersection = NULL;
+}
+
 /*******************************************************************//**
 Add the word to the documents "list" of matching words from
 the query. We make a copy of the word from the query heap. */
@@ -1128,7 +1143,7 @@ cont_search:
 /*****************************************************************//**
 Set difference.
 @return DB_SUCCESS if all go well */
-static __attribute__((nonnull, warn_unused_result))
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 fts_query_difference(
 /*=================*/
@@ -1220,7 +1235,7 @@ fts_query_difference(
 /*****************************************************************//**
 Intersect the token doc ids with the current set.
 @return DB_SUCCESS if all go well */
-static __attribute__((nonnull, warn_unused_result))
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 fts_query_intersect(
 /*================*/
@@ -1311,6 +1326,7 @@ fts_query_intersect(
 		/* error is passed by 'query->error' */
 		if (query->error != DB_SUCCESS) {
 			ut_ad(query->error == DB_FTS_EXCEED_RESULT_CACHE_LIMIT);
+			fts_query_free_intersection(query);
 			return(query->error);
 		}
 
@@ -1339,6 +1355,8 @@ fts_query_intersect(
 
 			ut_a(!query->multi_exist || (query->multi_exist
 			     && rbt_size(query->doc_ids) <= n_doc_ids));
+		} else if (query->intersection != NULL) {
+			fts_query_free_intersection(query);
 		}
 	}
 
@@ -1398,7 +1416,7 @@ fts_query_cache(
 /*****************************************************************//**
 Set union.
 @return DB_SUCCESS if all go well */
-static __attribute__((nonnull, warn_unused_result))
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 fts_query_union(
 /*============*/
@@ -1557,6 +1575,11 @@ fts_merge_doc_ids(
 				query, ranking->doc_id, ranking->rank);
 
 		if (query->error != DB_SUCCESS) {
+			if (query->intersection != NULL)
+			{
+				ut_a(query->oper == FTS_EXIST);
+				fts_query_free_intersection(query);
+			}
 			DBUG_RETURN(query->error);
 		}
 
@@ -1916,8 +1939,7 @@ fts_query_fetch_document(
 		if (dfield_is_ext(dfield)) {
 			data = btr_copy_externally_stored_field(
 				&cur_len, data, phrase->zip_size,
-				dfield_get_len(dfield), phrase->heap,
-				NULL);
+				dfield_get_len(dfield), phrase->heap);
 		} else {
 			cur_len = dfield_get_len(dfield);
 		}
@@ -2015,7 +2037,7 @@ fts_query_select(
 Read the rows from the FTS index, that match word and where the
 doc id is between first and last doc id.
 @return DB_SUCCESS if all go well else error code */
-static __attribute__((nonnull, warn_unused_result))
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 fts_query_find_term(
 /*================*/
@@ -2032,13 +2054,22 @@ fts_query_find_term(
 	fts_select_t		select;
 	doc_id_t		match_doc_id;
 	trx_t*			trx = query->trx;
+	char			table_name[MAX_FULL_NAME_LEN];
 
 	trx->op_info = "fetching FTS index matching nodes";
 
 	if (*graph) {
 		info = (*graph)->info;
 	} else {
+		ulint	selected;
+
 		info = pars_info_create();
+
+		selected = fts_select_index(*word->f_str);
+		query->fts_index_table.suffix = fts_get_suffix(selected);
+
+		fts_get_table_name(&query->fts_index_table, table_name);
+		pars_info_bind_id(info, true, "index_table_name", table_name);
 	}
 
 	select.found = FALSE;
@@ -2057,11 +2088,6 @@ fts_query_find_term(
 	fts_bind_doc_id(info, "max_doc_id", &match_doc_id);
 
 	if (!*graph) {
-		ulint		selected;
-
-		selected = fts_select_index(*word->f_str);
-
-		query->fts_index_table.suffix = fts_get_suffix(selected);
 
 		*graph = fts_parse_sql(
 			&query->fts_index_table,
@@ -2069,7 +2095,7 @@ fts_query_find_term(
 			"DECLARE FUNCTION my_func;\n"
 			"DECLARE CURSOR c IS"
 			" SELECT doc_count, ilist\n"
-			" FROM \"%s\"\n"
+			" FROM $index_table_name\n"
 			" WHERE word LIKE :word AND "
 			"	first_doc_id <= :min_doc_id AND "
 			"	last_doc_id >= :max_doc_id\n"
@@ -2155,7 +2181,7 @@ fts_query_sum(
 /********************************************************************
 Calculate the total documents that contain a particular word (term).
 @return DB_SUCCESS if all go well else error code */
-static __attribute__((nonnull, warn_unused_result))
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 fts_query_total_docs_containing_term(
 /*=================================*/
@@ -2168,6 +2194,7 @@ fts_query_total_docs_containing_term(
 	que_t*			graph;
 	ulint			selected;
 	trx_t*			trx = query->trx;
+	char			table_name[MAX_FULL_NAME_LEN]
 
 	trx->op_info = "fetching FTS index document count";
 
@@ -2182,13 +2209,17 @@ fts_query_total_docs_containing_term(
 
 	query->fts_index_table.suffix = fts_get_suffix(selected);
 
+	fts_get_table_name(&query->fts_index_table, table_name);
+
+	pars_info_bind_id(info, true, "index_table_name", table_name);
+
 	graph = fts_parse_sql(
 		&query->fts_index_table,
 		info,
 		"DECLARE FUNCTION my_func;\n"
 		"DECLARE CURSOR c IS"
 		" SELECT doc_count\n"
-		" FROM %s\n"
+		" FROM $index_table_name\n"
 		" WHERE word = :word "
 		" ORDER BY first_doc_id;\n"
 		"BEGIN\n"
@@ -2234,7 +2265,7 @@ fts_query_total_docs_containing_term(
 /********************************************************************
 Get the total number of words in a documents.
 @return DB_SUCCESS if all go well else error code */
-static __attribute__((nonnull, warn_unused_result))
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 fts_query_terms_in_document(
 /*========================*/
@@ -2247,6 +2278,7 @@ fts_query_terms_in_document(
 	que_t*		graph;
 	doc_id_t	read_doc_id;
 	trx_t*		trx = query->trx;
+	char		table_name[MAX_FULL_NAME_LEN];
 
 	trx->op_info = "fetching FTS document term count";
 
@@ -2262,13 +2294,17 @@ fts_query_terms_in_document(
 
 	query->fts_index_table.suffix = "DOC_ID";
 
+	fts_get_table_name(&query->fts_index_table, table_name);
+
+	pars_info_bind_id(info, true, "index_table_name", table_name);
+
 	graph = fts_parse_sql(
 		&query->fts_index_table,
 		info,
 		"DECLARE FUNCTION my_func;\n"
 		"DECLARE CURSOR c IS"
 		" SELECT count\n"
-		" FROM \"%s\"\n"
+		" FROM $index_table_name\n"
 		" WHERE doc_id = :doc_id "
 		"BEGIN\n"
 		"\n"
@@ -2315,7 +2351,7 @@ fts_query_terms_in_document(
 /*****************************************************************//**
 Retrieve the document and match the phrase tokens.
 @return DB_SUCCESS or error code */
-static __attribute__((nonnull, warn_unused_result))
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 fts_query_match_document(
 /*=====================*/
@@ -2361,7 +2397,7 @@ fts_query_match_document(
 This function fetches the original documents and count the
 words in between matching words to see that is in specified distance
 @return DB_SUCCESS if all OK */
-static __attribute__((nonnull, warn_unused_result))
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 bool
 fts_query_is_in_proximity_range(
 /*============================*/
@@ -2416,7 +2452,7 @@ fts_query_is_in_proximity_range(
 Iterate over the matched document ids and search the for the
 actual phrase in the text.
 @return DB_SUCCESS if all OK */
-static __attribute__((nonnull, warn_unused_result))
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 fts_query_search_phrase(
 /*====================*/
@@ -2504,7 +2540,7 @@ func_exit:
 /*****************************************************************//**
 Text/Phrase search.
 @return DB_SUCCESS or error code */
-static __attribute__((nonnull, warn_unused_result))
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 fts_query_phrase_search(
 /*====================*/
@@ -2755,7 +2791,7 @@ func_exit:
 /*****************************************************************//**
 Find the word and evaluate.
 @return DB_SUCCESS if all go well */
-static __attribute__((nonnull, warn_unused_result))
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 fts_query_execute(
 /*==============*/
@@ -2821,6 +2857,8 @@ fts_query_get_token(
 
 	return(new_ptr);
 }
+
+static dberr_t fts_ast_visit_sub_exp(fts_ast_node_t*, fts_ast_callback, void*);
 
 /*****************************************************************//**
 Visit every node of the AST. */
@@ -2911,7 +2949,7 @@ Process (nested) sub-expression, create a new result set to store the
 sub-expression result by processing nodes under current sub-expression
 list. Merge the sub-expression result with that of parent expression list.
 @return DB_SUCCESS if all  well */
-UNIV_INTERN
+static
 dberr_t
 fts_ast_visit_sub_exp(
 /*==================*/
@@ -2930,6 +2968,14 @@ fts_ast_visit_sub_exp(
 	DBUG_ENTER("fts_ast_visit_sub_exp");
 
 	ut_a(node->type == FTS_AST_SUBEXP_LIST);
+
+	/* To avoid stack overflow, we limit the mutual recursion
+	depth between fts_ast_visit(), fts_query_visitor() and
+	fts_ast_visit_sub_exp(). */
+	if (query->visiting_sub_exp++ > 31) {
+		query->error = DB_OUT_OF_MEMORY;
+		DBUG_RETURN(query->error);
+	}
 
 	cur_oper = query->oper;
 
@@ -2953,6 +2999,7 @@ fts_ast_visit_sub_exp(
 	/* Reinstate parent node state */
 	query->multi_exist = multi_exist;
 	query->oper = cur_oper;
+	query->visiting_sub_exp--;
 
 	/* Merge the sub-expression result with the parent result set. */
 	subexpr_doc_ids = query->doc_ids;
@@ -3633,6 +3680,11 @@ fts_query_free(
 		fts_doc_ids_free(query->deleted);
 	}
 
+	if (query->intersection) {
+		fts_query_free_doc_ids(query, query->intersection);
+		query->intersection = NULL;
+	}
+
 	if (query->doc_ids) {
 		fts_query_free_doc_ids(query, query->doc_ids);
 	}
@@ -3656,8 +3708,6 @@ fts_query_free(
 
 		rbt_free(query->word_freqs);
 	}
-
-	ut_a(!query->intersection);
 
 	if (query->word_map) {
 		rbt_free(query->word_map);
@@ -3760,10 +3810,19 @@ fts_query_str_preprocess(
 	str_len = query_len * charset->casedn_multiply + 1;
 	str_ptr = static_cast<byte*>(ut_malloc(str_len));
 
-	*result_len = innobase_fts_casedn_str(
-		charset, const_cast<char*>(reinterpret_cast<const char*>(
-			query_str)), query_len,
-		reinterpret_cast<char*>(str_ptr), str_len);
+	/* For binary collations, a case sensitive search is
+	performed. Hence don't convert to lower case. */
+	if (my_binary_compare(charset)) {
+		memcpy(str_ptr, query_str, query_len);
+		str_ptr[query_len]= 0;
+		*result_len= query_len;
+	} else {
+		*result_len = innobase_fts_casedn_str(
+				charset, const_cast<char*>
+				(reinterpret_cast<const char*>( query_str)),
+				query_len,
+				reinterpret_cast<char*>(str_ptr), str_len);
+	}
 
 	ut_ad(*result_len < str_len);
 
@@ -3859,7 +3918,6 @@ fts_query(
 
 	query.fts_common_table.type = FTS_COMMON_TABLE;
 	query.fts_common_table.table_id = index->table->id;
-	query.fts_common_table.parent = index->table->name;
 	query.fts_common_table.table = index->table;
 
 	charset = fts_index_get_charset(index);
@@ -3867,7 +3925,6 @@ fts_query(
 	query.fts_index_table.type = FTS_INDEX_TABLE;
 	query.fts_index_table.index_id = index->id;
 	query.fts_index_table.table_id = index->table->id;
-	query.fts_index_table.parent = index->table->name;
 	query.fts_index_table.charset = charset;
 	query.fts_index_table.table = index->table;
 
@@ -3957,6 +4014,7 @@ fts_query(
 	/* Parse the input query string. */
 	if (fts_query_parse(&query, lc_query_str, result_len)) {
 		fts_ast_node_t*	ast = query.root;
+		ast->trx = trx;
 
 		/* Optimize query to check if it's a single term */
 		fts_query_can_optimize(&query, flags);
@@ -3970,6 +4028,11 @@ fts_query(
 		query.error = fts_ast_visit(
 			FTS_NONE, ast, fts_query_visitor,
 			&query, &will_be_ignored);
+		if (query.error == DB_INTERRUPTED) {
+			error = DB_INTERRUPTED;
+			ut_free(lc_query_str);
+			goto func_exit;
+		}
 
 		/* If query expansion is requested, extend the search
 		with first search pass result */
@@ -3997,6 +4060,15 @@ fts_query(
 		memset(*result, 0, sizeof(**result));
 	}
 
+	if (trx_is_interrupted(trx)) {
+		error = DB_INTERRUPTED;
+		ut_free(lc_query_str);
+		if (*result) {
+			fts_query_free_result(*result);
+		}
+		goto func_exit;
+	}
+
 	ut_free(lc_query_str);
 
 	if (fts_enable_diag_print && (*result)) {
@@ -4011,7 +4083,7 @@ fts_query(
 		/* Log memory consumption & result size */
 		ib_logf(IB_LOG_LEVEL_INFO,
 			"Full Search Memory: "
-			"%lu (bytes),  Row: %lu .",
+			"%zu (bytes),  Row: %lu .",
 			query.total_size,
 			(*result)->rankings_by_id
 				?  rbt_size((*result)->rankings_by_id)
@@ -4124,7 +4196,7 @@ words in documents found in the first search pass will be used as
 search arguments to search the document again, thus "expand"
 the search result set.
 @return DB_SUCCESS if success, otherwise the error code */
-static __attribute__((nonnull, warn_unused_result))
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 fts_expand_query(
 /*=============*/

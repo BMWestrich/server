@@ -13,7 +13,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 
 /*
@@ -30,6 +30,8 @@
 #include "sql_base.h"
 #include "sql_view.h"                         // check_duplicate_names
 #include "sql_acl.h"                          // SELECT_ACL
+#include "sql_class.h"
+#include "sql_cte.h"
 
 typedef bool (*dt_processor)(THD *thd, LEX *lex, TABLE_LIST *derived);
 
@@ -68,7 +70,6 @@ bool
 mysql_handle_derived(LEX *lex, uint phases)
 {
   bool res= FALSE;
-  THD *thd= lex->thd;
   DBUG_ENTER("mysql_handle_derived");
   DBUG_PRINT("enter", ("phases: 0x%x", phases));
   if (!lex->derived_tables)
@@ -83,14 +84,13 @@ mysql_handle_derived(LEX *lex, uint phases)
       break;
     if (!(phases & phase_flag))
       continue;
-    if (phase_flag >= DT_CREATE && !thd->fill_derived_tables())
-      break;
 
     for (SELECT_LEX *sl= lex->all_selects_list;
 	 sl && !res;
 	 sl= sl->next_select_in_list())
     {
       TABLE_LIST *cursor= sl->get_table_list();
+      sl->changed_elements|= TOUCHED_SEL_DERIVED;
       /*
         DT_MERGE_FOR_INSERT is not needed for views/derived tables inside
         subqueries. Views and derived tables of subqueries should be
@@ -166,7 +166,6 @@ bool
 mysql_handle_single_derived(LEX *lex, TABLE_LIST *derived, uint phases)
 {
   bool res= FALSE;
-  THD *thd= lex->thd;
   uint8 allowed_phases= (derived->is_merged_derived() ? DT_PHASES_MERGE :
                          DT_PHASES_MATERIALIZE);
   DBUG_ENTER("mysql_handle_single_derived");
@@ -189,44 +188,12 @@ mysql_handle_single_derived(LEX *lex, TABLE_LIST *derived, uint phases)
     if (phase_flag != DT_PREPARE &&
         !(allowed_phases & phase_flag))
       continue;
-    if (phase_flag >= DT_CREATE && !thd->fill_derived_tables())
-      break;
 
     if ((res= (*processors[phase])(lex->thd, lex, derived)))
       break;
   }
   lex->thd->derived_tables_processing= FALSE;
   DBUG_RETURN(res);
-}
-
-
-/**
-  Run specified phases for derived tables/views in the given list
-
-  @param lex        LEX for this thread
-  @param table_list list of derived tables/view to handle
-  @param phase_map  phases to process tables/views through
-
-  @details
-  This function runs phases specified by the 'phases_map' on derived
-  tables/views found in the 'dt_list' with help of the
-  TABLE_LIST::handle_derived function.
-  'lex' is passed as an argument to the TABLE_LIST::handle_derived.
-
-  @return FALSE ok
-  @return TRUE  error
-*/
-
-bool
-mysql_handle_list_of_derived(LEX *lex, TABLE_LIST *table_list, uint phases)
-{
-  for (TABLE_LIST *tl= table_list; tl; tl= tl->next_local)
-  {
-    if (tl->is_view_or_derived() &&
-        tl->handle_derived(lex, phases))
-      return TRUE;
-  }
-  return FALSE;
 }
 
 
@@ -362,9 +329,16 @@ bool mysql_derived_merge(THD *thd, LEX *lex, TABLE_LIST *derived)
   SELECT_LEX *parent_lex= derived->select_lex;
   Query_arena *arena, backup;
   DBUG_ENTER("mysql_derived_merge");
+  DBUG_PRINT("enter", ("Alias: '%s'  Unit: %p",
+                       (derived->alias ? derived->alias : "<NULL>"),
+                       derived->get_unit()));
 
   if (derived->merged)
+  {
+
+    DBUG_PRINT("info", ("Irreversibly merged: exit"));
     DBUG_RETURN(FALSE);
+  }
 
   if (dt_select->uncacheable & UNCACHEABLE_RAND)
   {
@@ -374,12 +348,7 @@ bool mysql_derived_merge(THD *thd, LEX *lex, TABLE_LIST *derived)
     DBUG_RETURN(FALSE);
   }
 
- if (thd->lex->sql_command == SQLCOM_UPDATE_MULTI ||
-     thd->lex->sql_command == SQLCOM_DELETE_MULTI)
-   thd->save_prep_leaf_list= TRUE;
-
   arena= thd->activate_stmt_arena_if_needed(&backup);  // For easier test
-  derived->merged= TRUE;
 
   if (!derived->merged_for_insert || 
       (derived->is_multitable() && 
@@ -443,15 +412,20 @@ bool mysql_derived_merge(THD *thd, LEX *lex, TABLE_LIST *derived)
     if (parent_lex->join) 
       parent_lex->join->table_count+= dt_select->join->table_count - 1;
   }
+  derived->merged= TRUE;
   if (derived->get_unit()->prepared)
   {
     Item *expr= derived->on_expr;
     expr= and_conds(thd, expr, dt_select->join ? dt_select->join->conds : 0);
+    if (expr)
+      expr->top_level_item();
+
     if (expr && (derived->prep_on_expr || expr != derived->on_expr))
     {
       derived->on_expr= expr;
       derived->prep_on_expr= expr->copy_andor_structure(thd);
     }
+    thd->where= "on clause";
     if (derived->on_expr &&
         ((!derived->on_expr->fixed &&
           derived->on_expr->fix_fields(thd, &derived->on_expr)) ||
@@ -463,7 +437,8 @@ bool mysql_derived_merge(THD *thd, LEX *lex, TABLE_LIST *derived)
     // Update used tables cache according to new table map
     if (derived->on_expr)
     {
-      derived->on_expr->fix_after_pullout(parent_lex, &derived->on_expr);
+      derived->on_expr->fix_after_pullout(parent_lex, &derived->on_expr,
+                                          TRUE);
       fix_list_after_tbl_changes(parent_lex, &derived->nested_join->join_list);
     }
   }
@@ -476,10 +451,8 @@ exit_merge:
 unconditional_materialization:
   derived->change_refs_to_fields();
   derived->set_materialized_derived();
-  if (!derived->table || !derived->table->created)
+  if (!derived->table || !derived->table->is_created())
     res= mysql_derived_create(thd, lex, derived);
-  if (!res)
-    res= mysql_derived_fill(thd, lex, derived);
   goto exit_merge;
 }
 
@@ -506,7 +479,9 @@ unconditional_materialization:
 bool mysql_derived_merge_for_insert(THD *thd, LEX *lex, TABLE_LIST *derived)
 {
   DBUG_ENTER("mysql_derived_merge_for_insert");
-  DBUG_PRINT("enter", ("derived: %p", derived));
+  DBUG_PRINT("enter", ("Alias: '%s'  Unit: %p",
+                       (derived->alias ? derived->alias : "<NULL>"),
+                       derived->get_unit()));
   DBUG_PRINT("info", ("merged_for_insert: %d  is_materialized_derived: %d  "
                       "is_multitable: %d  single_table_updatable: %d  "
                       "merge_underlying_list: %d",
@@ -517,6 +492,8 @@ bool mysql_derived_merge_for_insert(THD *thd, LEX *lex, TABLE_LIST *derived)
                       derived->merge_underlying_list != 0));
   if (derived->merged_for_insert)
     DBUG_RETURN(FALSE);
+  if (derived->init_derived(thd, FALSE))
+    DBUG_RETURN(TRUE);
   if (derived->is_materialized_derived())
     DBUG_RETURN(mysql_derived_prepare(thd, lex, derived));
   if ((thd->lex->sql_command == SQLCOM_UPDATE_MULTI ||
@@ -560,13 +537,45 @@ bool mysql_derived_init(THD *thd, LEX *lex, TABLE_LIST *derived)
 {
   SELECT_LEX_UNIT *unit= derived->get_unit();
   DBUG_ENTER("mysql_derived_init");
-  DBUG_PRINT("enter", ("derived: %p", derived));
+  DBUG_PRINT("enter", ("Alias: '%s'  Unit: %p",
+                       (derived->alias ? derived->alias : "<NULL>"),
+                       derived->get_unit()));
 
   // Skip already prepared views/DT
   if (!unit || unit->prepared)
     DBUG_RETURN(FALSE);
 
-  DBUG_RETURN(derived->init_derived(thd, TRUE));
+  bool res= derived->init_derived(thd, TRUE);
+
+  derived->updatable= derived->updatable && derived->is_view();
+
+  DBUG_RETURN(res);
+}
+
+
+/*
+  @brief
+    Prevent name resolution out of context of ON expressions in derived tables
+
+  @param
+    join_list  list of tables used in from list of a derived
+
+  @details
+    The function sets the Name_resolution_context::outer_context to NULL
+    for all ON expressions contexts in the given join list. It does this
+    recursively for all nested joins the list contains.
+*/
+
+static void nullify_outer_context_for_on_clauses(List<TABLE_LIST>& join_list)
+{
+  List_iterator<TABLE_LIST> li(join_list);
+  while (TABLE_LIST *table= li++)
+  {
+    if (table->on_context)
+      table->on_context->outer_context= NULL;
+    if (table->nested_join)
+      nullify_outer_context_for_on_clauses(table->nested_join->join_list);
+  }
 }
 
 
@@ -626,31 +635,102 @@ bool mysql_derived_init(THD *thd, LEX *lex, TABLE_LIST *derived)
     true   Error
 */
 
+
 bool mysql_derived_prepare(THD *thd, LEX *lex, TABLE_LIST *derived)
 {
   SELECT_LEX_UNIT *unit= derived->get_unit();
   DBUG_ENTER("mysql_derived_prepare");
   bool res= FALSE;
-  DBUG_PRINT("enter", ("unit 0x%lx", (ulong) unit));
+  DBUG_PRINT("enter", ("Alias: '%s'  Unit: %p",
+                       (derived->alias ? derived->alias : "<NULL>"),
+                       unit));
+
+  if (!unit)
+    DBUG_RETURN(FALSE);
+
+  SELECT_LEX *first_select= unit->first_select();
+
+  if (derived->is_recursive_with_table() &&
+      !derived->is_with_table_recursive_reference() &&
+      !derived->with->rec_result && derived->with->get_sq_rec_ref())
+  {
+    /*
+      This is a non-recursive reference to a recursive CTE whose
+      specification unit has not been prepared at the regular processing of
+      derived table references. This can happen  only in the case when
+      the specification unit has no recursive references at the top level. 
+      Force the preparation of the specification unit. Use a recursive
+      table reference from a subquery for this.
+    */
+    DBUG_ASSERT(derived->with->get_sq_rec_ref());
+    if (mysql_derived_prepare(lex->thd, lex, derived->with->get_sq_rec_ref()))
+      DBUG_RETURN(TRUE);
+  }
+
+  if (unit->prepared && derived->is_recursive_with_table() &&
+      !derived->table)
+  {
+    /* 
+      Here 'derived' is either a non-recursive table reference to a recursive
+      with table or a recursive table reference to a recursvive table whose
+      specification has been already prepared (a secondary recursive table
+      reference.
+    */ 
+    if (!(derived->derived_result= new (thd->mem_root) select_union(thd)))
+      DBUG_RETURN(TRUE); // out of memory
+    thd->create_tmp_table_for_derived= TRUE;
+    res= derived->derived_result->create_result_table(
+                                  thd, &unit->types, FALSE,
+                                  (first_select->options |
+                                   thd->variables.option_bits |
+                                   TMP_TABLE_ALL_COLUMNS),
+                                  derived->alias, FALSE, FALSE);
+    thd->create_tmp_table_for_derived= FALSE;
+
+    if (!res && !derived->table)
+    {
+      derived->derived_result->set_unit(unit);
+      derived->table= derived->derived_result->table;
+      if (derived->is_with_table_recursive_reference())
+      {
+        /* Here 'derived" is a secondary recursive table reference */
+         unit->with_element->rec_result->rec_table_refs.push_back(derived);
+      }
+    }
+    DBUG_ASSERT(derived->table || res);
+    goto exit;
+  }
 
   // Skip already prepared views/DT
-  if (!unit || unit->prepared ||
+  if (unit->prepared ||
       (derived->merged_for_insert && 
        !(derived->is_multitable() &&
          (thd->lex->sql_command == SQLCOM_UPDATE_MULTI ||
           thd->lex->sql_command == SQLCOM_DELETE_MULTI))))
     DBUG_RETURN(FALSE);
 
-  SELECT_LEX *first_select= unit->first_select();
-
   /* prevent name resolving out of derived table */
   for (SELECT_LEX *sl= first_select; sl; sl= sl->next_select())
   {
+    // Prevent it for the WHERE clause
     sl->context.outer_context= 0;
-    // Prepare underlying views/DT first.
-    if ((res= sl->handle_derived(lex, DT_PREPARE)))
-      goto exit;
 
+    // And for ON clauses, if there are any
+    nullify_outer_context_for_on_clauses(*sl->join_list);
+
+    if (!derived->is_with_table_recursive_reference() ||
+        (!derived->with->with_anchor && 
+         !derived->with->is_with_prepared_anchor()))
+    {
+      /* 
+        Prepare underlying views/DT first unless 'derived' is a recursive
+        table reference and either the anchors from the specification of
+        'derived' has been already prepared or there no anchor in this
+        specification
+      */  
+      if ((res= sl->handle_derived(lex, DT_PREPARE)))
+        goto exit;
+    }
     if (derived->outer_join && sl->first_cond_optimization)
     {
       /* Mark that table is part of OUTER JOIN and fields may be NULL */
@@ -663,14 +743,29 @@ bool mysql_derived_prepare(THD *thd, LEX *lex, TABLE_LIST *derived)
 
   unit->derived= derived;
 
-  if (!(derived->derived_result= new (thd->mem_root) select_union(thd)))
+  /*
+    Above cascade call of prepare is important for PS protocol, but after it
+    is called we can check if we really need prepare for this derived
+  */
+  if (derived->merged)
+  {
+    DBUG_PRINT("info", ("Irreversibly merged: exit"));
+    DBUG_RETURN(FALSE);
+  }
+
+  derived->fill_me= FALSE;
+
+  if ((!derived->is_with_table_recursive_reference() ||
+       !derived->derived_result) &&
+      !(derived->derived_result= new (thd->mem_root) select_union(thd)))
     DBUG_RETURN(TRUE); // out of memory
 
-  lex->context_analysis_only|= CONTEXT_ANALYSIS_ONLY_DERIVED;
   // st_select_lex_unit::prepare correctly work for single select
   if ((res= unit->prepare(thd, derived->derived_result, 0)))
     goto exit;
-  lex->context_analysis_only&= ~CONTEXT_ANALYSIS_ONLY_DERIVED;
+  if (derived->with &&
+      (res= derived->with->rename_columns_of_derived_unit(thd, unit)))
+    goto exit; 
   if ((res= check_duplicate_names(thd, unit->types, 0)))
     goto exit;
 
@@ -679,7 +774,8 @@ bool mysql_derived_prepare(THD *thd, LEX *lex, TABLE_LIST *derived)
     Depending on the result field translation will or will not
     be created.
   */
-  if (derived->init_derived(thd, FALSE))
+  if (!derived->is_with_table_recursive_reference() &&
+      derived->init_derived(thd, FALSE))
     goto exit;
 
   /*
@@ -693,19 +789,21 @@ bool mysql_derived_prepare(THD *thd, LEX *lex, TABLE_LIST *derived)
     SELECT is last SELECT of UNION).
   */
   thd->create_tmp_table_for_derived= TRUE;
-  if (derived->derived_result->create_result_table(thd, &unit->types, FALSE,
-                                                (first_select->options |
-                                                 thd->variables.option_bits |
-                                                 TMP_TABLE_ALL_COLUMNS),
-                                                derived->alias,
-                                                FALSE, FALSE))
+  if (!(derived->table) &&
+      derived->derived_result->create_result_table(thd, &unit->types, FALSE,
+                                                   (first_select->options |
+                                                   thd->variables.option_bits |
+                                                   TMP_TABLE_ALL_COLUMNS),
+                                                   derived->alias,
+                                                   FALSE, FALSE, FALSE))
   { 
     thd->create_tmp_table_for_derived= FALSE;
     goto exit;
   }
   thd->create_tmp_table_for_derived= FALSE;
 
-  derived->table= derived->derived_result->table;
+  if (!derived->table)
+    derived->table= derived->derived_result->table;
   DBUG_ASSERT(derived->table);
   if (derived->is_derived() && derived->is_merged_derived())
     first_select->mark_as_belong_to_derived(derived);
@@ -732,9 +830,12 @@ exit:
   */
   if (res)
   {
-    if (derived->table)
-      free_tmp_table(thd, derived->table);
-    delete derived->derived_result;
+    if (!derived->is_with_table_recursive_reference())
+    {
+      if (derived->table)
+        free_tmp_table(thd, derived->table);
+      delete derived->derived_result;
+    }
   }
   else
   {
@@ -742,18 +843,22 @@ exit:
     table->derived_select_number= first_select->select_number;
     table->s->tmp_table= INTERNAL_TMP_TABLE;
 #ifndef NO_EMBEDDED_ACCESS_CHECKS
-    if (derived->referencing_view)
+    if (derived->is_view())
       table->grant= derived->grant;
     else
     {
+      DBUG_ASSERT(derived->is_derived());
+      DBUG_ASSERT(derived->is_anonymous_derived_table());
       table->grant.privilege= SELECT_ACL;
-      if (derived->is_derived())
-        derived->grant.privilege= SELECT_ACL;
+      derived->grant.privilege= SELECT_ACL;
     }
 #endif
     /* Add new temporary table to list of open derived tables */
-    table->next= thd->derived_tables;
-    thd->derived_tables= table;
+    if (!derived->is_with_table_recursive_reference())
+    {
+      table->next= thd->derived_tables;
+      thd->derived_tables= table;
+    }
 
     /* If table is used by a left join, mark that any column may be null */
     if (derived->outer_join)
@@ -787,6 +892,14 @@ bool mysql_derived_optimize(THD *thd, LEX *lex, TABLE_LIST *derived)
 
   bool res= FALSE;
   DBUG_ENTER("mysql_derived_optimize");
+  DBUG_PRINT("enter", ("Alias: '%s'  Unit: %p",
+                       (derived->alias ? derived->alias : "<NULL>"),
+                       derived->get_unit()));
+  if (derived->merged)
+  {
+    DBUG_PRINT("info", ("Irreversibly merged: exit"));
+    DBUG_RETURN(FALSE);
+  }
 
   if (unit->optimized)
     DBUG_RETURN(FALSE);
@@ -852,12 +965,15 @@ err:
 bool mysql_derived_create(THD *thd, LEX *lex, TABLE_LIST *derived)
 {
   DBUG_ENTER("mysql_derived_create");
+  DBUG_PRINT("enter", ("Alias: '%s'  Unit: %p",
+                       (derived->alias ? derived->alias : "<NULL>"),
+                       derived->get_unit()));
   TABLE *table= derived->table;
   SELECT_LEX_UNIT *unit= derived->get_unit();
 
-  if (table->created)
+  if (table->is_created())
     DBUG_RETURN(FALSE);
-  select_union *result= (select_union*)unit->result;
+  select_union *result= derived->derived_result;
   if (table->s->db_type() == TMP_ENGINE_HTON)
   {
     result->tmp_table_param.keyinfo= table->s->key_info;
@@ -876,6 +992,48 @@ bool mysql_derived_create(THD *thd, LEX *lex, TABLE_LIST *derived)
 }
 
 
+/**
+  @brief
+    Fill the recursive with table 
+
+  @param thd  The thread handle
+
+  @details
+    The method is called only for recursive with tables. 
+    The method executes the recursive part of the specification
+    of this with table until no more rows are added to the table
+    or the number of the performed iteration reaches the allowed
+    maximum. 
+
+  @retval
+    false   on success
+    true    on failure 
+*/
+
+bool TABLE_LIST::fill_recursive(THD *thd)
+{
+  bool rc= false;
+  st_select_lex_unit *unit= get_unit();
+  rc= with->instantiate_tmp_tables();
+  while (!rc && !with->all_are_stabilized())
+  {
+    if (with->level > thd->variables.max_recursive_iterations)
+      break;
+    with->prepare_for_next_iteration();
+    rc= unit->exec_recursive();
+  }
+  if (!rc)
+  {
+    TABLE *src= with->rec_result->table;
+    rc =src->insert_all_rows_into_tmp_table(thd,
+                                            table,
+                                            &with->rec_result->tmp_table_param,
+                                            true);
+  } 
+  return rc;
+}
+
+
 /*
   Execute subquery of a materialized derived table/view and fill the result
   table.
@@ -886,9 +1044,10 @@ bool mysql_derived_create(THD *thd, LEX *lex, TABLE_LIST *derived)
 
   @details
   Execute subquery of given 'derived' table/view and fill the result
-  table. After result table is filled, if this is not the EXPLAIN statement,
-  the entire unit / node is deleted. unit is deleted if UNION is used
-  for derived table and node is deleted is it is a simple SELECT.
+  table. After result table is filled, if this is not the EXPLAIN statement
+  and the table is not specified with a recursion the entire unit / node
+  is deleted. unit is deleted if UNION is used  for derived table and node
+  is deleted is it is a simple SELECT.
   'lex' is unused and 'thd' is passed as an argument to an underlying function.
 
   @note
@@ -899,32 +1058,53 @@ bool mysql_derived_create(THD *thd, LEX *lex, TABLE_LIST *derived)
   @return TRUE   Error
 */
 
+
 bool mysql_derived_fill(THD *thd, LEX *lex, TABLE_LIST *derived)
 {
-  DBUG_ENTER("mysql_derived_fill");
+  Field_iterator_table field_iterator;
   SELECT_LEX_UNIT *unit= derived->get_unit();
+  bool derived_is_recursive= derived->is_recursive_with_table();
   bool res= FALSE;
+  DBUG_ENTER("mysql_derived_fill");
+  DBUG_PRINT("enter", ("Alias: '%s'  Unit: %p",
+                       (derived->alias ? derived->alias : "<NULL>"),
+                       derived->get_unit()));
 
-  if (unit->executed && !unit->uncacheable && !unit->describe)
+  if (unit->executed && !unit->uncacheable && !unit->describe &&
+      !derived_is_recursive)
     DBUG_RETURN(FALSE);
   /*check that table creation passed without problems. */
-  DBUG_ASSERT(derived->table && derived->table->created);
-  SELECT_LEX *first_select= unit->first_select();
+  DBUG_ASSERT(derived->table && derived->table->is_created());
   select_union *derived_result= derived->derived_result;
   SELECT_LEX *save_current_select= lex->current_select;
-  if (unit->is_union())
+  
+  if (derived_is_recursive)
+  {
+    if (derived->is_with_table_recursive_reference())
+    {
+      /* Here only one iteration step is performed */
+      res= unit->exec_recursive();
+    }
+    else
+    {
+      /* In this case all iteration are performed */
+      res= derived->fill_recursive(thd);
+    }
+  }
+  else if (unit->is_union() || unit->fake_select_lex)
   {
     // execute union without clean up
     res= unit->exec();
   }
   else
   {
+    SELECT_LEX *first_select= unit->first_select();
     unit->set_limit(unit->global_parameters());
     if (unit->select_limit_cnt == HA_POS_ERROR)
       first_select->options&= ~OPTION_FOUND_ROWS;
 
     lex->current_select= first_select;
-    res= mysql_select(thd, &first_select->ref_pointer_array,
+    res= mysql_select(thd,
                       first_select->table_list.first,
                       first_select->with_wild,
                       first_select->item_list, first_select->where,
@@ -938,13 +1118,33 @@ bool mysql_derived_fill(THD *thd, LEX *lex, TABLE_LIST *derived)
                       derived_result, unit, first_select);
   }
 
-  if (!res)
+  if (!res && !derived_is_recursive)
   {
     if (derived_result->flush())
       res= TRUE;
     unit->executed= TRUE;
+
+    if (derived->field_translation)
+    {
+      /* reset translation table to materialized table */
+      field_iterator.set_table(derived->table);
+      for (uint i= 0;
+           !field_iterator.end_of_fields();
+           field_iterator.next(), i= i + 1)
+      {
+        Item *item;
+
+        if (!(item= field_iterator.create_item(thd)))
+        {
+          res= TRUE;
+          break;
+        }
+        thd->change_item_tree(&derived->field_translation[i].item, item);
+      }
+    }
   }
-  if (res || !lex->describe) 
+
+  if (res || (!lex->describe && !derived_is_recursive))
     unit->cleanup();
   lex->current_select= save_current_select;
 
@@ -972,6 +1172,9 @@ bool mysql_derived_fill(THD *thd, LEX *lex, TABLE_LIST *derived)
 bool mysql_derived_reinit(THD *thd, LEX *lex, TABLE_LIST *derived)
 {
   DBUG_ENTER("mysql_derived_reinit");
+  DBUG_PRINT("enter", ("Alias: '%s'  Unit: %p",
+                       (derived->alias ? derived->alias : "<NULL>"),
+                       derived->get_unit()));
   st_select_lex_unit *unit= derived->get_unit();
 
   derived->merged_for_insert= FALSE;
@@ -979,6 +1182,258 @@ bool mysql_derived_reinit(THD *thd, LEX *lex, TABLE_LIST *derived)
   unit->types.empty();
   /* for derived tables & PS (which can't be reset by Item_subselect) */
   unit->reinit_exec_mechanism();
+  for (st_select_lex *sl= unit->first_select(); sl; sl= sl->next_select())
+  {
+    sl->cond_pushed_into_where= NULL;
+    sl->cond_pushed_into_having= NULL;
+  }
   unit->set_thd(thd);
   DBUG_RETURN(FALSE);
+}
+
+
+/*
+  @brief
+    Given condition cond and transformer+argument, try transforming as many
+    conjuncts as possible.
+
+  @detail
+    The motivation of this function is to convert the condition that's being
+    pushed into a WHERE clause with derived_field_transformer_for_where or
+    with derived_grouping_field_transformer_for_where.
+    The transformer may fail for some sub-condition, in this case we want to
+    convert the most restrictive part of the condition that can be pushed.
+
+    This function only does it for top-level AND: conjuncts that could not be
+    converted are dropped.
+
+  @return
+    Converted condition, or NULL if nothing could be converted
+*/
+
+static
+Item *transform_condition_or_part(THD *thd,
+                                  Item *cond,
+                                  Item_transformer transformer,
+                                  uchar *arg)
+{
+  if (cond->type() != Item::COND_ITEM ||
+      ((Item_cond*) cond)->functype() != Item_func::COND_AND_FUNC)
+  {
+    Item *new_item= cond->transform(thd, transformer, arg);
+      // Indicate that the condition is not pushable
+    if (!new_item)
+      cond->clear_extraction_flag();
+    return new_item;
+  }
+
+  List_iterator<Item> li(*((Item_cond*) cond)->argument_list());
+  Item *item;
+  while ((item=li++))
+  {
+    Item *new_item= item->transform(thd, transformer, arg);
+    if (!new_item)
+    {
+      // Indicate that the condition is not pushable
+      item->clear_extraction_flag();
+      li.remove();
+    }
+    else
+      li.replace(new_item);
+  }
+
+  switch (((Item_cond*) cond)->argument_list()->elements)
+  {
+  case 0:
+    return NULL;
+  case 1:
+    return ((Item_cond*) cond)->argument_list()->head();
+  default:
+    return cond;
+  }
+}
+
+
+/**
+  @brief
+  Extract the condition depended on derived table/view and pushed it there 
+   
+  @param thd       The thread handle
+  @param cond      The condition from which to extract the pushed condition 
+  @param derived   The reference to the derived table/view
+
+  @details
+   This functiom builds the most restrictive condition depending only on
+   the derived table/view that can be extracted from the condition cond. 
+   The built condition is pushed into the having clauses of the
+   selects contained in the query specifying the derived table/view.
+   The function also checks for each select whether any condition depending
+   only on grouping fields can be extracted from the pushed condition.
+   If so, it pushes the condition over grouping fields into the where
+   clause of the select.
+  
+  @retval
+    true    if an error is reported 
+    false   otherwise
+*/
+
+bool pushdown_cond_for_derived(THD *thd, Item *cond, TABLE_LIST *derived)
+{
+  DBUG_ENTER("pushdown_cond_for_derived");
+  if (!cond)
+    DBUG_RETURN(false);
+
+  st_select_lex_unit *unit= derived->get_unit();
+  st_select_lex *first_sl= unit->first_select();
+  st_select_lex *sl= first_sl;
+
+  if (derived->prohibit_cond_pushdown)
+    DBUG_RETURN(false);
+
+  /* Do not push conditions into constant derived */
+  if (unit->executed)
+    DBUG_RETURN(false);
+
+  /* Do not push conditions into recursive with tables */
+  if (derived->is_recursive_with_table())
+    DBUG_RETURN(false);
+
+  /* Do not push conditions into unit with global ORDER BY ... LIMIT */
+  if (unit->fake_select_lex && unit->fake_select_lex->explicit_limit)
+    DBUG_RETURN(false);
+
+  /* Check whether any select of 'unit' allows condition pushdown */
+  bool some_select_allows_cond_pushdown= false;
+  for (; sl; sl= sl->next_select())
+  {
+    if (sl->cond_pushdown_is_allowed())
+    {
+      some_select_allows_cond_pushdown= true;
+      break;
+    }
+  }
+  if (!some_select_allows_cond_pushdown)
+    DBUG_RETURN(false);
+
+  /*
+    Build the most restrictive condition extractable from 'cond'
+    that can be pushed into the derived table 'derived'.
+    All subexpressions of this condition are cloned from the
+    subexpressions of 'cond'.
+    This condition has to be fixed yet.
+  */
+  Item *extracted_cond;
+  derived->check_pushable_cond_for_table(cond);
+  extracted_cond= derived->build_pushable_cond_for_table(thd, cond);
+  if (!extracted_cond)
+  {
+    /* Nothing can be pushed into the derived table */
+    DBUG_RETURN(false);
+  }
+  /* Push extracted_cond into every select of the unit specifying 'derived' */
+  st_select_lex *save_curr_select= thd->lex->current_select;
+  for (; sl; sl= sl->next_select())
+  {
+    if (!sl->cond_pushdown_is_allowed())
+      continue;
+    thd->lex->current_select= sl;
+    /*
+      For each select of the unit except the last one
+      create a clone of extracted_cond
+    */
+    Item *extracted_cond_copy= !sl->next_select() ? extracted_cond :
+                               extracted_cond->build_clone(thd, thd->mem_root);
+    if (!extracted_cond_copy)
+      continue;
+
+    if (!sl->join->group_list && !sl->with_sum_func)
+    {
+      /* extracted_cond_copy is pushed into where of sl */
+      extracted_cond_copy=
+        transform_condition_or_part(thd,
+                                    extracted_cond_copy,
+                                    &Item::derived_field_transformer_for_where,
+                                    (uchar*)sl);
+      if (extracted_cond_copy)
+      {
+        extracted_cond_copy->walk(
+          &Item::cleanup_excluding_const_fields_processor, 0, 0);
+        sl->cond_pushed_into_where= extracted_cond_copy;
+      }      
+  
+      continue;
+    }
+
+    /*
+      Figure out what can be extracted from the pushed condition
+      that could be pushed into the where clause of sl
+    */
+    Item *cond_over_grouping_fields;
+    sl->collect_grouping_fields(thd);
+    sl->check_cond_extraction_for_grouping_fields(extracted_cond_copy,
+                                                  derived);
+    cond_over_grouping_fields=
+      sl->build_cond_for_grouping_fields(thd, extracted_cond_copy, true);
+  
+    /*
+      Transform the references to the 'derived' columns from the condition
+      pushed into the where clause of sl to make them usable in the new context
+    */
+    if (cond_over_grouping_fields)
+    {
+      cond_over_grouping_fields= 
+        transform_condition_or_part(thd, cond_over_grouping_fields,
+                                    &Item::derived_grouping_field_transformer_for_where,
+                                    (uchar*) sl);
+    }
+     
+    if (cond_over_grouping_fields)
+    {
+      /*
+        In extracted_cond_copy remove top conjuncts that
+        has been pushed into the where clause of sl
+      */
+      extracted_cond_copy= remove_pushed_top_conjuncts(thd, extracted_cond_copy);
+
+      cond_over_grouping_fields->walk(
+        &Item::cleanup_excluding_const_fields_processor, 0, 0);
+      sl->cond_pushed_into_where= cond_over_grouping_fields;
+
+      if (!extracted_cond_copy)
+        continue;
+    }
+
+    /*
+      Rename the columns of all non-first selects of a union to be compatible
+      by names with the columns of the first select. It will allow to use copies
+      of the same expression pushed into having clauses of different selects.
+    */
+    if (sl != first_sl)
+    {
+      DBUG_ASSERT(sl->item_list.elements == first_sl->item_list.elements);
+      List_iterator_fast<Item> it(sl->item_list);
+      List_iterator_fast<Item> nm_it(unit->types);
+      Item * item;
+      while((item= it++))
+      {
+        item->share_name_with(nm_it++);
+      }
+    }
+
+    /*
+      Transform the references to the 'derived' columns from the condition
+      pushed into the having clause of sl to make them usable in the new context
+    */
+    extracted_cond_copy= extracted_cond_copy->transform(thd,
+                         &Item::derived_field_transformer_for_having,
+                         (uchar*) sl);
+    if (!extracted_cond_copy)
+      continue;
+
+    extracted_cond_copy->walk(&Item::cleanup_excluding_const_fields_processor,
+                              0, 0);
+    sl->cond_pushed_into_having= extracted_cond_copy;
+  }
+  thd->lex->current_select= save_curr_select;
+  DBUG_RETURN(false);
 }

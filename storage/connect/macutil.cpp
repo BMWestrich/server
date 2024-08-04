@@ -2,11 +2,11 @@
 /*  MACUTIL: Author Olivier Bertrand --  2008-2012                     */
 /*  From the article and sample code by Khalid Shaikh.                 */
 /***********************************************************************/
-#if defined(__WIN__)
+#if defined(_WIN32)
 #include "my_global.h"
-#else   // !__WIN__
+#else   // !_WIN32
 #error This is WINDOWS only DLL
-#endif  // !__WIN__
+#endif  // !_WIN32
 #include "global.h"
 #include "plgdbsem.h"
 #include "macutil.h"
@@ -192,7 +192,7 @@ bool MACINFO::GetOneInfo(PGLOBAL g, int flag, void *v, int lv)
       case 23:
         break;
       default:
-        p = "";
+        p = PlugDup(g, "");
       } // endswitch flag
 
   } else switch (flag) {
@@ -230,13 +230,13 @@ bool MACINFO::GetOneInfo(PGLOBAL g, int flag, void *v, int lv)
     case 11:                    // Description
       if ((p = strstr(Curp->Description, " - Packet Scheduler Miniport"))) {
         strncpy(buf, Curp->Description, p - Curp->Description);
-        i = p - Curp->Description;
+        i = (int)(p - Curp->Description);
         strncpy(buf, Curp->Description, i);
         buf[i] = 0;
         p = buf;
       } else if ((p = strstr(Curp->Description,
                   " - Miniport d'ordonnancement de paquets"))) {
-        i = p - Curp->Description;
+        i = (int)(p - Curp->Description);
         strncpy(buf, Curp->Description, i);
         buf[i] = 0;
         p = buf;

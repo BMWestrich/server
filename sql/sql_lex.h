@@ -1,5 +1,5 @@
-/* Copyright (c) 2000, 2015, Oracle and/or its affiliates.
-   Copyright (c) 2010, 2016, MariaDB
+/* Copyright (c) 2000, 2019, Oracle and/or its affiliates.
+   Copyright (c) 2010, 2019, MariaDB Corporation
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /**
   @defgroup Semantic_Analysis Semantic Analysis
@@ -28,6 +28,8 @@
 #include "mem_root_array.h"
 #include "sql_cmd.h"
 #include "sql_alter.h"                // Alter_info
+#include "sql_window.h"
+#include "sql_trigger.h"
 
 /* YACC and LEX Definitions */
 
@@ -47,7 +49,10 @@ class sys_var;
 class Item_func_match;
 class File_parser;
 class Key_part_spec;
+class Item_window_func;
 struct sql_digest_state;
+class With_clause;
+
 
 #define ALLOC_ROOT_SET 1024
 
@@ -178,6 +183,7 @@ const LEX_STRING sp_data_access_name[]=
 
 #define DERIVED_SUBQUERY	1
 #define DERIVED_VIEW		2
+#define DERIVED_WITH            4
 
 enum enum_view_create_mode
 {
@@ -240,11 +246,12 @@ struct LEX_MASTER_INFO
   ulong server_id;
   uint port, connect_retry;
   float heartbeat_period;
+  int sql_delay;
   /*
     Enum is used for making it possible to detect if the user
     changed variable or if it should be left at old value
    */
-  enum {LEX_MI_UNCHANGED, LEX_MI_DISABLE, LEX_MI_ENABLE}
+  enum {LEX_MI_UNCHANGED= 0, LEX_MI_DISABLE, LEX_MI_ENABLE}
     ssl, ssl_verify_server_cert, heartbeat_opt, repl_ignore_server_ids_opt,
     repl_do_domain_ids_opt, repl_ignore_domain_ids_opt;
   enum {
@@ -260,6 +267,7 @@ struct LEX_MASTER_INFO
                           sizeof(ulong), 0, 16, MYF(0));
     my_init_dynamic_array(&repl_ignore_domain_ids,
                           sizeof(ulong), 0, 16, MYF(0));
+    sql_delay= -1;
   }
   void reset(bool is_change_master)
   {
@@ -272,7 +280,7 @@ struct LEX_MASTER_INFO
     }
 
     host= user= password= log_file_name= ssl_key= ssl_cert= ssl_ca=
-      ssl_capath= ssl_cipher= relay_log_name= 0;
+      ssl_capath= ssl_cipher= ssl_crl= ssl_crlpath= relay_log_name= NULL;
     pos= relay_log_pos= server_id= port= connect_retry= 0;
     heartbeat_period= 0;
     ssl= ssl_verify_server_cert= heartbeat_opt=
@@ -280,6 +288,7 @@ struct LEX_MASTER_INFO
       repl_ignore_domain_ids_opt= LEX_MI_UNCHANGED;
     gtid_pos_str= null_lex_str;
     use_gtid_opt= LEX_GTID_UNCHANGED;
+    sql_delay= -1;
   }
 };
 
@@ -498,7 +507,7 @@ public:
 
   static void *operator new(size_t size, MEM_ROOT *mem_root) throw ()
   { return (void*) alloc_root(mem_root, (uint) size); }
-  static void operator delete(void *ptr,size_t size) { TRASH(ptr, size); }
+  static void operator delete(void *ptr,size_t size) { TRASH_FREE(ptr, size); }
   static void operator delete(void *ptr, MEM_ROOT *mem_root) {}
 
   // Ensures that at least all members used during cleanup() are initialized.
@@ -525,7 +534,6 @@ public:
   virtual st_select_lex* outer_select()= 0;
   virtual st_select_lex* return_after_parsing()= 0;
 
-  virtual bool set_braces(bool value);
   virtual bool inc_in_sum_expr();
   virtual uint get_in_sum_expr();
   virtual TABLE_LIST* get_table_list();
@@ -539,8 +547,21 @@ public:
 					List<Index_hint> *hints= 0,
                                         List<String> *partition_names= 0,
                                         LEX_STRING *option= 0);
-  virtual void set_lock_for_tables(thr_lock_type lock_type) {}
-
+  virtual void set_lock_for_tables(thr_lock_type lock_type, bool for_update) {}
+  void set_slave(st_select_lex_node *slave_arg) { slave= slave_arg; }
+  void move_node(st_select_lex_node *where_to_move)
+  {
+    if (where_to_move == this)
+      return;
+    if (next)
+      next->prev= prev;
+    *prev= next;
+    *where_to_move->prev= this;
+    next= where_to_move;
+  }
+  st_select_lex_node *insert_chain_before(st_select_lex_node **ptr_pos_to_insert,
+                                          st_select_lex_node *end_chain_node);
+  void move_as_slave(st_select_lex_node *new_master);
   friend class st_select_lex_unit;
   friend bool mysql_new_select(LEX *lex, bool move_down);
   friend bool mysql_make_view(THD *thd, TABLE_SHARE *share, TABLE_LIST *table,
@@ -595,6 +616,8 @@ public:
     executed, // already executed
     cleaned;
 
+  bool optimize_started;
+
   // list of fields which points to temporary table for union
   List<Item> item_list;
   /*
@@ -627,7 +650,7 @@ public:
       return saved_fake_select_lex;
     return first_select();
   };
-  //node on wich we should return current_select pointer after parsing subquery
+  //node on which we should return current_select pointer after parsing subquery
   st_select_lex *return_to;
   /* LIMIT clause runtime counters */
   ha_rows select_limit_cnt, offset_limit_cnt;
@@ -638,6 +661,13 @@ public:
     derived tables/views handling.
   */
   TABLE_LIST *derived;
+  bool is_view;
+  /* With clause attached to this unit (if any) */
+  With_clause *with_clause;
+  /* With element where this unit is used as the specification (if any) */
+  With_element *with_element;
+  /* The unit used as a CTE specification from which this unit is cloned */
+  st_select_lex_unit *cloned_from;
   /* thread handler */
   THD *thd;
   /*
@@ -646,7 +676,7 @@ public:
   */
   st_select_lex *fake_select_lex;
   /**
-    SELECT_LEX that stores LIMIT and OFFSET for UNION ALL when no
+    SELECT_LEX that stores LIMIT and OFFSET for UNION ALL when noq
     fake_select_lex is used.
   */
   st_select_lex *saved_fake_select_lex;
@@ -655,12 +685,7 @@ public:
   bool describe; /* union exec() called for EXPLAIN */
   Procedure *last_procedure;	 /* Pointer to procedure, if such exists */
 
-  /* 
-    Insert table with stored virtual columns.
-    This is used only in those rare cases 
-    when the list of inserted values is empty.
-  */
-  TABLE *insert_table_with_stored_vcol;
+  bool columns_are_renamed;
 
   void init_query();
   st_select_lex* outer_select();
@@ -668,18 +693,21 @@ public:
   {
     return reinterpret_cast<st_select_lex*>(slave);
   }
+  void set_with_clause(With_clause *with_cl);
   st_select_lex_unit* next_unit()
   {
     return reinterpret_cast<st_select_lex_unit*>(next);
   }
   st_select_lex* return_after_parsing() { return return_to; }
   void exclude_level();
-  void exclude_tree();
+  // void exclude_tree(); // it is not used for long time
+  bool is_excluded() { return prev == NULL; }
 
   /* UNION methods */
   bool prepare(THD *thd, select_result *result, ulong additional_options);
   bool optimize();
   bool exec();
+  bool exec_recursive();
   bool cleanup();
   inline void unclean() { cleaned= 0; }
   void reinit_exec_mechanism();
@@ -701,7 +729,7 @@ public:
   friend void lex_start(THD *thd);
   friend int subselect_union_engine::exec();
 
-  List<Item> *get_unit_column_types();
+  List<Item> *get_column_types(bool for_cursor);
 
   select_union *get_union_result() { return union_result; }
   int save_union_explain(Explain_query *output);
@@ -709,6 +737,26 @@ public:
 };
 
 typedef class st_select_lex_unit SELECT_LEX_UNIT;
+typedef Bounds_checked_array<Item*> Ref_ptr_array;
+
+
+/*
+  Structure which consists of the field and the item which 
+  produces this field.
+*/
+
+class Grouping_tmp_field :public Sql_alloc
+{
+public:
+  Field *tmp_field;
+  Item *producing_item;
+  Grouping_tmp_field(Field *fld, Item *item) 
+     :tmp_field(fld), producing_item(item) {}
+};
+
+
+#define TOUCHED_SEL_COND 1/* WHERE/HAVING/ON should be reinited before use */
+#define TOUCHED_SEL_DERIVED (1<<1)/* derived should be reinited before use */
 
 /*
   SELECT_LEX - store information of parsed SELECT statment
@@ -721,9 +769,17 @@ public:
   Item *where, *having;                         /* WHERE & HAVING clauses */
   Item *prep_where; /* saved WHERE clause for prepared statement processing */
   Item *prep_having;/* saved HAVING clause for prepared statement processing */
+  Item *cond_pushed_into_where;  /* condition pushed into the select's WHERE  */
+  Item *cond_pushed_into_having; /* condition pushed into the select's HAVING */
   /* Saved values of the WHERE and HAVING clauses*/
   Item::cond_result cond_value, having_value;
-  /* point on lex in which it was created, used in view subquery detection */
+  /*
+    Point to the LEX in which it was created, used in view subquery detection.
+
+    TODO: make also st_select_lex::parent_stmt_lex (see LEX::stmt_lex)
+    and use st_select_lex::parent_lex & st_select_lex::parent_stmt_lex
+    instead of global (from THD) references where it is possible.
+  */
   LEX *parent_lex;
   enum olap_type olap;
   /* FROM clause - points to the beginning of the TABLE_LIST::next_local list. */
@@ -739,7 +795,7 @@ public:
   Group_list_ptrs        *group_list_ptrs;
 
   List<Item>          item_list;  /* list of fields & expressions */
-  List<String>        interval_list;
+  List<Item>          pre_fix; /* above list before fix_fields */
   bool	              is_item_list_lookup;
   /* 
     Usualy it is pointer to ftfunc_list_alloc, but in union used to create fake
@@ -747,6 +803,11 @@ public:
   */
   List<Item_func_match> *ftfunc_list;
   List<Item_func_match> ftfunc_list_alloc;
+  /*
+    The list of items to which MIN/MAX optimizations of opt_sum_query()
+    have been applied. Used to rollback those optimizations if it's needed.
+  */
+  List<Item_sum> min_max_opt_list;
   JOIN *join; /* after JOIN::prepare it is pointer to corresponding JOIN */
   List<TABLE_LIST> top_join_list; /* join list of the top level          */
   List<TABLE_LIST> *join_list;    /* list for the currently parsed join  */
@@ -787,9 +848,9 @@ public:
   SQL_I_List<ORDER> order_list;   /* ORDER clause */
   SQL_I_List<ORDER> gorder_list;
   Item *select_limit, *offset_limit;  /* LIMIT clause parameters */
-  // Arrays of pointers to top elements of all_fields list
-  Item **ref_pointer_array;
-  size_t ref_pointer_array_size; // Number of elements in array.
+
+  /// Array of pointers to top elements of all_fields list
+  Ref_ptr_array ref_pointer_array;
 
   /*
     number of items in select_list and HAVING clause used to get number
@@ -807,7 +868,21 @@ public:
   uint select_n_where_fields;
   /* reserved for exists 2 in */
   uint select_n_reserved;
+  /*
+   it counts the number of bit fields in the SELECT list. These are used when DISTINCT is
+   converted to a GROUP BY involving BIT fields.
+  */
+  uint hidden_bit_fields;
+  /*
+    Number of fields used in the definition of all the windows functions.
+    This includes:
+      1) Fields in the arguments
+      2) Fields in the PARTITION BY clause
+      3) Fields in the ORDER BY clause
+  */
+  uint fields_in_window_functions;
   enum_parsing_place parsing_place; /* where we are parsing expression */
+  enum_parsing_place context_analysis_place; /* where we are in prepare */
   bool with_sum_func;   /* sum function indicator */
 
   ulong table_join_options;
@@ -826,6 +901,11 @@ public:
   bool  braces;   	/* SELECT ... UNION (SELECT ... ) <- this braces */
   /* TRUE when having fix field called in processing of this SELECT */
   bool having_fix_field;
+  /*
+    TRUE when fix field is called for a new condition pushed into the
+    HAVING clause of this SELECT
+  */
+  bool having_fix_field_for_pushed_cond;
   /* List of references to fields referenced from inner selects */
   List<Item_outer_ref> inner_refs_list;
   /* Number of Item_sum-derived objects in this SELECT */
@@ -846,6 +926,7 @@ public:
   */
   bool subquery_in_having;
   /* TRUE <=> this SELECT is correlated w.r.t. some ancestor select */
+  bool with_all_modifier;  /* used for selects in union */
   bool is_correlated;
   /*
     This variable is required to ensure proper work of subqueries and
@@ -859,7 +940,8 @@ public:
     subquery. Prepared statements work OK in that regard, as in
     case of an error during prepare the PS is not created.
   */
-  bool first_execution;
+  uint8 changed_elements; // see TOUCHED_SEL_*
+  /* TODO: add foloowing first_* to bitmap above */
   bool first_natural_join_processing;
   bool first_cond_optimization;
   /* do not wrap view fields with Item_ref */
@@ -886,8 +968,20 @@ public:
   */
   List<String> *prev_join_using;
 
+  /**
+    The set of those tables whose fields are referenced in the select list of
+    this select level.
+  */
+  table_map select_list_tables;
+
   /* namp of nesting SELECT visibility (for aggregate functions check) */
   nesting_map name_visibility_map;
+  
+  table_map with_dep;
+  List<Grouping_tmp_field> grouping_tmp_fields;
+
+  /* it is for correct printing SELECT options */
+  thr_lock_type lock_type;
 
   void init_query();
   void init_select();
@@ -912,9 +1006,13 @@ public:
   }
   inline bool is_subquery_function() { return master_unit()->item != 0; }
 
-  bool mark_as_dependent(THD *thd, st_select_lex *last, Item *dependency);
+  bool mark_as_dependent(THD *thd, st_select_lex *last,
+                         Item_ident *dependency);
 
-  bool set_braces(bool value);
+  void set_braces(bool value)
+  {
+    braces= value;
+  }
   bool inc_in_sum_expr();
   uint get_in_sum_expr();
 
@@ -936,10 +1034,12 @@ public:
   TABLE_LIST *end_nested_join(THD *thd);
   TABLE_LIST *nest_last_join(THD *thd);
   void add_joined_table(TABLE_LIST *table);
+  bool add_cross_joined_table(TABLE_LIST *left_op, TABLE_LIST *right_op,
+                              bool straight_fl);
   TABLE_LIST *convert_right_join();
   List<Item>* get_item_list();
   ulong get_table_join_options();
-  void set_lock_for_tables(thr_lock_type lock_type);
+  void set_lock_for_tables(thr_lock_type lock_type, bool for_update);
   inline void init_order()
   {
     order_list.elements= 0;
@@ -1049,6 +1149,8 @@ public:
   bool save_leaf_tables(THD *thd);
   bool save_prep_leaf_tables(THD *thd);
 
+  void set_unique_exclude();
+
   bool is_merged_child_of(st_select_lex *ancestor);
 
   /*
@@ -1062,7 +1164,44 @@ public:
 
   void set_non_agg_field_used(bool val) { m_non_agg_field_used= val; }
   void set_agg_func_used(bool val)      { m_agg_func_used= val; }
+  void set_with_clause(With_clause *with_clause);
+  With_clause *get_with_clause()
+  {
+    return master_unit()->with_clause;
+  }
+  With_element *get_with_element()
+  {
+    return master_unit()->cloned_from ?
+           master_unit()->cloned_from->with_element :
+           master_unit()->with_element;
+  }
+  With_element *find_table_def_in_with_clauses(TABLE_LIST *table);
+  bool check_unrestricted_recursive(bool only_standard_compliant);
+  bool check_subqueries_with_recursive_references();
+  void collect_grouping_fields(THD *thd); 
+  void check_cond_extraction_for_grouping_fields(Item *cond,
+                                                 TABLE_LIST *derived);
+  Item *build_cond_for_grouping_fields(THD *thd, Item *cond,
+				       bool no_to_clones);
+  
+  List<Window_spec> window_specs;
+  void prepare_add_window_spec(THD *thd);
+  bool add_window_def(THD *thd, LEX_STRING *win_name, LEX_STRING *win_ref,
+                      SQL_I_List<ORDER> win_partition_list,
+                      SQL_I_List<ORDER> win_order_list,
+                      Window_frame *win_frame);
+  bool add_window_spec(THD *thd, LEX_STRING *win_ref,
+                       SQL_I_List<ORDER> win_partition_list,
+                       SQL_I_List<ORDER> win_order_list,
+                       Window_frame *win_frame);
+  List<Item_window_func> window_funcs;
+  bool add_window_func(Item_window_func *win_func);
 
+  bool have_window_funcs() const { return (window_funcs.elements !=0); }
+
+  bool cond_pushdown_is_allowed() const
+  { return !have_window_funcs() && !olap && !explicit_limit; }
+  
 private:
   bool m_non_agg_field_used;
   bool m_agg_func_used;
@@ -1097,10 +1236,16 @@ struct st_sp_chistics
   enum enum_sp_data_access daccess;
 };
 
-struct st_trg_chistics
+
+
+struct st_trg_chistics: public st_trg_execution_order
 {
   enum trg_action_time_type action_time;
   enum trg_event_type event;
+
+  const char *ordering_clause_begin;
+  const char *ordering_clause_end;
+
 };
 
 extern sys_var *trg_new_row_fake_var;
@@ -1163,28 +1308,6 @@ public:
   SQL_I_List<Sroutine_hash_entry> sroutines_list;
   Sroutine_hash_entry **sroutines_list_own_last;
   uint sroutines_list_own_elements;
-
-  /**
-    Locking state of tables in this particular statement.
-
-    If we under LOCK TABLES or in prelocked mode we consider tables
-    for the statement to be "locked" if there was a call to lock_tables()
-    (which called handler::start_stmt()) for tables of this statement
-    and there was no matching close_thread_tables() call.
-
-    As result this state may differ significantly from one represented
-    by Open_tables_state::lock/locked_tables_mode more, which are always
-    "on" under LOCK TABLES or in prelocked mode.
-  */
-  enum enum_lock_tables_state {
-    LTS_NOT_LOCKED = 0,
-    LTS_LOCKED
-  };
-  enum_lock_tables_state lock_tables_state;
-  bool is_query_tables_locked()
-  {
-    return (lock_tables_state == LTS_LOCKED);
-  }
 
   /**
     Number of tables which were open by open_tables() and to be locked
@@ -1396,8 +1519,8 @@ public:
     This has all flags from 0 (inclusive) to BINLOG_STMT_FLAG_COUNT
     (exclusive) set.
   */
-  static const int BINLOG_STMT_UNSAFE_ALL_FLAGS=
-    ((1 << BINLOG_STMT_UNSAFE_COUNT) - 1);
+  static const uint32 BINLOG_STMT_UNSAFE_ALL_FLAGS=
+    ((1U << BINLOG_STMT_UNSAFE_COUNT) - 1);
 
   /**
     Maps elements of enum_binlog_stmt_unsafe to error codes.
@@ -1631,6 +1754,38 @@ public:
   }
 
   /**
+    Checks either a trans/non trans temporary table is being accessed while
+    executing a statement.
+
+    @return
+      @retval TRUE  if a temporary table is being accessed
+      @retval FALSE otherwise
+  */
+  inline bool stmt_accessed_temp_table()
+  {
+    DBUG_ENTER("THD::stmt_accessed_temp_table");
+    DBUG_RETURN(stmt_accessed_non_trans_temp_table() ||
+                stmt_accessed_trans_temp_table());
+  }
+
+  /**
+    Checks if a temporary transactional table is being accessed while executing
+    a statement.
+
+    @return
+      @retval TRUE  if a temporary transactional table is being accessed
+      @retval FALSE otherwise
+  */
+  inline bool stmt_accessed_trans_temp_table()
+  {
+    DBUG_ENTER("THD::stmt_accessed_trans_temp_table");
+
+    DBUG_RETURN((stmt_accessed_table_flag &
+                ((1U << STMT_READS_TEMP_TRANS_TABLE) |
+                 (1U << STMT_WRITES_TEMP_TRANS_TABLE))) != 0);
+  }
+
+  /**
     Checks if a temporary non-transactional table is about to be accessed
     while executing a statement.
 
@@ -1764,9 +1919,6 @@ private:
 struct st_parsing_options
 {
   bool allows_variable;
-  bool allows_select_into;
-  bool allows_select_procedure;
-  bool allows_derived;
 
   st_parsing_options() { reset(); }
   void reset();
@@ -2024,25 +2176,18 @@ public:
   /** Get the token start position, in the raw buffer. */
   const char *get_tok_start()
   {
-    return m_tok_start;
+    return lookahead_token >= 0 ? m_tok_start_prev : m_tok_start;
   }
 
-  /** Get the token start position, in the pre-processed buffer. */
-  const char *get_cpp_tok_start()
+  void set_cpp_tok_start(const char *pos)
   {
-    return m_cpp_tok_start;
+    m_cpp_tok_start= pos;
   }
 
   /** Get the token end position, in the raw buffer. */
   const char *get_tok_end()
   {
     return m_tok_end;
-  }
-
-  /** Get the token end position, in the pre-processed buffer. */
-  const char *get_cpp_tok_end()
-  {
-    return m_cpp_tok_end;
   }
 
   /** Get the previous token start position, in the raw buffer. */
@@ -2057,12 +2202,6 @@ public:
     return m_ptr;
   }
 
-  /** Get the current stream pointer, in the pre-processed buffer. */
-  const char *get_cpp_ptr()
-  {
-    return m_cpp_ptr;
-  }
-
   /** Get the length of the current token, in the raw buffer. */
   uint yyLength()
   {
@@ -2072,6 +2211,30 @@ public:
     */
     DBUG_ASSERT(m_ptr > m_tok_start);
     return (uint) ((m_ptr - m_tok_start) - 1);
+  }
+
+  /** Get the previus token start position, in the pre-processed buffer. */
+  const char *get_cpp_start_prev()
+  {
+    return m_cpp_tok_start_prev;
+  }
+
+  /** Get the token start position, in the pre-processed buffer. */
+  const char *get_cpp_tok_start()
+  {
+    return lookahead_token >= 0 ? m_cpp_tok_start_prev : m_cpp_tok_start;
+  }
+
+  /** Get the token end position, in the pre-processed buffer. */
+  const char *get_cpp_tok_end()
+  {
+    return m_cpp_tok_end;
+  }
+
+  /** Get the current stream pointer, in the pre-processed buffer. */
+  const char *get_cpp_ptr()
+  {
+    return m_cpp_ptr;
   }
 
   /** Get the utf8-body string. */
@@ -2409,12 +2572,41 @@ struct LEX: public Query_tables_list
   SELECT_LEX *current_select;
   /* list of all SELECT_LEX */
   SELECT_LEX *all_selects_list;
-  
+  /* current with clause in parsing if any, otherwise 0*/
+  With_clause *curr_with_clause;  
+  /* pointer to the first with clause in the current statement */
+  With_clause *with_clauses_list;
+  /*
+    (*with_clauses_list_last_next) contains a pointer to the last
+     with clause in the current statement
+  */
+  With_clause **with_clauses_list_last_next;
+  /*
+    When a copy of a with element is parsed this is set to the offset of
+    the with element in the input string, otherwise it's set to 0
+  */
+  uint clone_spec_offset;
+
   /* Query Plan Footprint of a currently running select  */
   Explain_query *explain;
 
   // type information
   CHARSET_INFO *charset;
+  /*
+    LEX which represents current statement (conventional, SP or PS)
+
+    For example during view parsing THD::lex will point to the views LEX and
+    lex::stmt_lex will point to LEX of the statement where the view will be
+    included
+
+    Currently it is used to have always correct select numbering inside
+    statement (LEX::current_select_number) without storing and restoring a
+    global counter which was THD::select_number.
+
+    TODO: make some unified statement representation (now SP has different)
+    to store such data like LEX::current_select_number.
+  */
+  LEX *stmt_lex;
 
   LEX_STRING name;
   char *help_arg;
@@ -2424,6 +2616,10 @@ struct LEX: public Query_tables_list
   String *wild; /* Wildcard in SHOW {something} LIKE 'wild'*/ 
   sql_exchange *exchange;
   select_result *result;
+  /**
+    @c the two may also hold BINLOG arguments: either comment holds a
+    base64-char string or both represent the BINLOG fragment user variables.
+  */
   LEX_STRING comment, ident;
   LEX_USER *grant_user;
   XID *xid;
@@ -2438,7 +2634,7 @@ struct LEX: public Query_tables_list
   /** SELECT of CREATE VIEW statement */
   LEX_STRING create_view_select;
 
-  uint number_of_selects; // valid only for view
+  uint current_select_number; // valid for statment LEX (not view)
 
   /** Start of 'ON table', in trigger statements.  */
   const char* raw_trg_on_table_name_begin;
@@ -2475,6 +2671,7 @@ public:
   List<Item_func_set_user_var> set_var_list; // in-query assignment list
   List<Item_param>    param_list;
   List<LEX_STRING>    view_list; // view list (list of field names in view)
+  List<LEX_STRING>    with_column_list; // list of column names in with_list_element
   List<LEX_STRING>   *column_list; // list of column names (in ANALYZE)
   List<LEX_STRING>   *index_list;  // list of index names (in ANALYZE)
   /*
@@ -2557,8 +2754,8 @@ public:
   uint profile_options;
   uint grant, grant_tot_col, which_columns;
   enum Foreign_key::fk_match_opt fk_match_option;
-  enum Foreign_key::fk_option fk_update_opt;
-  enum Foreign_key::fk_option fk_delete_opt;
+  enum_fk_option fk_update_opt;
+  enum_fk_option fk_delete_opt;
   uint slave_thd_opt, start_transaction_opt;
   int nest_level;
   /*
@@ -2579,6 +2776,20 @@ public:
   uint16 create_view_algorithm;
   uint8 create_view_check;
   uint8 context_analysis_only;
+  /*
+    true <=> The parsed fragment requires resolution of references to CTE
+    at the end of parsing. This name resolution process involves searching
+    for possible dependencies between CTE defined in the parsed fragment and
+    detecting possible recursive references.
+    The flag is set to true if the fragment contains CTE definitions.
+  */
+  bool with_cte_resolution;
+  /*
+    true <=> only resolution of references to CTE are required in the parsed
+    fragment, no checking of dependencies between CTE is required.
+    This flag is used only when parsing clones of CTE specifications.
+  */
+  bool only_cte_resolution;
   bool local_file;
   bool check_exists;
   bool autocommit;
@@ -2597,15 +2808,10 @@ public:
   TABLE_LIST *create_last_non_select_table;
   /* Prepared statements SQL syntax:*/
   LEX_STRING prepared_stmt_name; /* Statement name (in all queries) */
-  /*
-    Prepared statement query text or name of variable that holds the
-    prepared statement (in PREPARE ... queries)
-  */
-  LEX_STRING prepared_stmt_code;
-  /* If true, prepared_stmt_code is a name of variable that holds the query */
-  bool prepared_stmt_code_is_varref;
+  /* PREPARE or EXECUTE IMMEDIATE source expression */
+  Item *prepared_stmt_code;
   /* Names of user variables holding parameters (in EXECUTE) */
-  List<LEX_STRING> prepared_stmt_params;
+  List<Item> prepared_stmt_params;
   sp_head *sphead;
   sp_name *spname;
   bool sp_lex_in_use;	/* Keep track on lex usage in SPs for error handling */
@@ -2712,6 +2918,13 @@ public:
   */
   Item *limit_rows_examined;
   ulonglong limit_rows_examined_cnt;
+  /**
+    Holds a set of domain_ids for deletion at FLUSH..DELETE_DOMAIN_ID
+  */
+  DYNAMIC_ARRAY delete_gtid_domain;
+  static const ulong initial_gtid_domain_buffer_size= 16;
+  uint32 gtid_domain_static_buffer[initial_gtid_domain_buffer_size];
+
   inline void set_limit_rows_examined()
   {
     if (limit_rows_examined)
@@ -2720,6 +2933,14 @@ public:
       limit_rows_examined_cnt= ULONGLONG_MAX;
   }
 
+
+  SQL_I_List<ORDER> save_group_list;
+  SQL_I_List<ORDER> save_order_list;
+  LEX_STRING *win_ref;
+  Window_frame *win_frame;
+  Window_frame_bound *frame_top_bound;
+  Window_frame_bound *frame_bottom_bound;
+  Window_spec *win_spec;
 
   inline void free_set_stmt_mem_root()
   {
@@ -2759,21 +2980,24 @@ public:
   {
     safe_to_cache_query= 0;
 
-    /*
-      There are no sense to mark select_lex and union fields of LEX,
-      but we should merk all subselects as uncacheable from current till
-      most upper
-    */
-    SELECT_LEX *sl;
-    SELECT_LEX_UNIT *un;
-    for (sl= current_select, un= sl->master_unit();
-	 un != &unit;
-	 sl= sl->outer_select(), un= sl->master_unit())
+    if (current_select) // initialisation SP variables has no SELECT
     {
-      sl->uncacheable|= cause;
-      un->uncacheable|= cause;
+      /*
+        There are no sense to mark select_lex and union fields of LEX,
+        but we should merk all subselects as uncacheable from current till
+        most upper
+      */
+      SELECT_LEX *sl;
+      SELECT_LEX_UNIT *un;
+      for (sl= current_select, un= sl->master_unit();
+          un != &unit;
+          sl= sl->outer_select(), un= sl->master_unit())
+      {
+        sl->uncacheable|= cause;
+        un->uncacheable|= cause;
+      }
+      select_lex.uncacheable|= cause;
     }
-    select_lex.uncacheable|= cause;
   }
   void set_trg_event_type_for_tables();
 
@@ -2822,9 +3046,9 @@ public:
     return context_stack.push_front(context, mem_root);
   }
 
-  void pop_context()
+  Name_resolution_context *pop_context()
   {
-    context_stack.pop();
+    return context_stack.pop();
   }
 
   bool copy_db_to(char **p_db, size_t *p_db_length) const;
@@ -2870,11 +3094,25 @@ public:
 
   int print_explain(select_result_sink *output, uint8 explain_flags,
                     bool is_analyze, bool *printed_anything);
-  void restore_set_statement_var();
+  bool restore_set_statement_var();
 
   void init_last_field(Column_definition *field, const char *name, CHARSET_INFO *cs);
   void set_last_field_type(const Lex_field_type_st &type);
   bool set_bincmp(CHARSET_INFO *cs, bool bin);
+
+  bool get_dynamic_sql_string(LEX_CSTRING *dst, String *buffer);
+  bool prepared_stmt_params_fix_fields(THD *thd)
+  {
+    // Fix Items in the EXECUTE..USING list
+    List_iterator_fast<Item> param_it(prepared_stmt_params);
+    while (Item *param= param_it++)
+    {
+      if (param->fix_fields(thd, 0) || param->check_cols(1))
+        return true;
+    }
+    return false;
+  }
+
   // Check if "KEY IF NOT EXISTS name" used outside of ALTER context
   bool check_add_key(DDL_options_st ddl)
   {
@@ -2903,6 +3141,16 @@ public:
        !(last_key= new Key(key_type, key_name, algorithm, false, ddl)))
       return true;
     alter_info.key_list.push_back(last_key);
+    return false;
+  }
+  // Add a constraint as a part of CREATE TABLE or ALTER TABLE
+  bool add_constraint(LEX_STRING *name, Virtual_column_info *constr,
+                      bool if_not_exists)
+  {
+    constr->name= *name;
+    constr->flags= if_not_exists ?
+                   Alter_info::CHECK_CONSTRAINT_IF_NOT_EXISTS : 0;
+    alter_info.check_constraint_list.push_back(constr);
     return false;
   }
   void set_command(enum_sql_command command,
@@ -2952,6 +3200,55 @@ public:
   */
   bool tmp_table() const { return create_info.tmp_table(); }
   bool if_exists() const { return create_info.if_exists(); }
+
+  /*
+    Run specified phases for derived tables/views in the given list
+
+    @param table_list - list of derived tables/view to handle
+    @param phase      - phases to process tables/views through
+
+    @details
+    This method runs phases specified by the 'phases' on derived
+    tables/views found in the 'table_list' with help of the
+    TABLE_LIST::handle_derived function.
+    'this' is passed as an argument to the TABLE_LIST::handle_derived.
+
+    @return false -  ok
+    @return true  -  error
+  */
+  bool handle_list_of_derived(TABLE_LIST *table_list, uint phases)
+  {
+    for (TABLE_LIST *tl= table_list; tl; tl= tl->next_local)
+    {
+      if (tl->is_view_or_derived() && tl->handle_derived(this, phases))
+        return true;
+    }
+    return false;
+  }
+
+  bool create_like() const
+  {
+    DBUG_ASSERT(!create_info.like() || !select_lex.item_list.elements);
+    return create_info.like();
+  }
+
+  bool create_select() const
+  {
+    DBUG_ASSERT(!create_info.like() || !select_lex.item_list.elements);
+    return select_lex.item_list.elements;
+  }
+
+  bool create_simple() const
+  {
+    return !create_like() && !create_select();
+  }
+
+  bool check_dependencies_in_with_clauses();
+  bool resolve_references_to_cte_in_hanging_cte();
+  bool check_cte_dependencies_and_resolve_references();
+  bool resolve_references_to_cte(TABLE_LIST *tables,
+                                 TABLE_LIST **tables_last);
+
 };
 
 
@@ -2993,15 +3290,18 @@ public:
 class Yacc_state
 {
 public:
-  Yacc_state()
-  {
-    reset();
-  }
+  Yacc_state() : yacc_yyss(NULL), yacc_yyvs(NULL) { reset(); }
 
   void reset()
   {
-    yacc_yyss= NULL;
-    yacc_yyvs= NULL;
+    if (yacc_yyss != NULL) {
+      my_free(yacc_yyss);
+      yacc_yyss = NULL;
+    }
+    if (yacc_yyvs != NULL) {
+      my_free(yacc_yyvs);
+      yacc_yyvs = NULL;
+    }
     m_set_signal_info.clear();
     m_lock_type= TL_READ_DEFAULT;
     m_mdl_type= MDL_SHARED_READ;
@@ -3122,6 +3422,7 @@ public:
   }
 };
 
+
 extern sql_digest_state *
 digest_add_token(sql_digest_state *state, uint token, LEX_YYSTYPE yylval);
 
@@ -3136,13 +3437,14 @@ extern void lex_init(void);
 extern void lex_free(void);
 extern void lex_start(THD *thd);
 extern void lex_end(LEX *lex);
-extern void lex_end_stage1(LEX *lex);
-extern void lex_end_stage2(LEX *lex);
+extern void lex_end_nops(LEX *lex);
+extern void lex_unlock_plugins(LEX *lex);
 void end_lex_with_single_table(THD *thd, TABLE *table, LEX *old_lex);
 int init_lex_with_single_table(THD *thd, TABLE *table, LEX *lex);
 extern int MYSQLlex(union YYSTYPE *yylval, THD *thd);
 
-extern void trim_whitespace(CHARSET_INFO *cs, LEX_STRING *str);
+extern void trim_whitespace(CHARSET_INFO *cs, LEX_STRING *str,
+                            uint *prefix_removed);
 
 extern bool is_lex_native_function(const LEX_STRING *name);
 

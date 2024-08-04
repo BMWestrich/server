@@ -1,6 +1,7 @@
 /*****************************************************************************
 
-Copyright (c) 1995, 2011, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1995, 2016, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2017, 2018, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +13,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -26,57 +27,53 @@ Created Aug 11, 2011 Vasil Dimov
 #ifndef buf0checksum_h
 #define buf0checksum_h
 
-#include "univ.i"
-
 #include "buf0types.h"
 
-/** Magic value to use instead of checksums when they are disabled */
-#define BUF_NO_CHECKSUM_MAGIC 0xDEADBEEFUL
+#ifdef INNODB_BUG_ENDIAN_CRC32
+/** Calculate the CRC32 checksum of a page. The value is stored to the page
+when it is written to a file and also checked for a match when reading from
+the file. Note that we must be careful to calculate the same value on all
+architectures.
+@param[in]	page		buffer page (srv_page_size bytes)
+@param[in]	bug_endian	whether to use big endian byteorder
+when converting byte strings to integers, for bug-compatibility with
+big-endian architecture running MySQL 5.6, MariaDB 10.0 or MariaDB 10.1
+@return	CRC-32C */
+uint32_t buf_calc_page_crc32(const byte* page, bool bug_endian = false);
+#else
+/** Calculate the CRC32 checksum of a page. The value is stored to the page
+when it is written to a file and also checked for a match when reading from
+the file. Note that we must be careful to calculate the same value on all
+architectures.
+@param[in]	page			buffer page (srv_page_size bytes)
+@return	CRC-32C */
+uint32_t buf_calc_page_crc32(const byte* page);
+#endif
 
-/********************************************************************//**
-Calculates a page CRC32 which is stored to the page when it is written
+/** Calculate a checksum which is stored to the page when it is written
 to a file. Note that we must be careful to calculate the same value on
 32-bit and 64-bit architectures.
-@return	checksum */
-UNIV_INTERN
-ib_uint32_t
-buf_calc_page_crc32(
-/*================*/
-	const byte*	page);	/*!< in: buffer page */
+@param[in]	page	file page (srv_page_size bytes)
+@return checksum */
+uint32_t
+buf_calc_page_new_checksum(const byte* page);
 
-/********************************************************************//**
-Calculates a page checksum which is stored to the page when it is written
-to a file. Note that we must be careful to calculate the same value on
-32-bit and 64-bit architectures.
-@return	checksum */
-UNIV_INTERN
-ulint
-buf_calc_page_new_checksum(
-/*=======================*/
-	const byte*	page);	/*!< in: buffer page */
-
-/********************************************************************//**
-In versions < 4.0.14 and < 4.1.1 there was a bug that the checksum only
-looked at the first few bytes of the page. This calculates that old
-checksum.
+/** In MySQL before 4.0.14 or 4.1.1 there was an InnoDB bug that
+the checksum only looked at the first few bytes of the page.
+This calculates that old checksum.
 NOTE: we must first store the new formula checksum to
 FIL_PAGE_SPACE_OR_CHKSUM before calculating and storing this old checksum
 because this takes that field as an input!
-@return	checksum */
-UNIV_INTERN
-ulint
-buf_calc_page_old_checksum(
-/*=======================*/
-	const byte*	page);	/*!< in: buffer page */
+@param[in]	page	file page (srv_page_size bytes)
+@return checksum */
+uint32_t
+buf_calc_page_old_checksum(const byte* page);
 
-/********************************************************************//**
-Return a printable string describing the checksum algorithm.
-@return	algorithm name */
-UNIV_INTERN
+/** Return a printable string describing the checksum algorithm.
+@param[in]	algo	algorithm
+@return algorithm name */
 const char*
-buf_checksum_algorithm_name(
-/*========================*/
-	srv_checksum_algorithm_t	algo);	/*!< in: algorithm */
+buf_checksum_algorithm_name(srv_checksum_algorithm_t algo);
 
 extern ulong	srv_checksum_algorithm;
 

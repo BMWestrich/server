@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 # -*- cperl -*-
 
 # Copyright (c) 2008, 2013, Oracle and/or its affiliates. All rights reserved.
@@ -14,7 +14,7 @@
 # 
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335 USA
 
 ##############################################################################
 #
@@ -23,7 +23,7 @@
 #  Tool used for executing a suite of .test file
 #
 #  See the "MySQL Test framework manual" for more information
-#  http://dev.mysql.com/doc/mysqltest/en/index.html
+#  https://mariadb.com/kb/en/library/mysqltest/
 #
 #  Please keep the test framework tools identical in all versions!
 #
@@ -141,7 +141,7 @@ our $opt_tmpdir;                 # A path but set directly on cmd line
 # configuration used to build them.  To make life easier, an environment
 # variable or command-line option may be specified to control which set of
 # executables will be used by the test suite.
-our $opt_vs_config = $ENV{'MTR_VS_CONFIG'};
+our $multiconfig = $ENV{'MTR_VS_CONFIG'};
 
 our $default_vardir;
 
@@ -502,7 +502,7 @@ sub command_line_setup () {
              'compress'                 => \$opt_compress,
              'bench'                    => \$opt_bench,
              'small-bench'              => \$opt_small_bench,
-             'vs-config'            => \$opt_vs_config,
+             'vs-config'            => \$multiconfig,
 
              # Control what test suites or cases to run
              'force'                    => \$opt_force,
@@ -638,7 +638,7 @@ sub command_line_setup () {
   if (! -f $glob_scriptname)
   {
     mtr_error("Can't find the location for the mysql-test-run script\n" .
-              "Go to to the mysql-test directory and execute the script " .
+              "Go to the mysql-test directory and execute the script " .
               "as follows:\n./$glob_scriptname");
   }
 
@@ -2213,9 +2213,9 @@ sub vs_config_dirs ($$) {
 
   $exe = "" if not defined $exe;
 
-  if ($opt_vs_config)
+  if ($multiconfig)
   {
-    return ("$glob_bindir/$path_part/$opt_vs_config/$exe");
+    return ("$glob_bindir/$path_part/$multiconfig/$exe");
   }
 
   return ("$glob_bindir/$path_part/release/$exe",
@@ -4133,7 +4133,7 @@ sub valgrind_arguments {
       if -f "$glob_mysql_test_dir/valgrind.supp";
   }
 
-  # Add valgrind options, can be overriden by user
+  # Add valgrind options, can be overridden by user
   mtr_add_arg($args, '%s', $_) for (@valgrind_args);
 
   mtr_add_arg($args, $$exe);

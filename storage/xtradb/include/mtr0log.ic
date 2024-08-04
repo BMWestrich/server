@@ -12,7 +12,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -216,7 +216,7 @@ mlog_write_initial_log_record_fast(
 				"%d on page %lu of space %lu in the "
 				"doublewrite buffer, continuing anyway.\n"
 				"Please post a bug report to "
-				"bugs.mysql.com.\n",
+				"https://jira.mariadb.org/\n",
 				type, offset, space);
 			ut_ad(0);
 		}

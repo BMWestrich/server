@@ -4,8 +4,11 @@
 wsrep_sst_method=xtrabackup-v2
 wsrep_sst_auth="root:"
 wsrep_debug=ON
+innodb_safe_truncate=OFF
+innodb_undo_logs=1
 
 [SST]
-tkey=@ENV.MYSQL_TEST_DIR/std_data/galera-key.pem
-tcert=@ENV.MYSQL_TEST_DIR/std_data/galera-cert.pem
+tkey=@ENV.MYSQL_TEST_DIR/std_data/cakey.pem
+tcert=@ENV.MYSQL_TEST_DIR/std_data/cacert.pem
 encrypt=3
+transferfmt=@ENV.MTR_GALERA_TFMT

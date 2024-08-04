@@ -8,11 +8,17 @@
 # on the presence of the log tables (which are CSV-based).
 --source include/have_csv.inc
 
-# Check that XtraDB is enabled as result depends on it
--- source include/have_xtradb.inc
+# Without aria_used_for_temp_tables some I_S tables will be MyISAM,
+# while the test expects them to be Aria
+-- source include/have_aria_used_for_temp_tables.inc
+
+-- source include/have_innodb.inc
 
 # Save the initial number of concurrent sessions
 --source include/count_sessions.inc
+
+--source include/default_optimizer_switch.inc
+--source include/default_charset.inc
 
 set global sql_mode="";
 set local sql_mode="";
@@ -576,7 +582,9 @@ begin
   end if;
 end|
 delimiter ;|
+--replace_column 6 #
 show triggers;
+--replace_column 17 #
 select * from information_schema.triggers where trigger_schema in ('mysql', 'information_schema', 'test', 'mysqltest');
 
 drop trigger trg1;
@@ -620,13 +628,13 @@ select * from information_schema.schema_privileges order by grantee;
 select * from information_schema.user_privileges order by grantee;
 show grants;
 connection con4;
-select * from information_schema.column_privileges where grantee like '%user%'
+select * from information_schema.column_privileges where grantee like '\'user%'
 order by grantee;
-select * from information_schema.table_privileges where grantee like '%user%'
+select * from information_schema.table_privileges where grantee like '\'user%'
 order by grantee;
-select * from information_schema.schema_privileges where grantee like '%user%'
+select * from information_schema.schema_privileges where grantee like '\'user%'
 order by grantee;
-select * from information_schema.user_privileges where grantee like '%user%'
+select * from information_schema.user_privileges where grantee like '\'user%'
 order by grantee;
 show grants;
 connection default;
@@ -1034,12 +1042,14 @@ grant select(b) on mysqltest.t1 to mysqltest_1@localhost;
 
 select trigger_name from information_schema.triggers
 where event_object_table='t1';
+--replace_column 6 #
 show triggers from mysqltest;
 
 connect (con27629,localhost,mysqltest_1,,mysqltest);
 show columns from t1;
 select column_name from information_schema.columns where table_name='t1';
 
+--replace_column 6 #
 show triggers;
 select trigger_name from information_schema.triggers
 where event_object_table='t1';
@@ -1489,16 +1499,13 @@ drop tables if exists t1, t2, t3;
 create table t1 (i int);
 create table t2 (j int primary key auto_increment);
 connect (con3726_1,localhost,root,,test);
---echo # Switching to connection 'con3726_1'
 connection con3726_1;
 lock table t2 read;
 connect (con3726_2,localhost,root,,test);
---echo # Switching to connection 'con3726_2'
 connection con3726_2;
 --echo # RENAME below will be blocked by 'lock table t2 read' above but
 --echo # will add two pending requests for exclusive metadata locks.
 --send rename table t2 to t3
---echo # Switching to connection 'default'
 connection default;
 let $wait_condition=
   select count(*) = 1 from information_schema.processlist
@@ -1510,13 +1517,10 @@ select table_name, column_name, data_type from information_schema.columns
   where table_schema = 'test' and table_name in ('t1', 't2');
 select table_name, auto_increment from information_schema.tables
   where table_schema = 'test' and table_name in ('t1', 't2');
---echo # Switching to connection 'con3726_1'
 connection con3726_1;
 unlock tables;
---echo # Switching to connection 'con3726_2'
 connection con3726_2;
 --reap
---echo # Switching to connection 'default'
 connection default;
 disconnect con3726_1;
 disconnect con3726_2;
@@ -1604,10 +1608,8 @@ create view v1 as select t1.a, t1.b from t1;
 alter table t1 change b c int;
 lock table t1 read;
 connect(con1, localhost, root,,);
---echo # --> connection con1
 connection con1;
 send flush tables;
---echo # --> connection default
 connection default;
 let $wait_condition=
   select count(*) = 1 from information_schema.processlist
@@ -1623,13 +1625,11 @@ unlock tables;
 --echo # Cleanup.
 --echo #
 
---echo # --> connection con1
 connection con1;
 --echo # Reaping 'flush tables'
 reap;
 disconnect con1;
 --source include/wait_until_disconnected.inc
---echo # --> connection default
 connection default;
 drop table t1;
 drop view v1;
@@ -1663,17 +1663,11 @@ create table t2 (k int);
 --echo # blocked.
 lock tables t2 read;
 
---echo #
---echo # Switching to connection 'con12828477_1'. 
---echo #
 connect (con12828477_1, localhost, root,,mysqltest);
 --echo # The below RENAME should wait on 't2' while
 --echo # keeping X lock on 't1'.
 --send rename table t1 to t3, t2 to t1, t3 to t2
 
---echo #
---echo # Switching to connection 'con12828477_2'. 
---echo #
 connect (con12828477_2, localhost, root,,mysqltest);
 --echo # Wait while the above RENAME is blocked.
 let $wait_condition=
@@ -1686,9 +1680,6 @@ let $wait_condition=
 --echo # blocked on 't1' because of RENAME.
 --send select table_name, auto_increment from information_schema.tables where table_schema='mysqltest'
 
---echo #
---echo # Switching to connection 'con12828477_3'. 
---echo #
 connect (con12828477_3, localhost, root,,mysqltest);
 --echo # Wait while the above SELECT is blocked.
 let $wait_condition=
@@ -1701,31 +1692,19 @@ let $wait_condition=
 --echo # Check that it holds no lock on 't0' so it can be renamed.
 rename table t0 to t4;
 
---echo #
---echo # Switching to connection 'default'.
---echo #
 connection default;
 --echo #
 --echo # Unblock the first RENAME.
 unlock tables;
 
---echo #
---echo # Switching to connection 'con12828477_1'. 
---echo #
 connection con12828477_1;
 --echo # Reap the first RENAME
 --reap
 
---echo #
---echo # Switching to connection 'con12828477_2'. 
---echo #
 connection con12828477_2;
 --echo # Reap SELECT to I_S.
 --reap
 
---echo #
---echo # Switching to connection 'default'.
---echo #
 connection default;
 
 --echo #
@@ -1739,17 +1718,11 @@ rename table t4 to t0;
 --echo # blocked.
 lock tables t2 read;
 
---echo #
---echo # Switching to connection 'con12828477_1'. 
---echo #
 connection con12828477_1;
 --echo # The below RENAME should wait on 't2' while
 --echo # keeping X lock on 't1'.
 --send rename table t1 to t3, t2 to t1, t3 to t2
 
---echo #
---echo # Switching to connection 'con12828477_2'. 
---echo #
 connection con12828477_2;
 --echo # Wait while the above RENAME is blocked.
 let $wait_condition=
@@ -1762,9 +1735,6 @@ let $wait_condition=
 --echo # blocked on 't1' because of RENAME.
 --send select event_object_table, trigger_name from information_schema.triggers where event_object_schema='mysqltest'
 
---echo #
---echo # Switching to connection 'con12828477_3'. 
---echo #
 connection con12828477_3;
 --echo # Wait while the above SELECT is blocked.
 let $wait_condition=
@@ -1777,31 +1747,19 @@ let $wait_condition=
 --echo # Check that it holds no lock on 't0' so it can be renamed.
 rename table t0 to t4;
 
---echo #
---echo # Switching to connection 'default'.
---echo #
 connection default;
 --echo #
 --echo # Unblock the first RENAME.
 unlock tables;
 
---echo #
---echo # Switching to connection 'con12828477_1'. 
---echo #
 connection con12828477_1;
 --echo # Reap the first RENAME
 --reap
 
---echo #
---echo # Switching to connection 'con12828477_2'. 
---echo #
 connection con12828477_2;
 --echo # Reap SELECT to I_S.
 --reap
 
---echo #
---echo # Switching to connection 'default'.
---echo #
 connection default;
 disconnect con12828477_1;
 disconnect con12828477_2;
@@ -1910,3 +1868,93 @@ disconnect con1;
 --source include/wait_until_count_sessions.inc
 
 set global sql_mode=default;
+
+USE test;
+
+--echo #
+--echo # End of 10.0 tests
+--echo #
+
+
+--echo #
+--echo # Start of 10.1 tests
+--echo #
+
+
+--echo #
+--echo # MDEV-13242 Wrong results for queries with row constructors and information_schema
+--echo #
+
+CREATE TABLE tt1(c1 INT);
+CREATE TABLE tt2(c2 INT);
+SELECT count(*) FROM information_schema.columns WHERE table_schema='test' AND (table_name, column_name) IN (('tt1', 'c1'));
+SELECT count(*) FROM information_schema.columns WHERE table_schema='test' AND (table_name, column_name) IN (('tt2', 'c2'));
+SELECT count(*) FROM information_schema.columns WHERE table_schema='test' AND (table_name, column_name) IN (('tt1','c1'),('tt2', 'c2'));
+SELECT count(*) FROM information_schema.columns WHERE table_schema='test' AND (table_name, column_name) IN (SELECT 'tt1','c1' FROM dual UNION SELECT 'tt2', 'c2' FROM dual);
+SELECT count(*) FROM information_schema.columns WHERE table_schema='test' AND (table_name='tt1' AND column_name='c1') OR (table_name='tt2' AND column_name='c2');
+SELECT column_name FROM information_schema.columns WHERE (table_name, column_name) IN (('tt1','c1'),('tt2', 'c2')) ORDER BY column_name;
+DROP TABLE tt1, tt2;
+
+--echo #
+--echo # MDEV-13242 Wrong results for queries with row constructors and information_schema
+--echo #
+
+SELECT SCHEMA_NAME from information_schema.schemata where schema_name='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+SELECT SCHEMA_NAME from information_schema.schemata where schema_name=REPEAT('a',193);
+
+
+--echo #
+--echo # End of 10.1 tests
+--echo #
+
+--echo #
+--echo # Start of 10.2 Test
+--echo #
+--echo # MDEV-14836: Assertion `m_status == DA_ERROR' failed in
+--echo # Diagnostics_area::sql_errno upon query from I_S with LIMIT ROWS EXAMINED
+--echo #
+
+replace_regex /at least \d+ rows/at least ### rows/;
+SELECT * FROM INFORMATION_SCHEMA.`COLUMNS` LIMIT ROWS EXAMINED 10;
+
+--echo #
+--echo # MDEV-24179: AAssertion `m_status == DA_ERROR || m_status == DA_OK ||
+--echo # m_status == DA_OK_BULK' failed in Diagnostics_area::message()
+--echo #
+
+call mtr.add_suppression("Sort aborted.*");
+
+DROP DATABASE test;
+CREATE DATABASE test;
+USE test;
+CREATE VIEW v AS SELECT table_schema  AS object_schema, table_name  AS object_name, table_type AS object_type FROM information_schema.tables ORDER BY object_schema;
+
+--error ER_FILSORT_ABORT
+SELECT * FROM v LIMIT ROWS EXAMINED 9;
+
+DROP VIEW v;
+
+--echo #
+--echo # MDEV-23408 Wrong result upon query from I_S and further Assertion `!alias_arg || strlen(alias_arg->str) == alias_arg->length' failed with certain connection charset
+--echo #
+
+# Expect empty sets if requested TABLE_NAME or TABLE_SCHEMA with zero bytes
+CREATE TABLE t (a INT);
+SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME=CONCAT('t',0x00,'1');
+SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA=CONCAT('test',0x00,'1');
+DROP TABLE t;
+
+# Make sure check_table_name() does not reject special characters
+CREATE TABLE `a/~.b` (a INT);
+SELECT TABLE_SCHEMA, TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME='a/~.b';
+DROP TABLE `a/~.b`;
+
+# Make sure check_db_name() does not reject special characters
+CREATE DATABASE `a/~.b`;
+CREATE TABLE `a/~.b`.t1 (a INT);
+SELECT TABLE_SCHEMA, TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA='a/~.b';
+DROP DATABASE `a/~.b`;
+
+--echo #
+--echo # End of 10.2 Test
+--echo #

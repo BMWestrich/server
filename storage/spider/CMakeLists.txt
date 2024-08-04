@@ -34,6 +34,8 @@ IF(EXISTS ${PROJECT_SOURCE_DIR}/storage/mysql_storage_engine.cmake)
     ${CMAKE_SOURCE_DIR}/regex)
 
   MYSQL_STORAGE_ENGINE(SPIDER)
+ELSEIF(PLUGIN_PARTITION MATCHES "^NO$")
+  MESSAGE(STATUS "Spider is skipped because partitioning is disabled")
 ELSE()
   INCLUDE_DIRECTORIES(${CMAKE_SOURCE_DIR}/storage/spider/hs_client)
 
@@ -41,7 +43,6 @@ ELSE()
     ${CMAKE_SOURCE_DIR}/storage/spider/scripts/install_spider.sql
     DESTINATION ${INSTALL_MYSQLSHAREDIR} COMPONENT Server
   )
-  SET(SPIDER_DEB_FILES "usr/lib/mysql/plugin/ha_spider.so usr/share/mysql/install_spider.sql" PARENT_SCOPE)
   MYSQL_ADD_PLUGIN(spider ${SPIDER_SOURCES} STORAGE_ENGINE MODULE_ONLY MODULE_OUTPUT_NAME "ha_spider")
 ENDIF()
 

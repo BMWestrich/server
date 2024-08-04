@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA */
 
 /**
   @file
@@ -300,6 +300,17 @@ inline
 bool my_decimal_is_zero(const my_decimal *decimal_value)
 {
   return decimal_is_zero(decimal_value);
+}
+
+
+inline
+int my_decimal_round_if_needed(uint mask, my_decimal *dec, int scale,
+                               bool truncate)
+{
+  if (scale >= dec->frac)
+    return E_DEC_OK;
+  return check_result(mask, decimal_round(dec, dec, scale,
+					  (truncate ? TRUNCATE : HALF_UP)));
 }
 
 

@@ -9,6 +9,8 @@
 # 2008-06-04 mleich Create this script based on older scripts and new code.
 #
 
+--source include/default_charset.inc
+
 # Just have some tables within different databases.
 --disable_warnings
 DROP DATABASE IF EXISTS test1;
@@ -36,7 +38,6 @@ DROP   USER testuser1@localhost;
 CREATE USER testuser1@localhost;
 GRANT SELECT ON test1.* TO testuser1@localhost;
 
---echo # Establish connection testuser1 (user=testuser1)
 --replace_result $MASTER_MYPORT MYSQL_PORT $MASTER_MYSOCK MYSQL_SOCK
 connect (testuser1,localhost,testuser1,,test1);
 --source suite/funcs_1/datadict/tables2.inc
@@ -46,7 +47,6 @@ SHOW TABLES FROM test1;
 SHOW TABLES FROM test2;
 --enable_abort_on_error
 
---echo # Switch to connection default and close connection testuser1
 connection default;
 disconnect testuser1;
 DROP USER testuser1@localhost;

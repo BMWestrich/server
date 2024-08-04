@@ -1,3 +1,5 @@
+set @@global.optimizer_switch=@@local.optimizer_switch;
+set @@global.join_cache_level=@@local.join_cache_level;
 DROP TABLE IF EXISTS t1;
 CREATE TABLE t1
 (a INT AUTO_INCREMENT PRIMARY KEY,
@@ -5,12 +7,8 @@ b CHAR(20)
 );
 SET @start_value= @@global.max_seeks_for_key;
 '#--------------------FN_DYNVARS_084_01-------------------------#'
-SELECT @@global.max_seeks_for_key = 10;
-@@global.max_seeks_for_key = 10
-0
-SELECT @@session.max_seeks_for_key = 10;
-@@session.max_seeks_for_key = 10
-0
+CONNECT  test_con1,localhost,root,,;
+connection test_con1;
 SET @@global.max_seeks_for_key = 20;
 SELECT @@global.max_seeks_for_key;
 @@global.max_seeks_for_key
@@ -31,6 +29,8 @@ id	select_type	table	type	possible_keys	key	key_len	ref	rows	Extra
 1	SIMPLE	t1	ALL	NULL	NULL	NULL	NULL	3	
 1	SIMPLE	t2	ALL	NULL	NULL	NULL	NULL	3	Using where; Using join buffer (flat, BNL join)
 '#--------------------FN_DYNVARS_084_02-------------------------#'
+CONNECT  test_con2,localhost,root,,;
+connection test_con2;
 SELECT @@global.max_seeks_for_key = 10;
 @@global.max_seeks_for_key = 10
 0
@@ -73,5 +73,10 @@ id	select_type	table	type	possible_keys	key	key_len	ref	rows	Extra
 1	SIMPLE	t1	ALL	NULL	NULL	NULL	NULL	17	
 1	SIMPLE	t2	ALL	NULL	NULL	NULL	NULL	17	Using where; Using join buffer (flat, BNL join)
 SET MAX_SEEKS_FOR_KEY=DEFAULT;
+connection default;
+disconnect test_con1;
+disconnect test_con2;
 DROP TABLE t1;
 SET @@global.max_seeks_for_key= @start_value;
+SET @@global.optimizer_switch=  @save_optimizer_switch;
+SET @@global.join_cache_level=  @save_join_cache_level;

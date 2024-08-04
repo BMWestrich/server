@@ -13,7 +13,7 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335  USA
 
 # This is a library file used by the Perl version of mysql-test-run,
 # and is part of the translation of the Bourne shell script with the
@@ -57,8 +57,6 @@ use My::Platform;
 use My::Test;
 use My::Find;
 use My::Suite;
-
-require "mtr_misc.pl";
 
 # locate plugin suites, depending on whether it's a build tree or installed
 my @plugin_suitedirs;
@@ -311,6 +309,7 @@ sub combinations_from_file($$)
 }
 
 our %disabled;
+our %disabled_wildcards;
 sub parse_disabled {
   my ($filename, $suitename) = @_;
 
@@ -319,10 +318,18 @@ sub parse_disabled {
       chomp;
       next if /^\s*#/ or /^\s*$/;
       mtr_error("Syntax error in $filename line $.")
-        unless /^\s*(?:([-0-9A-Za-z_\/]+)\.)?([-0-9A-Za-z_#]+)\s*:\s*(.*?)\s*$/;
-      mtr_error("Wrong suite name in $filename line $.")
+        unless /^\s*(?:([-0-9A-Za-z_\/]+)\.)?([-0-9A-Za-z_#\*]+)\s*:\s*(.*?)\s*$/;
+      mtr_error("Wrong suite name in $filename line $.: suitename = $suitename but the file says $1")
         if defined $1 and defined $suitename and $1 ne $suitename;
-      $disabled{($1 || $suitename || '') . ".$2"} = $3;
+      my ($sname, $casename, $text)= (($1 || $suitename || ''), $2, $3);
+
+      if ($casename =~ /\*/) {
+        # Wildcard
+        $disabled_wildcards{$sname . ".$casename"}= $text;
+      }
+      else {
+        $disabled{$sname . ".$casename"}= $text;
+      }
     }
     close DISABLED;
   }
@@ -616,8 +623,10 @@ sub make_combinations($$@)
   {
     # Skip all other combinations if the values they change
     # are already fixed in master_opt or slave_opt
-    if (My::Options::is_set($test->{master_opt}, $comb->{comb_opt}) &&
-        My::Options::is_set($test->{slave_opt}, $comb->{comb_opt}) ){
+    # (empty combinations are not considered a subset of anything)
+    if (@{$comb->{comb_opt}} &&
+        My::Options::is_subset($test->{master_opt}, $comb->{comb_opt}) &&
+        My::Options::is_subset($test->{slave_opt}, $comb->{comb_opt}) ){
 
       $test_combs->{$comb->{name}} = 2;
 
@@ -720,6 +729,14 @@ sub collect_one_test_case {
   # Check for disabled tests
   # ----------------------------------------------------------------------
   my $disable = $disabled{".$tname"} || $disabled{$name};
+  if (not $disable) {
+    foreach my $w (keys %disabled_wildcards) {
+      if ($name =~ /^$w/) {
+        $disable= $disabled_wildcards{$w};
+        last;
+      }
+    }
+  }
   if (not defined $disable and $suite->{parent}) {
     $disable = $disabled{$suite->{parent}->{name} . ".$tname"};
   }
@@ -1079,7 +1096,7 @@ sub get_tags_from_file($$) {
   $file_to_tags{$file}= $tags;
   $file_to_master_opts{$file}= $master_opts;
   $file_to_slave_opts{$file}= $slave_opts;
-  $file_combinations{$file}= [ uniq(@combinations) ];
+  $file_combinations{$file}= [ ::uniq(@combinations) ];
   $file_in_overlay{$file} = 1 if $in_overlay;
   return @{$tags};
 }

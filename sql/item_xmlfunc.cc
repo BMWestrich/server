@@ -1,4 +1,5 @@
-/* Copyright (c) 2005, 2013, Oracle and/or its affiliates.
+/* Copyright (c) 2005, 2019, Oracle and/or its affiliates.
+   Copyright (c) 2009, 2019, MariaDB
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -11,11 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA */
-
-#ifdef __GNUC__
-#pragma implementation
-#endif
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335  USA */
 
 #include <my_global.h>
 #include "sql_priv.h"
@@ -67,7 +64,7 @@ typedef struct my_xml_node_st
 } MY_XML_NODE;
 
 
-/* Lexical analizer token */
+/* Lexical analyzer token */
 typedef struct my_xpath_lex_st
 {
   int        term;  /* token type, see MY_XPATH_LEX_XXXXX below */
@@ -179,7 +176,7 @@ public:
   {
     nodebeg= (MY_XML_NODE*) pxml->ptr();
     nodeend= (MY_XML_NODE*) (pxml->ptr() + pxml->length());
-    numnodes= nodeend - nodebeg;
+    numnodes= (uint)(nodeend - nodebeg);
   }
   void prepare(String *nodeset)
   {
@@ -225,18 +222,19 @@ public:
     return str;
   }
   enum Item_result result_type () const { return STRING_RESULT; }
-  void fix_length_and_dec()
+  bool fix_length_and_dec()
   {
     max_length= MAX_BLOB_WIDTH;
     collation.collation= pxml->charset();
     // To avoid premature evaluation, mark all nodeset functions as non-const.
     used_tables_cache= RAND_TABLE_BIT;
     const_item_cache= false;
+    return FALSE;
   }
   const char *func_name() const { return "nodeset"; }
-  bool check_vcol_func_processor(uchar *int_arg)
+  bool check_vcol_func_processor(void *arg)
   {
-    return trace_unsupported_by_check_vcol_func_processor(func_name());
+    return mark_unsupported_function(func_name(), arg, VCOL_IMPOSSIBLE);
   }
 
 };
@@ -250,6 +248,8 @@ public:
     Item_nodeset_func(thd, pxml) {}
   const char *func_name() const { return "xpath_rootelement"; }
   String *val_nodeset(String *nodeset);
+  Item *get_copy(THD *thd, MEM_ROOT *mem_root)
+  { return get_item_copy<Item_nodeset_func_rootelement>(thd, mem_root, this); }
 };
 
 
@@ -261,6 +261,8 @@ public:
     Item_nodeset_func(thd, a, b, pxml) {}
   const char *func_name() const { return "xpath_union"; }
   String *val_nodeset(String *nodeset);
+  Item *get_copy(THD *thd, MEM_ROOT *mem_root)
+  { return get_item_copy<Item_nodeset_func_union>(thd, mem_root, this); }
 };
 
 
@@ -293,6 +295,8 @@ public:
     Item_nodeset_func_axisbyname(thd, a, n_arg, l_arg, pxml) {}
   const char *func_name() const { return "xpath_selfbyname"; }
   String *val_nodeset(String *nodeset);
+  Item *get_copy(THD *thd, MEM_ROOT *mem_root)
+  { return get_item_copy<Item_nodeset_func_selfbyname>(thd, mem_root, this); }
 };
 
 
@@ -305,6 +309,8 @@ public:
     Item_nodeset_func_axisbyname(thd, a, n_arg, l_arg, pxml) {}
   const char *func_name() const { return "xpath_childbyname"; }
   String *val_nodeset(String *nodeset);
+  Item *get_copy(THD *thd, MEM_ROOT *mem_root)
+  { return get_item_copy<Item_nodeset_func_childbyname>(thd, mem_root, this); }
 };
 
 
@@ -319,6 +325,8 @@ public:
       need_self(need_self_arg) {}
   const char *func_name() const { return "xpath_descendantbyname"; }
   String *val_nodeset(String *nodeset);
+  Item *get_copy(THD *thd, MEM_ROOT *mem_root)
+  { return get_item_copy<Item_nodeset_func_descendantbyname>(thd, mem_root, this); }
 };
 
 
@@ -333,6 +341,8 @@ public:
       need_self(need_self_arg) {}
   const char *func_name() const { return "xpath_ancestorbyname"; }
   String *val_nodeset(String *nodeset);
+  Item *get_copy(THD *thd, MEM_ROOT *mem_root)
+  { return get_item_copy<Item_nodeset_func_ancestorbyname>(thd, mem_root, this); }
 };
 
 
@@ -345,6 +355,8 @@ public:
     Item_nodeset_func_axisbyname(thd, a, n_arg, l_arg, pxml) {}
   const char *func_name() const { return "xpath_parentbyname"; }
   String *val_nodeset(String *nodeset);
+  Item *get_copy(THD *thd, MEM_ROOT *mem_root)
+  { return get_item_copy<Item_nodeset_func_parentbyname>(thd, mem_root, this); }
 };
 
 
@@ -357,6 +369,8 @@ public:
     Item_nodeset_func_axisbyname(thd, a, n_arg, l_arg, pxml) {}
   const char *func_name() const { return "xpath_attributebyname"; }
   String *val_nodeset(String *nodeset);
+  Item *get_copy(THD *thd, MEM_ROOT *mem_root)
+  { return get_item_copy<Item_nodeset_func_attributebyname>(thd, mem_root, this); }
 };
 
 
@@ -372,6 +386,8 @@ public:
     Item_nodeset_func(thd, a, b, pxml) {}
   const char *func_name() const { return "xpath_predicate"; }
   String *val_nodeset(String *nodeset);
+  Item *get_copy(THD *thd, MEM_ROOT *mem_root)
+  { return get_item_copy<Item_nodeset_func_predicate>(thd, mem_root, this); }
 };
 
 
@@ -383,19 +399,8 @@ public:
     Item_nodeset_func(thd, a, b, pxml) { }
   const char *func_name() const { return "xpath_elementbyindex"; }
   String *val_nodeset(String *nodeset);
-};
-
-
-/*
-  We need to distinguish a number from a boolean:
-  a[1] and a[true] are different things in XPath.
-*/
-class Item_bool :public Item_int
-{
-public:
-  Item_bool(THD *thd, int32 i): Item_int(thd, i) {}
-  const char *func_name() const { return "xpath_bool"; }
-  bool is_bool_type() { return true; }
+  Item *get_copy(THD *thd, MEM_ROOT *mem_root)
+  { return get_item_copy<Item_nodeset_func_elementbyindex>(thd, mem_root, this); }
 };
 
 
@@ -422,6 +427,8 @@ public:
     }
     return args[0]->val_real() ? 1 : 0;
   }
+  Item *get_copy(THD *thd, MEM_ROOT *mem_root)
+  { return get_item_copy<Item_xpath_cast_bool>(thd, mem_root, this); }
 };
 
 
@@ -434,6 +441,8 @@ public:
   Item_xpath_cast_number(THD *thd, Item *a): Item_real_func(thd, a) {}
   const char *func_name() const { return "xpath_cast_number"; }
   virtual double val_real() { return args[0]->val_real(); }
+  Item *get_copy(THD *thd, MEM_ROOT *mem_root)
+  { return get_item_copy<Item_xpath_cast_number>(thd, mem_root, this); }
 };
 
 
@@ -448,7 +457,9 @@ public:
     Item_nodeset_func(thd, pxml), string_cache(str_arg) { }
   String *val_nodeset(String *res)
   { return string_cache; }
-  void fix_length_and_dec() { max_length= MAX_BLOB_WIDTH; }
+  bool fix_length_and_dec() { max_length= MAX_BLOB_WIDTH; return FALSE; }
+  Item *get_copy(THD *thd, MEM_ROOT *mem_root)
+  { return get_item_copy<Item_nodeset_context_cache>(thd, mem_root, this); }
 };
 
 
@@ -460,7 +471,7 @@ public:
   Item_func_xpath_position(THD *thd, Item *a, String *p):
     Item_int_func(thd, a), pxml(p) {}
   const char *func_name() const { return "xpath_position"; }
-  void fix_length_and_dec() { max_length=10; }
+  bool fix_length_and_dec() { max_length=10; return FALSE; }
   longlong val_int()
   {
     String *flt= args[0]->val_nodeset(&tmp_value);
@@ -468,6 +479,8 @@ public:
       return ((MY_XPATH_FLT*)flt->ptr())->pos + 1;
     return 0;
   }
+  Item *get_copy(THD *thd, MEM_ROOT *mem_root)
+  { return get_item_copy<Item_func_xpath_position>(thd, mem_root, this); }
 };
 
 
@@ -479,7 +492,7 @@ public:
   Item_func_xpath_count(THD *thd, Item *a, String *p):
     Item_int_func(thd, a), pxml(p) {}
   const char *func_name() const { return "xpath_count"; }
-  void fix_length_and_dec() { max_length=10; }
+  bool fix_length_and_dec() { max_length=10; return FALSE; }
   longlong val_int()
   {
     uint predicate_supplied_context_size;
@@ -489,6 +502,8 @@ public:
       return predicate_supplied_context_size;
     return res->length() / sizeof(MY_XPATH_FLT);
   }
+  Item *get_copy(THD *thd, MEM_ROOT *mem_root)
+  { return get_item_copy<Item_func_xpath_count>(thd, mem_root, this); }
 };
 
 
@@ -532,6 +547,8 @@ public:
     }
     return sum;
   }
+  Item *get_copy(THD *thd, MEM_ROOT *mem_root)
+  { return get_item_copy<Item_func_xpath_sum>(thd, mem_root, this); }
 };
 
 
@@ -572,9 +589,9 @@ public:
     Item_bool_func(thd, nodeset, cmpfunc), pxml(p) {}
   enum Type type() const { return XPATH_NODESET_CMP; };
   const char *func_name() const { return "xpath_nodeset_to_const_comparator"; }
-  bool check_vcol_func_processor(uchar *int_arg) 
+  bool check_vcol_func_processor(void *arg)
   {
-    return trace_unsupported_by_check_vcol_func_processor(func_name());
+    return mark_unsupported_function(func_name(), arg, VCOL_IMPOSSIBLE);
   }
 
   longlong val_int()
@@ -599,7 +616,7 @@ public:
         if ((node->parent == flt->num) &&
             (node->type == MY_XML_NODE_TEXT))
         {
-          fake->set_value(node->beg, node->end - node->beg,
+          fake->set_value(node->beg, (uint)(node->end - node->beg),
                           collation.collation);
           if (args[1]->val_int())
             return 1;
@@ -608,6 +625,8 @@ public:
     }
     return 0;
   }
+  Item *get_copy(THD *thd, MEM_ROOT *mem_root)
+  { return get_item_copy<Item_nodeset_to_const_comparator>(thd, mem_root, this); }
 };
 
 
@@ -796,17 +815,16 @@ String *Item_nodeset_func_attributebyname::val_nodeset(String *nodeset)
 String *Item_nodeset_func_predicate::val_nodeset(String *str)
 {
   Item_nodeset_func *nodeset_func= (Item_nodeset_func*) args[0];
-  Item_func *comp_func= (Item_func*)args[1];
   uint pos= 0, size;
   prepare(str);
-  size= fltend - fltbeg;
+  size= (uint)(fltend - fltbeg);
   for (MY_XPATH_FLT *flt= fltbeg; flt < fltend; flt++)
   {
     nodeset_func->context_cache.length(0);
     ((XPathFilter*)(&nodeset_func->context_cache))->append_element(flt->num,
                                                                    flt->pos,
                                                                    size);
-    if (comp_func->val_int())
+    if (args[1]->val_int())
       ((XPathFilter*)str)->append_element(flt->num, pos++);
   }
   return str;
@@ -818,7 +836,7 @@ String *Item_nodeset_func_elementbyindex::val_nodeset(String *nodeset)
   Item_nodeset_func *nodeset_func= (Item_nodeset_func*) args[0];
   prepare(nodeset);
   MY_XPATH_FLT *flt;
-  uint pos, size= fltend - fltbeg;
+  uint pos, size= (uint)(fltend - fltbeg);
   for (pos= 0, flt= fltbeg; flt < fltend; flt++)
   {
     nodeset_func->context_cache.length(0);
@@ -977,12 +995,17 @@ static Item *create_comparator(MY_XPATH *xpath,
   else if (a->type() == Item::XPATH_NODESET &&
            b->type() == Item::XPATH_NODESET)
   {
-    uint len= xpath->query.end - context->beg;
-    set_if_smaller(len, 32);
-    my_printf_error(ER_UNKNOWN_ERROR,
-                    "XPATH error: "
-                    "comparison of two nodesets is not supported: '%.*s'",
-                    MYF(0), len, context->beg);
+    uint len= (uint)(xpath->query.end - context->beg);
+    if (len <= 32)
+      my_printf_error(ER_UNKNOWN_ERROR,
+                      "XPATH error: "
+                      "comparison of two nodesets is not supported: '%.*s'",
+                      MYF(0), len, context->beg);
+    else
+      my_printf_error(ER_UNKNOWN_ERROR,
+                      "XPATH error: "
+                      "comparison of two nodesets is not supported: '%.32T'",
+                      MYF(0), context->beg);
 
     return 0; // TODO: Comparison of two nodesets
   }
@@ -1078,7 +1101,7 @@ static Item* nametestfunc(MY_XPATH *xpath,
 
 
 /*
-  Tokens consisting of one character, for faster lexical analizer.
+  Tokens consisting of one character, for faster lexical analyzer.
 */
 static char simpletok[128]=
 {
@@ -1180,13 +1203,13 @@ my_xpath_keyword(MY_XPATH *x,
 
 static Item *create_func_true(MY_XPATH *xpath, Item **args, uint nargs)
 {
-  return new (xpath->thd->mem_root) Item_bool(xpath->thd, 1);
+  return new (xpath->thd->mem_root) Item_bool(xpath->thd, "xpath_bool", 1);
 }
 
 
 static Item *create_func_false(MY_XPATH *xpath, Item **args, uint nargs)
 {
-  return new (xpath->thd->mem_root) Item_bool(xpath->thd, 0);
+  return new (xpath->thd->mem_root) Item_bool(xpath->thd, "xpath_bool", 0);
 }
 
 
@@ -1381,7 +1404,7 @@ MY_XPATH_FUNC *
 my_xpath_function(const char *beg, const char *end)
 {
   MY_XPATH_FUNC *k, *function_names;
-  uint length= end-beg;
+  uint length= (uint)(end-beg);
   switch (length)
   {
     case 1: return 0;
@@ -1398,7 +1421,7 @@ my_xpath_function(const char *beg, const char *end)
 }
 
 
-/* Initialize a lex analizer token */
+/* Initialize a lex analyzer token */
 static void
 my_xpath_lex_init(MY_XPATH_LEX *lex,
                   const char *str, const char *strend)
@@ -1429,7 +1452,7 @@ my_xdigit(int c)
   SYNOPSYS
     Scan the next token from the input.
     lex->term is set to the scanned token type.
-    lex->beg and lex->end are set to the beginnig
+    lex->beg and lex->end are set to the beginning
     and to the end of the token.
   RETURN
     N/A
@@ -1455,7 +1478,7 @@ my_xpath_lex_scan(MY_XPATH *xpath,
                                       (const uchar*) end)) > 0 &&
       ((ctype & (_MY_L | _MY_U)) || *beg == '_'))
   {
-    // scan untill the end of the idenfitier
+    // scan until the end of the identifier
     for (beg+= length; 
          (length= xpath->cs->cset->ctype(xpath->cs, &ctype,
                                          (const uchar*) beg,
@@ -1584,7 +1607,7 @@ static int my_xpath_parse_AxisName(MY_XPATH *xpath)
 ** Grammar rules, according to http://www.w3.org/TR/xpath
 ** Implemented using recursive descendant method.
 ** All the following grammar processing functions accept
-** a signle "xpath" argument and return 1 on success and 0 on error.
+** a single "xpath" argument and return 1 on success and 0 on error.
 ** They also modify "xpath" argument by creating new items.
 */
 
@@ -1943,7 +1966,7 @@ static int my_xpath_parse_PrimaryExpr_literal(MY_XPATH *xpath)
     return 0;
   xpath->item= new (xpath->thd->mem_root)
     Item_string(xpath->thd, xpath->prevtok.beg + 1,
-                xpath->prevtok.end - xpath->prevtok.beg - 2,
+                (uint)(xpath->prevtok.end - xpath->prevtok.beg - 2),
                 xpath->cs);
   return 1;
 }
@@ -2464,7 +2487,7 @@ static int my_xpath_parse_UnaryExpr(MY_XPATH *xpath)
   as it is in conflict with abbreviated step.
   1 + .123    does not work,
   1 + 0.123   does.
-  Perhaps it is better to move this code into lex analizer.
+  Perhaps it is better to move this code into lex analyzer.
 
   RETURN
     1 - success
@@ -2481,13 +2504,13 @@ static int my_xpath_parse_Number(MY_XPATH *xpath)
   if (!my_xpath_parse_term(xpath, MY_XPATH_LEX_DOT))
   {
     xpath->item= new (thd->mem_root) Item_int(thd, xpath->prevtok.beg,
-                              xpath->prevtok.end - xpath->prevtok.beg);
+                              (uint)(xpath->prevtok.end - xpath->prevtok.beg));
     return 1;
   }
   my_xpath_parse_term(xpath, MY_XPATH_LEX_DIGITS);
 
   xpath->item= new (thd->mem_root) Item_float(thd, beg,
-                                              xpath->prevtok.end - beg);
+                                              (uint)(xpath->prevtok.end - beg));
   return 1;
 }
 
@@ -2614,10 +2637,13 @@ my_xpath_parse_VariableReference(MY_XPATH *xpath)
     {
       xpath->item= NULL;
       DBUG_ASSERT(xpath->query.end > dollar_pos);
-      uint len= xpath->query.end - dollar_pos;
-      set_if_smaller(len, 32);
-      my_printf_error(ER_UNKNOWN_ERROR, "Unknown XPATH variable at: '%.*s'", 
-                      MYF(0), len, dollar_pos);
+      uint len= (uint)(xpath->query.end - dollar_pos);
+      if (len <= 32)
+        my_printf_error(ER_UNKNOWN_ERROR, "Unknown XPATH variable at: '%.*s'",
+                        MYF(0), len, dollar_pos);
+      else
+        my_printf_error(ER_UNKNOWN_ERROR, "Unknown XPATH variable at: '%.32T'",
+                        MYF(0), dollar_pos);
     }
   }
   return xpath->item ? 1 : 0;
@@ -2642,7 +2668,7 @@ my_xpath_parse_NodeTest_QName(MY_XPATH *xpath)
   if (!my_xpath_parse_QName(xpath))
     return 0;
   DBUG_ASSERT(xpath->context);
-  uint len= xpath->prevtok.end - xpath->prevtok.beg;
+  uint len= (uint)(xpath->prevtok.end - xpath->prevtok.beg);
   xpath->context= nametestfunc(xpath, xpath->axis, xpath->context,
                                xpath->prevtok.beg, len);
   return 1;
@@ -2691,16 +2717,16 @@ my_xpath_parse(MY_XPATH *xpath, const char *str, const char *strend)
 }
 
 
-void Item_xml_str_func::fix_length_and_dec()
+bool Item_xml_str_func::fix_length_and_dec()
 {
   max_length= MAX_BLOB_WIDTH;
-  agg_arg_charsets_for_comparison(collation, args, arg_count);
+  return agg_arg_charsets_for_comparison(collation, args, arg_count);
 }
 
 
 bool Item_xml_str_func::fix_fields(THD *thd, Item **ref)
 {
-  String *xp, tmp;
+  String *xp;
   MY_XPATH xpath;
   int rc;
 
@@ -2728,7 +2754,13 @@ bool Item_xml_str_func::fix_fields(THD *thd, Item **ref)
     return true;
   }
 
-  if (!(xp= args[1]->val_str(&tmp)))
+  /*
+    Get the XPath query text from args[1] and cache it in m_xpath_query.
+    Its fragments will be referenced by items created during my_xpath_parse(),
+    e.g. by Item_nodeset_func_axisbyname::node_name.
+  */
+  if (!(xp= args[1]->val_str(&m_xpath_query)) ||
+      (xp != &m_xpath_query && m_xpath_query.copy(*xp)))
     return false; // Will return NULL
   my_xpath_init(&xpath);
   xpath.thd= thd;
@@ -2741,10 +2773,14 @@ bool Item_xml_str_func::fix_fields(THD *thd, Item **ref)
 
   if (!rc)
   {
-    uint clen= xpath.query.end - xpath.lasttok.beg;
-    set_if_smaller(clen, 32);
-    my_printf_error(ER_UNKNOWN_ERROR, "XPATH syntax error: '%.*s'",
-                    MYF(0), clen, xpath.lasttok.beg);
+    uint clen= (uint)(xpath.query.end - xpath.lasttok.beg);
+    if (clen <= 32)
+      my_printf_error(ER_UNKNOWN_ERROR, "XPATH syntax error: '%.*s'",
+                      MYF(0), clen, xpath.lasttok.beg);
+    else
+      my_printf_error(ER_UNKNOWN_ERROR, "XPATH syntax error: '%.32T'",
+                      MYF(0), xpath.lasttok.beg);
+
     return true;
   }
 
@@ -2802,7 +2838,7 @@ append_node(String *str, MY_XML_NODE *node)
   SYNOPSYS
 
     A call-back function executed when XML parser
-    is entering a tag or an attribue.
+    is entering a tag or an attribute.
     Appends the new node into data->pxml.
     Increments data->level.
 
@@ -2819,9 +2855,9 @@ int xml_enter(MY_XML_PARSER *st,const char *attr, size_t len)
 
   node.parent= data->parent; // Set parent for the new node to old parent
   data->parent= numnodes;    // Remember current node as new parent
-  DBUG_ASSERT(data->level <= MAX_LEVEL);
+  DBUG_ASSERT(data->level < MAX_LEVEL);
   data->pos[data->level]= numnodes;
-  if (data->level < MAX_LEVEL)
+  if (data->level < MAX_LEVEL - 1)
     node.level= data->level++;
   else
     return MY_XML_ERROR;
@@ -2838,7 +2874,7 @@ int xml_enter(MY_XML_PARSER *st,const char *attr, size_t len)
   SYNOPSYS
 
     A call-back function executed when XML parser
-    is entering into a tag or an attribue textual value.
+    is entering into a tag or an attribute textual value.
     The value is appended into data->pxml.
 
   RETURN
@@ -2866,7 +2902,7 @@ int xml_value(MY_XML_PARSER *st,const char *attr, size_t len)
   SYNOPSYS
 
     A call-back function executed when XML parser
-    is leaving a tag or an attribue.
+    is leaving a tag or an attribute.
     Decrements data->level.
 
   RETURN

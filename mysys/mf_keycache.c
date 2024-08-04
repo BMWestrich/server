@@ -1,4 +1,5 @@
 /* Copyright (c) 2000, 2013, Oracle and/or its affiliates.
+   Copyright (c) 2017, MariaDB Corporation.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -11,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 
 
@@ -58,11 +59,11 @@
   When a new block is required it is first tried to pop one from the stack.
   If the stack is empty, it is tried to get a never-used block from the pool.
   If this is empty too, then a block is taken from the LRU ring, flushing it
-  to disk, if neccessary. This is handled in find_key_block().
+  to disk, if necessary. This is handled in find_key_block().
   With the new free list, the blocks can have three temperatures:
   hot, warm and cold (which is free). This is remembered in the block header
   by the enum BLOCK_TEMPERATURE temperature variable. Remembering the
-  temperature is neccessary to correctly count the number of warm blocks,
+  temperature is necessary to correctly count the number of warm blocks,
   which is required to decide when blocks are allowed to become hot. Whenever
   a block is inserted to another (sub-)chain, we take the old and new
   temperature into account to decide if we got one more or less warm block.
@@ -274,16 +275,16 @@ struct st_hash_link
 };
 
 /* simple states of a block */
-#define BLOCK_ERROR           1 /* an error occured when performing file i/o */
-#define BLOCK_READ            2 /* file block is in the block buffer         */
-#define BLOCK_IN_SWITCH       4 /* block is preparing to read new page       */
-#define BLOCK_REASSIGNED      8 /* blk does not accept requests for old page */
-#define BLOCK_IN_FLUSH       16 /* block is selected for flush               */
-#define BLOCK_CHANGED        32 /* block buffer contains a dirty page        */
-#define BLOCK_IN_USE         64 /* block is not free                         */
-#define BLOCK_IN_EVICTION   128 /* block is selected for eviction            */
-#define BLOCK_IN_FLUSHWRITE 256 /* block is in write to file                 */
-#define BLOCK_FOR_UPDATE    512 /* block is selected for buffer modification */
+#define BLOCK_ERROR           1U/* an error occurred when performing file i/o */
+#define BLOCK_READ            2U/* file block is in the block buffer         */
+#define BLOCK_IN_SWITCH       4U/* block is preparing to read new page       */
+#define BLOCK_REASSIGNED      8U/* blk does not accept requests for old page */
+#define BLOCK_IN_FLUSH       16U/* block is selected for flush               */
+#define BLOCK_CHANGED        32U/* block buffer contains a dirty page        */
+#define BLOCK_IN_USE         64U/* block is not free                         */
+#define BLOCK_IN_EVICTION   128U/* block is selected for eviction            */
+#define BLOCK_IN_FLUSHWRITE 256U/* block is in write to file                 */
+#define BLOCK_FOR_UPDATE    512U/* block is selected for buffer modification */
 
 /* page status, returned by find_key_block */
 #define PAGE_READ               0
@@ -450,7 +451,7 @@ static inline uint next_power(uint value)
     structure of the type SIMPLE_KEY_CACHE_CB that is used for this key cache. 
     The parameter keycache is supposed to point to this structure. 
     The parameter key_cache_block_size specifies the size of the blocks in
-    the key cache to be built. The parameters division_limit and age_threshhold
+    the key cache to be built. The parameters division_limit and age_threshold
     determine the initial values of those characteristics of the key cache
     that are used for midpoint insertion strategy. The parameter use_mem
     specifies the total amount of memory to be allocated for key cache blocks
@@ -608,11 +609,11 @@ int init_simple_key_cache(SIMPLE_KEY_CACHE_CB *keycache,
     keycache->waiting_for_hash_link.last_thread= NULL;
     keycache->waiting_for_block.last_thread= NULL;
     DBUG_PRINT("exit",
-	       ("disk_blocks: %d  block_root: 0x%lx  hash_entries: %d\
- hash_root: 0x%lx  hash_links: %d  hash_link_root: 0x%lx",
-		keycache->disk_blocks,  (long) keycache->block_root,
-		keycache->hash_entries, (long) keycache->hash_root,
-		keycache->hash_links,   (long) keycache->hash_link_root));
+	       ("disk_blocks: %d  block_root: %p  hash_entries: %d\
+ hash_root: %p  hash_links: %d  hash_link_root: %p",
+		keycache->disk_blocks,   keycache->block_root,
+		keycache->hash_entries,  keycache->hash_root,
+		keycache->hash_links,    keycache->hash_link_root));
   }
   else
   {
@@ -962,7 +963,7 @@ static
 void end_simple_key_cache(SIMPLE_KEY_CACHE_CB *keycache, my_bool cleanup)
 {
   DBUG_ENTER("end_simple_key_cache");
-  DBUG_PRINT("enter", ("key_cache: 0x%lx", (long) keycache));
+  DBUG_PRINT("enter", ("key_cache: %p",  keycache));
 
   if (!keycache->key_cache_inited)
     DBUG_VOID_RETURN;
@@ -4365,7 +4366,7 @@ int flush_simple_key_cache_blocks(SIMPLE_KEY_CACHE_CB *keycache,
 {
   int res= 0;
   DBUG_ENTER("flush_key_blocks");
-  DBUG_PRINT("enter", ("keycache: 0x%lx", (long) keycache));
+  DBUG_PRINT("enter", ("keycache: %p",  keycache));
 
   if (!keycache->key_cache_inited)
     DBUG_RETURN(0);
@@ -4794,11 +4795,11 @@ void keycache_debug_log_close(void)
 
 static int fail_block(BLOCK_LINK *block)
 {
-  F_B_PRT("block->next_used:    %lx\n", (ulong) block->next_used);
-  F_B_PRT("block->prev_used:    %lx\n", (ulong) block->prev_used);
-  F_B_PRT("block->next_changed: %lx\n", (ulong) block->next_changed);
-  F_B_PRT("block->prev_changed: %lx\n", (ulong) block->prev_changed);
-  F_B_PRT("block->hash_link:    %lx\n", (ulong) block->hash_link);
+  F_B_PRT("block->next_used:    %p\n", block->next_used);
+  F_B_PRT("block->prev_used:    %p\n", block->prev_used);
+  F_B_PRT("block->next_changed: %p\n", block->next_changed);
+  F_B_PRT("block->prev_changed: %p\n", block->prev_changed);
+  F_B_PRT("block->hash_link:    %p\n", block->hash_link);
   F_B_PRT("block->status:       %u\n", block->status);
   F_B_PRT("block->length:       %u\n", block->length);
   F_B_PRT("block->offset:       %u\n", block->offset);
@@ -4809,9 +4810,9 @@ static int fail_block(BLOCK_LINK *block)
 
 static int fail_hlink(HASH_LINK *hlink)
 {
-  F_B_PRT("hlink->next:    %lx\n", (ulong) hlink->next);
-  F_B_PRT("hlink->prev:    %lx\n", (ulong) hlink->prev);
-  F_B_PRT("hlink->block:   %lx\n", (ulong) hlink->block);
+  F_B_PRT("hlink->next:    %p\n", hlink->next);
+  F_B_PRT("hlink->prev:    %p\n", hlink->prev);
+  F_B_PRT("hlink->block:   %p\n", hlink->block);
   F_B_PRT("hlink->diskpos: %lu\n", (ulong) hlink->diskpos);
   F_B_PRT("hlink->file:    %d\n", hlink->file);
   return 0; /* Let the assert fail. */
@@ -5189,7 +5190,7 @@ int init_partitioned_key_cache(PARTITIONED_KEY_CACHE_CB *keycache,
     }
   } 
 
-  keycache->partitions= partitions= partition_ptr-keycache->partition_array;
+  keycache->partitions= partitions= (uint) (partition_ptr-keycache->partition_array);
   keycache->key_cache_mem_size= mem_per_cache * partitions;
   for (i= 0; i < (int) partitions; i++)
     keycache->partition_array[i]->hash_factor= partitions;
@@ -5357,7 +5358,7 @@ void end_partitioned_key_cache(PARTITIONED_KEY_CACHE_CB *keycache,
   uint i;
   uint partitions= keycache->partitions;
   DBUG_ENTER("partitioned_end_key_cache");
-  DBUG_PRINT("enter", ("key_cache: 0x%lx", (long) keycache));
+  DBUG_PRINT("enter", ("key_cache: %p",  keycache));
 
   for (i= 0; i < partitions; i++)
   {
@@ -5671,7 +5672,7 @@ int flush_partitioned_key_cache_blocks(PARTITIONED_KEY_CACHE_CB *keycache,
   int err= 0;
   ulonglong *dirty_part_map= (ulonglong *) file_extra;
   DBUG_ENTER("partitioned_flush_key_blocks");
-  DBUG_PRINT("enter", ("keycache: 0x%lx", (long) keycache));
+  DBUG_PRINT("enter", ("keycache: %p",  keycache));
 
   for (i= 0; i < partitions; i++)
   {

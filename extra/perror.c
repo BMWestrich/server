@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /* Return error-text for system error messages and handler messages */
 
@@ -222,7 +222,7 @@ static my_bool print_win_error_msg(DWORD error, my_bool verbose)
     will ignore calls to register already registered error numbers.
 */
 
-static const char **get_handler_error_messages()
+static const char **get_handler_error_messages(int e __attribute__((unused)))
 {
   return handler_error_messages;
 }

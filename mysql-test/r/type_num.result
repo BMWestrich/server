@@ -42,171 +42,171 @@ Note	1265	Data truncated for column 'a' at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a FLOAT);
 INSERT INTO t1 VALUES ('');
-ERROR 22007: Incorrect double value: '' for column 'a' at row 1
+ERROR 22007: Incorrect double value: '' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a DOUBLE);
 INSERT INTO t1 VALUES ('');
-ERROR 22007: Incorrect double value: '' for column 'a' at row 1
+ERROR 22007: Incorrect double value: '' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a TINYINT);
 INSERT INTO t1 VALUES ('');
-ERROR 22007: Incorrect integer value: '' for column 'a' at row 1
+ERROR 22007: Incorrect integer value: '' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a SMALLINT);
 INSERT INTO t1 VALUES ('');
-ERROR 22007: Incorrect integer value: '' for column 'a' at row 1
+ERROR 22007: Incorrect integer value: '' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a INT);
 INSERT INTO t1 VALUES ('');
-ERROR 22007: Incorrect integer value: '' for column 'a' at row 1
+ERROR 22007: Incorrect integer value: '' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a BIGINT);
 INSERT INTO t1 VALUES ('');
-ERROR 22007: Incorrect integer value: '' for column 'a' at row 1
+ERROR 22007: Incorrect integer value: '' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a DECIMAL);
 INSERT INTO t1 VALUES ('');
-ERROR 22007: Incorrect decimal value: '' for column 'a' at row 1
+ERROR 22007: Incorrect decimal value: '' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a FLOAT);
 INSERT INTO t1 VALUES ('x');
-ERROR 22007: Incorrect double value: 'x' for column 'a' at row 1
+ERROR 22007: Incorrect double value: 'x' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a DOUBLE);
 INSERT INTO t1 VALUES ('x');
-ERROR 22007: Incorrect double value: 'x' for column 'a' at row 1
+ERROR 22007: Incorrect double value: 'x' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a TINYINT);
 INSERT INTO t1 VALUES ('x');
-ERROR 22007: Incorrect integer value: 'x' for column 'a' at row 1
+ERROR 22007: Incorrect integer value: 'x' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a SMALLINT);
 INSERT INTO t1 VALUES ('x');
-ERROR 22007: Incorrect integer value: 'x' for column 'a' at row 1
+ERROR 22007: Incorrect integer value: 'x' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a INT);
 INSERT INTO t1 VALUES ('x');
-ERROR 22007: Incorrect integer value: 'x' for column 'a' at row 1
+ERROR 22007: Incorrect integer value: 'x' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a BIGINT);
 INSERT INTO t1 VALUES ('x');
-ERROR 22007: Incorrect integer value: 'x' for column 'a' at row 1
+ERROR 22007: Incorrect integer value: 'x' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a DECIMAL);
 INSERT INTO t1 VALUES ('x');
-ERROR 22007: Incorrect decimal value: 'x' for column 'a' at row 1
+ERROR 22007: Incorrect decimal value: 'x' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a FLOAT);
 INSERT INTO t1 VALUES (' x');
-ERROR 22007: Incorrect double value: ' x' for column 'a' at row 1
+ERROR 22007: Incorrect double value: ' x' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a DOUBLE);
 INSERT INTO t1 VALUES (' x');
-ERROR 22007: Incorrect double value: ' x' for column 'a' at row 1
+ERROR 22007: Incorrect double value: ' x' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a TINYINT);
 INSERT INTO t1 VALUES (' x');
-ERROR 22007: Incorrect integer value: ' x' for column 'a' at row 1
+ERROR 22007: Incorrect integer value: ' x' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a SMALLINT);
 INSERT INTO t1 VALUES (' x');
-ERROR 22007: Incorrect integer value: ' x' for column 'a' at row 1
+ERROR 22007: Incorrect integer value: ' x' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a INT);
 INSERT INTO t1 VALUES (' x');
-ERROR 22007: Incorrect integer value: ' x' for column 'a' at row 1
+ERROR 22007: Incorrect integer value: ' x' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a BIGINT);
 INSERT INTO t1 VALUES (' x');
-ERROR 22007: Incorrect integer value: ' x' for column 'a' at row 1
+ERROR 22007: Incorrect integer value: ' x' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a DECIMAL);
 INSERT INTO t1 VALUES (' x');
-ERROR 22007: Incorrect decimal value: ' x' for column 'a' at row 1
+ERROR 22007: Incorrect decimal value: ' x' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a FLOAT);
 INSERT INTO t1 VALUES ('.');
-ERROR 22007: Incorrect double value: '.' for column 'a' at row 1
+ERROR 22007: Incorrect double value: '.' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a DOUBLE);
 INSERT INTO t1 VALUES ('.');
-ERROR 22007: Incorrect double value: '.' for column 'a' at row 1
+ERROR 22007: Incorrect double value: '.' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a TINYINT);
 INSERT INTO t1 VALUES ('.');
-ERROR 22007: Incorrect integer value: '.' for column 'a' at row 1
+ERROR 22007: Incorrect integer value: '.' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a SMALLINT);
 INSERT INTO t1 VALUES ('.');
-ERROR 22007: Incorrect integer value: '.' for column 'a' at row 1
+ERROR 22007: Incorrect integer value: '.' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a INT);
 INSERT INTO t1 VALUES ('.');
-ERROR 22007: Incorrect integer value: '.' for column 'a' at row 1
+ERROR 22007: Incorrect integer value: '.' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a BIGINT);
 INSERT INTO t1 VALUES ('.');
-ERROR 22007: Incorrect integer value: '.' for column 'a' at row 1
+ERROR 22007: Incorrect integer value: '.' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a DECIMAL);
 INSERT INTO t1 VALUES ('.');
-ERROR 22007: Incorrect decimal value: '.' for column 'a' at row 1
+ERROR 22007: Incorrect decimal value: '.' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a FLOAT);
 INSERT INTO t1 VALUES ('-');
-ERROR 22007: Incorrect double value: '-' for column 'a' at row 1
+ERROR 22007: Incorrect double value: '-' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a DOUBLE);
 INSERT INTO t1 VALUES ('-');
-ERROR 22007: Incorrect double value: '-' for column 'a' at row 1
+ERROR 22007: Incorrect double value: '-' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a TINYINT);
 INSERT INTO t1 VALUES ('-');
-ERROR 22007: Incorrect integer value: '-' for column 'a' at row 1
+ERROR 22007: Incorrect integer value: '-' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a SMALLINT);
 INSERT INTO t1 VALUES ('-');
-ERROR 22007: Incorrect integer value: '-' for column 'a' at row 1
+ERROR 22007: Incorrect integer value: '-' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a INT);
 INSERT INTO t1 VALUES ('-');
-ERROR 22007: Incorrect integer value: '-' for column 'a' at row 1
+ERROR 22007: Incorrect integer value: '-' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a BIGINT);
 INSERT INTO t1 VALUES ('-');
-ERROR 22007: Incorrect integer value: '-' for column 'a' at row 1
+ERROR 22007: Incorrect integer value: '-' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a DECIMAL);
 INSERT INTO t1 VALUES ('-');
-ERROR 22007: Incorrect decimal value: '-' for column 'a' at row 1
+ERROR 22007: Incorrect decimal value: '-' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a FLOAT);
 INSERT INTO t1 VALUES ('+');
-ERROR 22007: Incorrect double value: '+' for column 'a' at row 1
+ERROR 22007: Incorrect double value: '+' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a DOUBLE);
 INSERT INTO t1 VALUES ('+');
-ERROR 22007: Incorrect double value: '+' for column 'a' at row 1
+ERROR 22007: Incorrect double value: '+' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a TINYINT);
 INSERT INTO t1 VALUES ('+');
-ERROR 22007: Incorrect integer value: '+' for column 'a' at row 1
+ERROR 22007: Incorrect integer value: '+' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a SMALLINT);
 INSERT INTO t1 VALUES ('+');
-ERROR 22007: Incorrect integer value: '+' for column 'a' at row 1
+ERROR 22007: Incorrect integer value: '+' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a INT);
 INSERT INTO t1 VALUES ('+');
-ERROR 22007: Incorrect integer value: '+' for column 'a' at row 1
+ERROR 22007: Incorrect integer value: '+' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a BIGINT);
 INSERT INTO t1 VALUES ('+');
-ERROR 22007: Incorrect integer value: '+' for column 'a' at row 1
+ERROR 22007: Incorrect integer value: '+' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a DECIMAL);
 INSERT INTO t1 VALUES ('+');
-ERROR 22007: Incorrect decimal value: '+' for column 'a' at row 1
+ERROR 22007: Incorrect decimal value: '+' for column `test`.`t1`.`a` at row 1
 DROP TABLE t1;
 CREATE TABLE t1 (a FLOAT);
 INSERT INTO t1 VALUES ('1x');
@@ -423,70 +423,61 @@ Note	1265	Data truncated for column 'i2' at row 1
 Note	1265	Data truncated for column 'i4' at row 1
 Note	1265	Data truncated for column 'i8' at row 1
 Note	1265	Data truncated for column 'd' at row 1
-INSERT INTO t1 VALUES ('','','','','','','');
+INSERT IGNORE INTO t1 VALUES ('','','','','','','');
 Warnings:
-Warning	1366	Incorrect double value: '' for column 'f4' at row 1
-Warning	1366	Incorrect double value: '' for column 'f8' at row 1
-Warning	1366	Incorrect integer value: '' for column 'i1' at row 1
-Warning	1366	Incorrect integer value: '' for column 'i2' at row 1
-Warning	1366	Incorrect integer value: '' for column 'i4' at row 1
-Warning	1366	Incorrect integer value: '' for column 'i8' at row 1
-Warning	1366	Incorrect decimal value: '' for column 'd' at row 1
-INSERT INTO t1 VALUES ('x','x','x','x','x','x','x');
+Warning	1366	Incorrect double value: '' for column `test`.`t1`.`f4` at row 1
+Warning	1366	Incorrect double value: '' for column `test`.`t1`.`f8` at row 1
+Warning	1366	Incorrect integer value: '' for column `test`.`t1`.`i1` at row 1
+Warning	1366	Incorrect integer value: '' for column `test`.`t1`.`i2` at row 1
+Warning	1366	Incorrect integer value: '' for column `test`.`t1`.`i4` at row 1
+Warning	1366	Incorrect integer value: '' for column `test`.`t1`.`i8` at row 1
+Warning	1366	Incorrect decimal value: '' for column `test`.`t1`.`d` at row 1
+INSERT IGNORE INTO t1 VALUES ('x','x','x','x','x','x','x');
 Warnings:
-Warning	1366	Incorrect double value: 'x' for column 'f4' at row 1
-Warning	1366	Incorrect double value: 'x' for column 'f8' at row 1
-Warning	1366	Incorrect integer value: 'x' for column 'i1' at row 1
-Warning	1366	Incorrect integer value: 'x' for column 'i2' at row 1
-Warning	1366	Incorrect integer value: 'x' for column 'i4' at row 1
-Warning	1366	Incorrect integer value: 'x' for column 'i8' at row 1
-Warning	1366	Incorrect decimal value: 'x' for column 'd' at row 1
-INSERT INTO t1 VALUES (' x',' x',' x',' x',' x',' x',' x');
+Warning	1366	Incorrect double value: 'x' for column `test`.`t1`.`f4` at row 1
+Warning	1366	Incorrect double value: 'x' for column `test`.`t1`.`f8` at row 1
+Warning	1366	Incorrect integer value: 'x' for column `test`.`t1`.`i1` at row 1
+Warning	1366	Incorrect integer value: 'x' for column `test`.`t1`.`i2` at row 1
+Warning	1366	Incorrect integer value: 'x' for column `test`.`t1`.`i4` at row 1
+Warning	1366	Incorrect integer value: 'x' for column `test`.`t1`.`i8` at row 1
+Warning	1366	Incorrect decimal value: 'x' for column `test`.`t1`.`d` at row 1
+INSERT IGNORE INTO t1 VALUES (' x',' x',' x',' x',' x',' x',' x');
 Warnings:
-Warning	1366	Incorrect double value: ' x' for column 'f4' at row 1
-Warning	1366	Incorrect double value: ' x' for column 'f8' at row 1
-Warning	1366	Incorrect integer value: ' x' for column 'i1' at row 1
-Warning	1366	Incorrect integer value: ' x' for column 'i2' at row 1
-Warning	1366	Incorrect integer value: ' x' for column 'i4' at row 1
-Warning	1366	Incorrect integer value: ' x' for column 'i8' at row 1
-Warning	1366	Incorrect decimal value: ' x' for column 'd' at row 1
-INSERT INTO t1 VALUES ('.','.','.','.','.','.','.');
+Warning	1366	Incorrect double value: ' x' for column `test`.`t1`.`f4` at row 1
+Warning	1366	Incorrect double value: ' x' for column `test`.`t1`.`f8` at row 1
+Warning	1366	Incorrect integer value: ' x' for column `test`.`t1`.`i1` at row 1
+Warning	1366	Incorrect integer value: ' x' for column `test`.`t1`.`i2` at row 1
+Warning	1366	Incorrect integer value: ' x' for column `test`.`t1`.`i4` at row 1
+Warning	1366	Incorrect integer value: ' x' for column `test`.`t1`.`i8` at row 1
+Warning	1366	Incorrect decimal value: ' x' for column `test`.`t1`.`d` at row 1
+INSERT IGNORE INTO t1 VALUES ('.','.','.','.','.','.','.');
 Warnings:
-Warning	1366	Incorrect double value: '.' for column 'f4' at row 1
-Warning	1366	Incorrect double value: '.' for column 'f8' at row 1
-Warning	1366	Incorrect integer value: '.' for column 'i1' at row 1
-Warning	1366	Incorrect integer value: '.' for column 'i2' at row 1
-Warning	1366	Incorrect integer value: '.' for column 'i4' at row 1
-Warning	1366	Incorrect integer value: '.' for column 'i8' at row 1
-Warning	1366	Incorrect decimal value: '.' for column 'd' at row 1
-INSERT INTO t1 VALUES ('-','-','-','-','-','-','-');
+Warning	1366	Incorrect double value: '.' for column `test`.`t1`.`f4` at row 1
+Warning	1366	Incorrect double value: '.' for column `test`.`t1`.`f8` at row 1
+Warning	1366	Incorrect integer value: '.' for column `test`.`t1`.`i1` at row 1
+Warning	1366	Incorrect integer value: '.' for column `test`.`t1`.`i2` at row 1
+Warning	1366	Incorrect integer value: '.' for column `test`.`t1`.`i4` at row 1
+Warning	1366	Incorrect integer value: '.' for column `test`.`t1`.`i8` at row 1
+Warning	1366	Incorrect decimal value: '.' for column `test`.`t1`.`d` at row 1
+INSERT IGNORE INTO t1 VALUES ('-','-','-','-','-','-','-');
 Warnings:
-Warning	1366	Incorrect double value: '-' for column 'f4' at row 1
-Warning	1366	Incorrect double value: '-' for column 'f8' at row 1
-Warning	1366	Incorrect integer value: '-' for column 'i1' at row 1
-Warning	1366	Incorrect integer value: '-' for column 'i2' at row 1
-Warning	1366	Incorrect integer value: '-' for column 'i4' at row 1
-Warning	1366	Incorrect integer value: '-' for column 'i8' at row 1
-Warning	1366	Incorrect decimal value: '-' for column 'd' at row 1
-INSERT INTO t1 VALUES ('+','+','+','+','+','+','+');
+Warning	1366	Incorrect double value: '-' for column `test`.`t1`.`f4` at row 1
+Warning	1366	Incorrect double value: '-' for column `test`.`t1`.`f8` at row 1
+Warning	1366	Incorrect integer value: '-' for column `test`.`t1`.`i1` at row 1
+Warning	1366	Incorrect integer value: '-' for column `test`.`t1`.`i2` at row 1
+Warning	1366	Incorrect integer value: '-' for column `test`.`t1`.`i4` at row 1
+Warning	1366	Incorrect integer value: '-' for column `test`.`t1`.`i8` at row 1
+Warning	1366	Incorrect decimal value: '-' for column `test`.`t1`.`d` at row 1
+INSERT IGNORE INTO t1 VALUES ('+','+','+','+','+','+','+');
 Warnings:
-Warning	1366	Incorrect double value: '+' for column 'f4' at row 1
-Warning	1366	Incorrect double value: '+' for column 'f8' at row 1
-Warning	1366	Incorrect integer value: '+' for column 'i1' at row 1
-Warning	1366	Incorrect integer value: '+' for column 'i2' at row 1
-Warning	1366	Incorrect integer value: '+' for column 'i4' at row 1
-Warning	1366	Incorrect integer value: '+' for column 'i8' at row 1
-Warning	1366	Incorrect decimal value: '+' for column 'd' at row 1
-INSERT INTO t1 VALUES ('1x','1x','1x','1x','1x','1x','1x');
-Warnings:
-Warning	1265	Data truncated for column 'f4' at row 1
-Warning	1265	Data truncated for column 'f8' at row 1
-Warning	1265	Data truncated for column 'i1' at row 1
-Warning	1265	Data truncated for column 'i2' at row 1
-Warning	1265	Data truncated for column 'i4' at row 1
-Warning	1265	Data truncated for column 'i8' at row 1
-Warning	1265	Data truncated for column 'd' at row 1
-INSERT INTO t1 VALUES ('1e','1e','1e','1e','1e','1e','1e');
+Warning	1366	Incorrect double value: '+' for column `test`.`t1`.`f4` at row 1
+Warning	1366	Incorrect double value: '+' for column `test`.`t1`.`f8` at row 1
+Warning	1366	Incorrect integer value: '+' for column `test`.`t1`.`i1` at row 1
+Warning	1366	Incorrect integer value: '+' for column `test`.`t1`.`i2` at row 1
+Warning	1366	Incorrect integer value: '+' for column `test`.`t1`.`i4` at row 1
+Warning	1366	Incorrect integer value: '+' for column `test`.`t1`.`i8` at row 1
+Warning	1366	Incorrect decimal value: '+' for column `test`.`t1`.`d` at row 1
+INSERT IGNORE INTO t1 VALUES ('1x','1x','1x','1x','1x','1x','1x');
 Warnings:
 Warning	1265	Data truncated for column 'f4' at row 1
 Warning	1265	Data truncated for column 'f8' at row 1
@@ -495,7 +486,7 @@ Warning	1265	Data truncated for column 'i2' at row 1
 Warning	1265	Data truncated for column 'i4' at row 1
 Warning	1265	Data truncated for column 'i8' at row 1
 Warning	1265	Data truncated for column 'd' at row 1
-INSERT INTO t1 VALUES ('1e-','1e-','1e-','1e-','1e-','1e-','1e-');
+INSERT IGNORE INTO t1 VALUES ('1e','1e','1e','1e','1e','1e','1e');
 Warnings:
 Warning	1265	Data truncated for column 'f4' at row 1
 Warning	1265	Data truncated for column 'f8' at row 1
@@ -504,7 +495,7 @@ Warning	1265	Data truncated for column 'i2' at row 1
 Warning	1265	Data truncated for column 'i4' at row 1
 Warning	1265	Data truncated for column 'i8' at row 1
 Warning	1265	Data truncated for column 'd' at row 1
-INSERT INTO t1 VALUES ('1E+','1E+','1E+','1E+','1E+','1E+','1E+');
+INSERT IGNORE INTO t1 VALUES ('1e-','1e-','1e-','1e-','1e-','1e-','1e-');
 Warnings:
 Warning	1265	Data truncated for column 'f4' at row 1
 Warning	1265	Data truncated for column 'f8' at row 1
@@ -513,7 +504,16 @@ Warning	1265	Data truncated for column 'i2' at row 1
 Warning	1265	Data truncated for column 'i4' at row 1
 Warning	1265	Data truncated for column 'i8' at row 1
 Warning	1265	Data truncated for column 'd' at row 1
-INSERT INTO t1 VALUES ('1e1000','1e1000','1e1000','1e1000','1e1000','1e1000','1e1000');
+INSERT IGNORE INTO t1 VALUES ('1E+','1E+','1E+','1E+','1E+','1E+','1E+');
+Warnings:
+Warning	1265	Data truncated for column 'f4' at row 1
+Warning	1265	Data truncated for column 'f8' at row 1
+Warning	1265	Data truncated for column 'i1' at row 1
+Warning	1265	Data truncated for column 'i2' at row 1
+Warning	1265	Data truncated for column 'i4' at row 1
+Warning	1265	Data truncated for column 'i8' at row 1
+Warning	1265	Data truncated for column 'd' at row 1
+INSERT IGNORE INTO t1 VALUES ('1e1000','1e1000','1e1000','1e1000','1e1000','1e1000','1e1000');
 Warnings:
 Warning	1264	Out of range value for column 'f4' at row 1
 Warning	1264	Out of range value for column 'f4' at row 1
@@ -570,7 +570,7 @@ SELECT COUNT(*) FROM t1 WHERE d='1 ';
 COUNT(*)
 2
 Warnings:
-Note	1292	Truncated incorrect DOUBLE value: '1 '
+Note	1292	Truncated incorrect DECIMAL value: '1 '
 SELECT COUNT(*) FROM t1 WHERE f4='';
 COUNT(*)
 2
@@ -605,7 +605,7 @@ SELECT COUNT(*) FROM t1 WHERE d='';
 COUNT(*)
 2
 Warnings:
-Warning	1292	Truncated incorrect DOUBLE value: ''
+Warning	1292	Truncated incorrect DECIMAL value: ''
 SELECT COUNT(*) FROM t1 WHERE f4='x';
 COUNT(*)
 2
@@ -640,7 +640,7 @@ SELECT COUNT(*) FROM t1 WHERE d='x';
 COUNT(*)
 2
 Warnings:
-Warning	1292	Truncated incorrect DOUBLE value: 'x'
+Warning	1292	Truncated incorrect DECIMAL value: 'x'
 SELECT COUNT(*) FROM t1 WHERE f4=' x';
 COUNT(*)
 2
@@ -675,7 +675,7 @@ SELECT COUNT(*) FROM t1 WHERE d=' x';
 COUNT(*)
 2
 Warnings:
-Warning	1292	Truncated incorrect DOUBLE value: ' x'
+Warning	1292	Truncated incorrect DECIMAL value: ' x'
 SELECT COUNT(*) FROM t1 WHERE f4='.';
 COUNT(*)
 2
@@ -710,7 +710,7 @@ SELECT COUNT(*) FROM t1 WHERE d='.';
 COUNT(*)
 2
 Warnings:
-Warning	1292	Truncated incorrect DOUBLE value: '.'
+Warning	1292	Truncated incorrect DECIMAL value: '.'
 SELECT COUNT(*) FROM t1 WHERE f4='-';
 COUNT(*)
 2
@@ -745,7 +745,7 @@ SELECT COUNT(*) FROM t1 WHERE d='-';
 COUNT(*)
 2
 Warnings:
-Warning	1292	Truncated incorrect DOUBLE value: '-'
+Warning	1292	Truncated incorrect DECIMAL value: '-'
 SELECT COUNT(*) FROM t1 WHERE f4='+';
 COUNT(*)
 2
@@ -780,7 +780,7 @@ SELECT COUNT(*) FROM t1 WHERE d='+';
 COUNT(*)
 2
 Warnings:
-Warning	1292	Truncated incorrect DOUBLE value: '+'
+Warning	1292	Truncated incorrect DECIMAL value: '+'
 SELECT COUNT(*) FROM t1 WHERE f4='1x';
 COUNT(*)
 2
@@ -815,7 +815,7 @@ SELECT COUNT(*) FROM t1 WHERE d='1x';
 COUNT(*)
 2
 Warnings:
-Warning	1292	Truncated incorrect DOUBLE value: '1x'
+Warning	1292	Truncated incorrect DECIMAL value: '1x'
 SELECT COUNT(*) FROM t1 WHERE f4='1e';
 COUNT(*)
 2
@@ -850,7 +850,7 @@ SELECT COUNT(*) FROM t1 WHERE d='1e';
 COUNT(*)
 2
 Warnings:
-Warning	1292	Truncated incorrect DOUBLE value: '1e'
+Warning	1292	Truncated incorrect DECIMAL value: '1e'
 SELECT COUNT(*) FROM t1 WHERE f4='1e+';
 COUNT(*)
 2
@@ -885,7 +885,7 @@ SELECT COUNT(*) FROM t1 WHERE d='1e+';
 COUNT(*)
 2
 Warnings:
-Warning	1292	Truncated incorrect DOUBLE value: '1e+'
+Warning	1292	Truncated incorrect DECIMAL value: '1e+'
 SELECT COUNT(*) FROM t1 WHERE f4='1E-';
 COUNT(*)
 2
@@ -920,7 +920,7 @@ SELECT COUNT(*) FROM t1 WHERE d='1E-';
 COUNT(*)
 2
 Warnings:
-Warning	1292	Truncated incorrect DOUBLE value: '1E-'
+Warning	1292	Truncated incorrect DECIMAL value: '1E-'
 SELECT COUNT(*) FROM t1 WHERE f4='1Ex';
 COUNT(*)
 2
@@ -955,7 +955,7 @@ SELECT COUNT(*) FROM t1 WHERE d='1Ex';
 COUNT(*)
 2
 Warnings:
-Warning	1292	Truncated incorrect DOUBLE value: '1Ex'
+Warning	1292	Truncated incorrect DECIMAL value: '1Ex'
 SELECT COUNT(*) FROM t1 WHERE f4='1e+x';
 COUNT(*)
 2
@@ -990,7 +990,7 @@ SELECT COUNT(*) FROM t1 WHERE d='1e+x';
 COUNT(*)
 2
 Warnings:
-Warning	1292	Truncated incorrect DOUBLE value: '1e+x'
+Warning	1292	Truncated incorrect DECIMAL value: '1e+x'
 SELECT COUNT(*) FROM t1 WHERE f4='1e1000';
 COUNT(*)
 0
@@ -1025,7 +1025,8 @@ SELECT COUNT(*) FROM t1 WHERE d='1e1000';
 COUNT(*)
 0
 Warnings:
-Warning	1292	Truncated incorrect DOUBLE value: '1e1000'
+Warning	1916	Got overflow when converting '' to DECIMAL. Value truncated
+Warning	1292	Truncated incorrect DECIMAL value: '1e1000'
 ALTER TABLE t1
 ADD KEY f4(f4),
 ADD KEY f8(f8),
@@ -1218,5 +1219,42 @@ Warning	1292	Truncated incorrect INTEGER value: '1E+'
 Warning	1292	Truncated incorrect DECIMAL value: '1E+'
 Warning	1292	Truncated incorrect DOUBLE value: '1E+'
 #
-# End of 10.0 tests
+# Start of 10.1 tests
 #
+#
+# MDEV-9653 Assertion `length || !scale' failed in uint my_decimal_length_to_precision(uint, uint, bool)
+#
+SELECT NULL+1 AS c0,
+COALESCE(NULL)+1 AS c2,
+COALESCE(COALESCE(NULL))+1 AS c3,
+''+1 AS c4,
+COALESCE('')+1 AS c5,
+COALESCE(COALESCE(''))+1 AS c6;
+Catalog	Database	Table	Table_alias	Column	Column_alias	Type	Length	Max length	Is_null	Flags	Decimals	Charsetnr
+def					c0	5	17	0	Y	32896	0	63
+def					c2	5	17	0	Y	32896	0	63
+def					c3	5	17	0	Y	32896	0	63
+def					c4	5	23	1	N	32897	31	63
+def					c5	5	17	1	N	32897	0	63
+def					c6	5	17	1	N	32897	0	63
+c0	c2	c3	c4	c5	c6
+NULL	NULL	NULL	1	1	1
+Warnings:
+Warning	1292	Truncated incorrect DOUBLE value: ''
+Warning	1292	Truncated incorrect DOUBLE value: ''
+Warning	1292	Truncated incorrect DOUBLE value: ''
+#
+# Start of 10.2 tests
+#
+CREATE TABLE t1 (a INT SIGNED ZEROFILL);
+ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'ZEROFILL)' at line 1
+CREATE TABLE t1 (a INT SIGNED UNSIGNED);
+ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'UNSIGNED)' at line 1
+CREATE TABLE t1 (a INT ZEROFILL UNSIGNED ZEROFILL);
+ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'ZEROFILL)' at line 1
+CREATE OR REPLACE TABLE t1 (a INT SIGNED);
+CREATE OR REPLACE TABLE t1 (a INT UNSIGNED);
+CREATE OR REPLACE TABLE t1 (a INT ZEROFILL);
+CREATE OR REPLACE TABLE t1 (a INT UNSIGNED ZEROFILL);
+CREATE OR REPLACE TABLE t1 (a INT ZEROFILL UNSIGNED);
+DROP TABLE t1;

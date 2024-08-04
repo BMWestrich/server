@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 
 #ifndef GCALC_SLICESCAN_INCLUDED
@@ -26,7 +26,7 @@
 
 #ifndef GCALC_DBUG_OFF
 #define GCALC_DBUG_PRINT(b) DBUG_PRINT("Gcalc", b)
-#define GCALC_DBUG_ENTER(a) DBUG_ENTER("Gcalc "a)
+#define GCALC_DBUG_ENTER(a) DBUG_ENTER("Gcalc " a)
 #define GCALC_DBUG_RETURN(r) DBUG_RETURN(r)
 #define GCALC_DBUG_VOID_RETURN DBUG_VOID_RETURN
 #define GCALC_DBUG_ASSERT(r) DBUG_ASSERT(r)
@@ -63,6 +63,7 @@ public:
   };
 
   Gcalc_dyn_list(size_t blk_size, size_t sizeof_item);
+  Gcalc_dyn_list(const Gcalc_dyn_list &dl);
   ~Gcalc_dyn_list();
   Item *new_item()
   {
@@ -229,6 +230,12 @@ public:
     Gcalc_dyn_list(blk_size, sizeof(Info)),
     m_hook(&m_first), m_n_points(0)
   {}
+
+  Gcalc_heap(const Gcalc_heap &gh) :
+    Gcalc_dyn_list(gh),
+    m_hook(&m_first), m_n_points(0)
+  {}
+
   void set_extent(double xmin, double xmax, double ymin, double ymax);
   Info *new_point_info(double x, double y, gcalc_shape_info shape);
   void free_point_info(Info *i, Gcalc_dyn_list::Item **i_hook);
@@ -355,9 +362,9 @@ enum Gcalc_scan_events
 
 
 /* 
-   Gcalc_scan_iterator incapsulates the slisescan algorithm.
-   It takes filled Gcalc_heap as an datasource. Then can be
-   iterated trought the vertexes and intersection points with
+   Gcalc_scan_iterator incapsulates the slicescan algorithm.
+   It takes filled Gcalc_heap as a datasource. Then can be
+   iterated through the vertexes and intersection points with
    the step() method. After the 'step()' one usually observes
    the current 'slice' to do the necessary calculations, like
    looking for intersections, calculating the area, whatever.

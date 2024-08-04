@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA */
 
 #ifndef _my_compare_h
 #define _my_compare_h
@@ -57,7 +57,7 @@ typedef struct st_HA_KEYSEG		/* Key-portion */
   uint16 language;
   uint8  type;				/* Type of key (for sort) */
   uint8  null_bit;			/* bitmask to test for NULL */
-  uint8  bit_start,bit_end;		/* if bit field */
+  uint8  bit_start;
   uint8  bit_length;                    /* Length of bit part */
 } HA_KEYSEG;
 
@@ -91,24 +91,26 @@ typedef struct st_HA_KEYSEG		/* Key-portion */
 
 #define size_to_store_key_length(length) ((length) < 255 ? 1 : 3)
 
-#define get_rec_bits(bit_ptr, bit_ofs, bit_len) \
-  (((((uint16) (bit_ptr)[1] << 8) | (uint16) (bit_ptr)[0]) >> (bit_ofs)) & \
-   ((1 << (bit_len)) - 1))
+static inline uchar get_rec_bits(const uchar *ptr, uchar ofs, uint len)
+{
+  uint16 val= ptr[0];
+  if (ofs + len > 8)
+    val|= (uint16)(ptr[1]) << 8;
+  return (val >> ofs) & ((1 << len) - 1);
+}
 
-#define set_rec_bits(bits, bit_ptr, bit_ofs, bit_len) \
-{ \
-  (bit_ptr)[0]= ((bit_ptr)[0] & ~(((1 << (bit_len)) - 1) << (bit_ofs))) | \
-                ((bits) << (bit_ofs)); \
-  if ((bit_ofs) + (bit_len) > 8) \
-    (bit_ptr)[1]= ((bit_ptr)[1] & ~((1 << ((bit_len) - 8 + (bit_ofs))) - 1)) | \
-                  ((bits) >> (8 - (bit_ofs))); \
+static inline void set_rec_bits(uint16 bits, uchar *ptr, uchar ofs, uint len)
+{
+  ptr[0]= (ptr[0] & ~(((1 << len) - 1) << ofs)) | (bits << ofs);
+  if (ofs + len > 8)
+    ptr[1]= (ptr[1] & ~((1 << (len - 8 + ofs)) - 1)) | (bits >> (8 - ofs));
 }
 
 #define clr_rec_bits(bit_ptr, bit_ofs, bit_len) \
   set_rec_bits(0, bit_ptr, bit_ofs, bit_len)
 
 extern int ha_compare_text(CHARSET_INFO *, const uchar *, uint,
-                           const uchar *, uint , my_bool, my_bool);
+                           const uchar *, uint , my_bool);
 extern int ha_key_cmp(HA_KEYSEG *keyseg, const uchar *a,
 		      const uchar *b, uint key_length, uint nextflag,
 		      uint *diff_pos);

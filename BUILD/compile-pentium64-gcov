@@ -14,7 +14,7 @@
 # 
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA
 
 path=`dirname $0`
 . "$path/SETUP.sh"
@@ -28,6 +28,6 @@ export LDFLAGS="$gcov_link_flags"
 extra_flags="$pentium64_cflags $max_cflags $gcov_compile_flags"
 c_warnings="$c_warnings $debug_extra_warnings"
 cxx_warnings="$cxx_warnings $debug_extra_warnings"
-extra_configs="$pentium_configs $debug_configs $gcov_configs $max_configs --with-zlib-dir=bundled"
+extra_configs="$pentium_configs $debug_configs $gcov_configs $max_configs --without-oqgraph"
 
 . "$path/FINISH.sh"

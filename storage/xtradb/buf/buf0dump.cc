@@ -1,6 +1,7 @@
 /*****************************************************************************
 
-Copyright (c) 2011, 2012, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2011, 2017, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2017, 2020, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +13,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -40,6 +41,8 @@ Created April 08, 2011 Vasil Dimov
 #include "sync0rw.h" /* rw_lock_s_lock() */
 #include "ut0byte.h" /* ut_ull_create() */
 #include "ut0sort.h" /* UT_SORT_FUNCTION_BODY */
+#include "mysql/service_wsrep.h" /* wsrep_recovery */
+#include <my_service_manager.h>
 
 enum status_severity {
 	STATUS_INFO,
@@ -52,8 +55,8 @@ enum status_severity {
 
 /* Flags that tell the buffer pool dump/load thread which action should it
 take after being waked up. */
-static ibool	buf_dump_should_start = FALSE;
-static ibool	buf_load_should_start = FALSE;
+static volatile bool	buf_dump_should_start;
+static volatile bool	buf_load_should_start;
 
 static ibool	buf_load_abort_flag = FALSE;
 
@@ -78,7 +81,7 @@ void
 buf_dump_start()
 /*============*/
 {
-	buf_dump_should_start = TRUE;
+	buf_dump_should_start = true;
 	os_event_set(srv_buf_dump_event);
 }
 
@@ -92,7 +95,7 @@ void
 buf_load_start()
 /*============*/
 {
-	buf_load_should_start = TRUE;
+	buf_load_should_start = true;
 	os_event_set(srv_buf_dump_event);
 }
 
@@ -105,7 +108,7 @@ SELECT variable_value FROM information_schema.global_status WHERE
 variable_name = 'INNODB_BUFFER_POOL_DUMP_STATUS';
 or by:
 SHOW STATUS LIKE 'innodb_buffer_pool_dump_status'; */
-static __attribute__((nonnull, format(printf, 2, 3)))
+static MY_ATTRIBUTE((nonnull, format(printf, 2, 3)))
 void
 buf_dump_status(
 /*============*/
@@ -137,7 +140,7 @@ SELECT variable_value FROM information_schema.global_status WHERE
 variable_name = 'INNODB_BUFFER_POOL_LOAD_STATUS';
 or by:
 SHOW STATUS LIKE 'innodb_buffer_pool_load_status'; */
-static __attribute__((nonnull, format(printf, 2, 3)))
+static MY_ATTRIBUTE((nonnull, format(printf, 2, 3)))
 void
 buf_load_status(
 /*============*/
@@ -163,6 +166,25 @@ buf_load_status(
 	va_end(ap);
 }
 
+/** Returns the directory path where the buffer pool dump file will be created.
+@return directory path */
+static
+const char*
+get_buf_dump_dir()
+{
+	const char*	dump_dir;
+
+	/* The dump file should be created in the default data directory if
+	innodb_data_home_dir is set as an empty string. */
+	if (!*srv_data_home) {
+		dump_dir = fil_path_to_mysql_datadir;
+	} else {
+		dump_dir = srv_data_home;
+	}
+
+	return(dump_dir);
+}
+
 /*****************************************************************//**
 Perform a buffer pool dump into the file specified by
 innodb_buffer_pool_filename. If any errors occur then the value of
@@ -178,24 +200,40 @@ buf_dump(
 {
 #define SHOULD_QUIT()	(SHUTTING_DOWN() && obey_shutdown)
 
+	static const char format_name[]= "%s.incomplete";
 	char	full_filename[OS_FILE_MAX_PATH];
-	char	tmp_filename[OS_FILE_MAX_PATH];
+	char	tmp_filename[OS_FILE_MAX_PATH + sizeof(format_name)];
 	char	now[32];
 	FILE*	f;
 	ulint	i;
 	int	ret;
 
+	mysql_mutex_lock(&LOCK_global_system_variables);
 	ut_snprintf(full_filename, sizeof(full_filename),
-		    "%s%c%s", srv_data_home, SRV_PATH_SEPARATOR,
+		    "%s%c%s", get_buf_dump_dir(), SRV_PATH_SEPARATOR,
 		    srv_buf_dump_filename);
+	mysql_mutex_unlock(&LOCK_global_system_variables);
 
 	ut_snprintf(tmp_filename, sizeof(tmp_filename),
-		    "%s.incomplete", full_filename);
+		    format_name, full_filename);
 
 	buf_dump_status(STATUS_NOTICE, "Dumping buffer pool(s) to %s",
 			full_filename);
 
-	f = fopen(tmp_filename, "w");
+#if defined(__GLIBC__) || defined(__WIN__) || O_CLOEXEC == 0
+	f = fopen(tmp_filename, "w" STR_O_CLOEXEC);
+#else
+	{
+		int	fd;
+		fd = open(tmp_filename, O_CREAT | O_TRUNC | O_CLOEXEC | O_WRONLY, 0640);
+		if (fd >= 0) {
+			f = fdopen(fd, "w");
+		}
+		else {
+			f = NULL;
+		}
+	}
+#endif
 	if (f == NULL) {
 		buf_dump_status(STATUS_ERR,
 				"Cannot open '%s' for writing: %s",
@@ -293,6 +331,14 @@ buf_dump(
 				counter = 0;
 				buf_dump_status(
 					STATUS_INFO,
+					"Dumping buffer pool "
+					ULINTPF "/" ULINTPF ", "
+					"page " ULINTPF "/" ULINTPF,
+					i + 1, srv_buf_pool_instances,
+					j + 1, n_pages);
+			}
+			if (SHUTTING_DOWN() && !(j % 1024)) {
+				service_manager_extend_timeout(INNODB_EXTEND_TIMEOUT_INTERVAL,
 					"Dumping buffer pool "
 					ULINTPF "/" ULINTPF ", "
 					"page " ULINTPF "/" ULINTPF,
@@ -470,9 +516,11 @@ buf_load()
 	/* Ignore any leftovers from before */
 	buf_load_abort_flag = FALSE;
 
+	mysql_mutex_lock(&LOCK_global_system_variables);
 	ut_snprintf(full_filename, sizeof(full_filename),
-		    "%s%c%s", srv_data_home, SRV_PATH_SEPARATOR,
+		    "%s%c%s", get_buf_dump_dir(), SRV_PATH_SEPARATOR,
 		    srv_buf_dump_filename);
+	mysql_mutex_unlock(&LOCK_global_system_variables);
 
 	buf_load_status(STATUS_NOTICE,
 			"Loading buffer pool(s) from %s", full_filename);
@@ -592,6 +640,7 @@ buf_load()
 
 	if (dump_n == 0) {
 		ut_free(dump);
+		ut_free(dump_tmp);
 		ut_sprintf_timestamp(now);
 		buf_load_status(STATUS_NOTICE,
 				"Buffer pool(s) load completed at %s "
@@ -663,20 +712,22 @@ again.
 @return this function does not return, it calls os_thread_exit() */
 extern "C" UNIV_INTERN
 os_thread_ret_t
-DECLARE_THREAD(buf_dump_thread)(
-/*============================*/
-	void*	arg __attribute__((unused)))	/*!< in: a dummy parameter
-						required by os_thread_create */
+DECLARE_THREAD(buf_dump_thread)(void*)
 {
+	my_thread_init();
 	ut_ad(!srv_read_only_mode);
-
-	srv_buf_dump_thread_active = TRUE;
 
 	buf_dump_status(STATUS_INFO, "Dumping buffer pool(s) not yet started");
 	buf_load_status(STATUS_INFO, "Loading buffer pool(s) not yet started");
 
 	if (srv_buffer_pool_load_at_startup) {
+#ifdef WITH_WSREP
+		if (!wsrep_recovery) {
+#endif /* WITH_WSREP */
 		buf_load();
+#ifdef WITH_WSREP
+                }
+#endif /* WITH_WSREP */
 	}
 
 	while (!SHUTTING_DOWN()) {
@@ -684,25 +735,35 @@ DECLARE_THREAD(buf_dump_thread)(
 		os_event_wait(srv_buf_dump_event);
 
 		if (buf_dump_should_start) {
-			buf_dump_should_start = FALSE;
+			buf_dump_should_start = false;
 			buf_dump(TRUE /* quit on shutdown */);
 		}
 
 		if (buf_load_should_start) {
-			buf_load_should_start = FALSE;
+			buf_load_should_start = false;
 			buf_load();
 		}
 
+		if (buf_dump_should_start || buf_load_should_start) {
+			continue;
+		}
 		os_event_reset(srv_buf_dump_event);
 	}
 
 	if (srv_buffer_pool_dump_at_shutdown && srv_fast_shutdown != 2) {
+#ifdef WITH_WSREP
+		if (!wsrep_recovery) {
+#endif /* WITH_WSREP */
 		buf_dump(FALSE /* ignore shutdown down flag,
 		keep going even if we are in a shutdown state */);
+#ifdef WITH_WSREP
+		}
+#endif /* WITH_WSREP */
 	}
 
-	srv_buf_dump_thread_active = FALSE;
+	srv_buf_dump_thread_active = false;
 
+	my_thread_end();
 	/* We count the number of threads in os_thread_exit(). A created
 	thread should always use that to exit and not use return() to exit. */
 	os_thread_exit(NULL);

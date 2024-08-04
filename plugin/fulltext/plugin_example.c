@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335  USA */
 
 #include <stdlib.h>
 #include <ctype.h>
@@ -150,7 +150,7 @@ static void add_word(MYSQL_FTPARSER_PARAM *param, const char *word, size_t len)
   MYSQL_FTPARSER_BOOLEAN_INFO bool_info=
     { FT_TOKEN_WORD, 0, 0, 0, 0, ' ', 0 };
 
-  param->mysql_add_word(param, word, len, &bool_info);
+  param->mysql_add_word(param, word, (int)len, &bool_info);
 }
 
 /*

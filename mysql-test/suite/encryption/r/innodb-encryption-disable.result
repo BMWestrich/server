@@ -1,12 +1,8 @@
-SET GLOBAL innodb_file_format = `Barracuda`;
-SET GLOBAL innodb_file_per_table = ON;
-call mtr.add_suppression("InnoDB: Block in space_id .* in file test/.* encrypted");
-call mtr.add_suppression("InnoDB: However key management plugin or used key_id 1 is not found or used encryption algorithm or method does not match.");
-call mtr.add_suppression("InnoDB: Marking tablespace as missing. You may drop this table or install correct key management plugin and key file.");
-call mtr.add_suppression(".*InnoDB: Cannot open table test/.* from the internal data dictionary of InnoDB though the .frm file for the table exists. See .* for how you can resolve the problem.");
-call mtr.add_suppression("InnoDB: .ibd file is missing for table test/.*");
-call mtr.add_suppression("Couldn't load plugins from 'file_key_management*");
-call mtr.add_suppression("InnoDB: Tablespace id.* is encrypted but encryption service or used key_id .* is not available. Can't continue opening tablespace.");
+call mtr.add_suppression("InnoDB: The page \\[page id: space=[1-9][0-9]*, page number=[1-9][0-9]*\\] in file '.*test.t[15]\\.ibd' cannot be decrypted\\.");
+call mtr.add_suppression("failed to read or decrypt \\[page id: space=[1-9][0-9]*, page number=[1-9][0-9]*\\]");
+call mtr.add_suppression("InnoDB: Encrypted page \\[page id: space=[1-9][0-9]*, page number=3\\] in file .*test.t[15].ibd looks corrupted; key_version=1");
+call mtr.add_suppression("InnoDB: Table `test`\\.`t[15]` is corrupted");
+call mtr.add_suppression("Couldn't load plugins from 'file_key_management");
 create table t5 (
 `intcol1` int(32) DEFAULT NULL,
 `intcol2` int(32) DEFAULT NULL,
@@ -25,8 +21,8 @@ CREATE TABLE `t1` (
 insert into t1 values (1,2,'maria','db','encryption');
 alter table t1 encrypted='yes' `encryption_key_id`=1;
 select * from t1;
-ERROR HY000: Got error 192 'Table encrypted but decryption failed. This could be because correct encryption management plugin is not loaded, used encryption key is not available or encryption method does not match.' from InnoDB
+ERROR 42S02: Table 'test.t1' doesn't exist in engine
 select * from t5;
-ERROR HY000: Got error 192 'Table encrypted but decryption failed. This could be because correct encryption management plugin is not loaded, used encryption key is not available or encryption method does not match.' from InnoDB
+ERROR 42S02: Table 'test.t5' doesn't exist in engine
 drop table t1;
 drop table t5;

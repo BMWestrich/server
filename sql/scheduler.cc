@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /*
   Implementation for the thread scheduler
@@ -36,7 +36,10 @@
 static bool no_threads_end(THD *thd, bool put_in_cache)
 {
   if (thd)
+  {
     unlink_thd(thd);
+    delete thd;
+  }
   return 1;                                     // Abort handle_one_connection
 }
 

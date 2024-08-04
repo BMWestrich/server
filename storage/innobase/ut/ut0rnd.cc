@@ -1,6 +1,7 @@
 /*****************************************************************************
 
-Copyright (c) 1994, 2009, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1994, 2016, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2019, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +13,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -25,9 +26,8 @@ Created 5/11/1994 Heikki Tuuri
 
 #include "ut0rnd.h"
 
-#ifdef UNIV_NONINL
-#include "ut0rnd.ic"
-#endif
+/** Seed value of ut_rnd_gen() */
+int32 ut_rnd_current;
 
 /** These random numbers are used in ut_find_prime */
 /*@{*/
@@ -36,14 +36,10 @@ Created 5/11/1994 Heikki Tuuri
 #define UT_RANDOM_3	1.0132677
 /*@}*/
 
-/** Seed value of ut_rnd_gen_ulint(). */
-UNIV_INTERN ulint	ut_rnd_ulint_counter = 65654363;
-
 /***********************************************************//**
 Looks for a prime number slightly greater than the given argument.
 The prime is chosen so that it is not near any power of 2.
-@return	prime */
-UNIV_INTERN
+@return prime */
 ulint
 ut_find_prime(
 /*==========*/

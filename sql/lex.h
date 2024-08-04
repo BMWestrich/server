@@ -15,7 +15,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 
 /* This file includes all reserved words and functions */
@@ -23,7 +23,7 @@
 #include "lex_symbol.h"
 
 SYM_GROUP sym_group_common= {"", ""};
-SYM_GROUP sym_group_geom= {"Spatial extentions", "HAVE_SPATIAL"};
+SYM_GROUP sym_group_geom= {"Spatial extensions", "HAVE_SPATIAL"};
 SYM_GROUP sym_group_rtree= {"RTree keys", "HAVE_RTREE_KEYS"};
 
 /* We don't want to include sql_yacc.h into gen_lex_hash */
@@ -45,14 +45,11 @@ SYM_GROUP sym_group_rtree= {"RTree keys", "HAVE_RTREE_KEYS"};
   lists
 */
 
-static SYMBOL symbols[] = {
+SYMBOL symbols[] = {
   { "&&",		SYM(AND_AND_SYM)},
-  { "<",		SYM(LT)},
   { "<=",		SYM(LE)},
   { "<>",		SYM(NE)},
   { "!=",		SYM(NE)},
-  { "=",		SYM(EQ)},
-  { ">",		SYM(GT_SYM)},
   { ">=",		SYM(GE)},
   { "<<",		SYM(SHIFT_LEFT)},
   { ">>",		SYM(SHIFT_RIGHT)},
@@ -182,6 +179,7 @@ static SYMBOL symbols[] = {
   { "DELAYED",		SYM(DELAYED_SYM)},
   { "DELAY_KEY_WRITE",	SYM(DELAY_KEY_WRITE_SYM)},
   { "DELETE",		SYM(DELETE_SYM)},
+  { "DELETE_DOMAIN_ID", SYM(DELETE_DOMAIN_ID_SYM)},
   { "DESC",		SYM(DESC)},
   { "DESCRIBE",		SYM(DESCRIBE)},
   { "DES_KEY_FILE",	SYM(DES_KEY_FILE)},
@@ -221,6 +219,7 @@ static SYMBOL symbols[] = {
   { "EVERY",		SYM(EVERY_SYM)},
   { "EXAMINED",         SYM(EXAMINED_SYM)},
   { "EXCHANGE",         SYM(EXCHANGE_SYM)},
+  { "EXCLUDE",          SYM(EXCLUDE_SYM)},
   { "EXECUTE",		SYM(EXECUTE_SYM)},
   { "EXISTS",		SYM(EXISTS)},
   { "EXIT",             SYM(EXIT_SYM)},
@@ -241,6 +240,8 @@ static SYMBOL symbols[] = {
   { "FLOAT4",		SYM(FLOAT_SYM)},
   { "FLOAT8",		SYM(DOUBLE_SYM)},
   { "FLUSH",		SYM(FLUSH_SYM)},
+  { "FOLLOWING",        SYM(FOLLOWING_SYM)},
+  { "FOLLOWS",          SYM(FOLLOWS_SYM)},
   { "FOR",		SYM(FOR_SYM)},
   { "FORCE",		SYM(FORCE_SYM)},
   { "FOREIGN",		SYM(FOREIGN)},
@@ -278,6 +279,7 @@ static SYMBOL symbols[] = {
   { "IGNORE",		SYM(IGNORE_SYM)},
   { "IGNORE_DOMAIN_IDS", SYM(IGNORE_DOMAIN_IDS_SYM)},
   { "IGNORE_SERVER_IDS", SYM(IGNORE_SERVER_IDS_SYM)},
+  { "IMMEDIATE",	SYM(IMMEDIATE_SYM)},
   { "IMPORT",		SYM(IMPORT)},
   { "IN",		SYM(IN_SYM)},
   { "INDEX",		SYM(INDEX_SYM)},
@@ -308,6 +310,7 @@ static SYMBOL symbols[] = {
   { "ITERATE",          SYM(ITERATE_SYM)},
   { "INVOKER",          SYM(INVOKER_SYM)},
   { "JOIN",		SYM(JOIN_SYM)},
+  { "JSON",		SYM(JSON_SYM)},
   { "KEY",		SYM(KEY_SYM)},
   { "KEYS",		SYM(KEYS)},
   { "KEY_BLOCK_SIZE",	SYM(KEY_BLOCK_SIZE)},
@@ -342,6 +345,7 @@ static SYMBOL symbols[] = {
   { "LOW_PRIORITY",	SYM(LOW_PRIORITY)},
   { "MASTER",           SYM(MASTER_SYM)},
   { "MASTER_CONNECT_RETRY",           SYM(MASTER_CONNECT_RETRY_SYM)},
+  { "MASTER_DELAY",     SYM(MASTER_DELAY_SYM)},
   { "MASTER_GTID_POS",  SYM(MASTER_GTID_POS_SYM)},
   { "MASTER_HOST",           SYM(MASTER_HOST_SYM)},
   { "MASTER_LOG_FILE",           SYM(MASTER_LOG_FILE_SYM)},
@@ -425,9 +429,11 @@ static SYMBOL symbols[] = {
   { "OPTIONALLY",	SYM(OPTIONALLY)},
   { "OR",		SYM(OR_SYM)},
   { "ORDER",		SYM(ORDER_SYM)},
+  { "OTHERS",           SYM(OTHERS_SYM)},
   { "OUT",              SYM(OUT_SYM)},
   { "OUTER",		SYM(OUTER)},
   { "OUTFILE",		SYM(OUTFILE)},
+  { "OVER",             SYM(OVER_SYM)},
   { "OWNER",		SYM(OWNER_SYM)},
   { "PACK_KEYS",	SYM(PACK_KEYS_SYM)},
   { "PAGE",	        SYM(PAGE_SYM)},
@@ -446,6 +452,8 @@ static SYMBOL symbols[] = {
   { "POINT",		SYM(POINT_SYM)},
   { "POLYGON",		SYM(POLYGON)},
   { "PORT",		SYM(PORT_SYM)},
+  { "PRECEDES",         SYM(PRECEDES_SYM)},
+  { "PRECEDING",        SYM(PRECEDING_SYM)},
   { "PRECISION",	SYM(PRECISION)},
   { "PREPARE",          SYM(PREPARE_SYM)},
   { "PRESERVE",		SYM(PRESERVE_SYM)},
@@ -470,6 +478,7 @@ static SYMBOL symbols[] = {
   { "REAL",		SYM(REAL)},
   { "REBUILD",		SYM(REBUILD_SYM)},
   { "RECOVER",          SYM(RECOVER_SYM)},
+  { "RECURSIVE",        SYM(RECURSIVE_SYM)},
   { "REDO_BUFFER_SIZE",	SYM(REDO_BUFFER_SIZE_SYM)},
   { "REDOFILE",         SYM(REDOFILE_SYM)},
   { "REDUNDANT",	SYM(REDUNDANT_SYM)},
@@ -509,8 +518,8 @@ static SYMBOL symbols[] = {
   { "ROLLUP",		SYM(ROLLUP_SYM)},
   { "ROUTINE",		SYM(ROUTINE_SYM)},
   { "ROW",		SYM(ROW_SYM)},
-  { "ROW_COUNT",        SYM(ROW_COUNT_SYM)},
   { "ROWS",		SYM(ROWS_SYM)},
+  { "ROW_COUNT",        SYM(ROW_COUNT_SYM)},
   { "ROW_FORMAT",	SYM(ROW_FORMAT_SYM)},
   { "RTREE",		SYM(RTREE_SYM)},
   { "SAVEPOINT",	SYM(SAVEPOINT_SYM)},
@@ -546,7 +555,8 @@ static SYMBOL symbols[] = {
   { "SOME",             SYM(ANY_SYM)},
   { "SONAME",		SYM(SONAME_SYM)},
   { "SOUNDS",		SYM(SOUNDS_SYM)},
-  { "SOURCE",   SYM(SOURCE_SYM)},
+  { "SOURCE",           SYM(SOURCE_SYM)},
+  { "STORED",           SYM(STORED_SYM)},
   { "SPATIAL",		SYM(SPATIAL_SYM)},
   { "SPECIFIC",         SYM(SPECIFIC_SYM)},
   { "REF_SYSTEM_ID",    SYM(REF_SYSTEM_ID_SYM)},
@@ -601,6 +611,7 @@ static SYMBOL symbols[] = {
   { "TEXT",		SYM(TEXT_SYM)},
   { "THAN",             SYM(THAN_SYM)},
   { "THEN",		SYM(THEN_SYM)},
+  { "TIES",             SYM(TIES_SYM)},
   { "TIME",		SYM(TIME_SYM)},
   { "TIMESTAMP",	SYM(TIMESTAMP)},
   { "TIMESTAMPADD",     SYM(TIMESTAMP_ADD)},
@@ -618,6 +629,7 @@ static SYMBOL symbols[] = {
   { "TRUNCATE",		SYM(TRUNCATE_SYM)},
   { "TYPE",		SYM(TYPE_SYM)},
   { "TYPES",		SYM(TYPES_SYM)},
+  { "UNBOUNDED",        SYM(UNBOUNDED_SYM)},
   { "UNCOMMITTED",	SYM(UNCOMMITTED_SYM)},
   { "UNDEFINED",	SYM(UNDEFINED_SYM)},
   { "UNDO_BUFFER_SIZE",	SYM(UNDO_BUFFER_SIZE_SYM)},
@@ -635,7 +647,7 @@ static SYMBOL symbols[] = {
   { "UPGRADE",          SYM(UPGRADE_SYM)},
   { "USAGE",		SYM(USAGE)},
   { "USE",		SYM(USE_SYM)},
-  { "USER",		SYM(USER)},
+  { "USER",		SYM(USER_SYM)},
   { "USER_RESOURCES",	SYM(RESOURCES)},
   { "USE_FRM",		SYM(USE_FRM)},
   { "USING",		SYM(USING)},
@@ -659,6 +671,7 @@ static SYMBOL symbols[] = {
   { "WHEN",		SYM(WHEN_SYM)},
   { "WHERE",		SYM(WHERE)},
   { "WHILE",            SYM(WHILE_SYM)},
+  { "WINDOW",           SYM(WINDOW_SYM)}, 
   { "WITH",		SYM(WITH)},
   { "WORK",		SYM(WORK_SYM)},
   { "WRAPPER",		SYM(WRAPPER_SYM)},
@@ -674,25 +687,35 @@ static SYMBOL symbols[] = {
 };
 
 
-static SYMBOL sql_functions[] = {
+SYMBOL sql_functions[] = {
   { "ADDDATE",		SYM(ADDDATE_SYM)},
   { "BIT_AND",		SYM(BIT_AND)},
   { "BIT_OR",		SYM(BIT_OR)},
   { "BIT_XOR",		SYM(BIT_XOR)},
   { "CAST",		SYM(CAST_SYM)},
   { "COUNT",		SYM(COUNT_SYM)},
+  { "CUME_DIST",        SYM(CUME_DIST_SYM)},
   { "CURDATE",		SYM(CURDATE)},
   { "CURTIME",		SYM(CURTIME)},
   { "DATE_ADD",		SYM(DATE_ADD_INTERVAL)},
   { "DATE_SUB",		SYM(DATE_SUB_INTERVAL)},
+  { "DENSE_RANK",       SYM(DENSE_RANK_SYM)},
   { "EXTRACT",		SYM(EXTRACT_SYM)},
+  { "FIRST_VALUE",      SYM(FIRST_VALUE_SYM)},
   { "GROUP_CONCAT",	SYM(GROUP_CONCAT_SYM)},
+  { "LAG",              SYM(LAG_SYM)},
+  { "LEAD",             SYM(LEAD_SYM)},
   { "MAX",		SYM(MAX_SYM)},
   { "MID",		SYM(SUBSTRING)},	/* unireg function */
   { "MIN",		SYM(MIN_SYM)},
   { "NOW",		SYM(NOW_SYM)},
+  { "NTH_VALUE",        SYM(NTH_VALUE_SYM)},
+  { "NTILE",            SYM(NTILE_SYM)},
   { "POSITION",		SYM(POSITION_SYM)},
-  { "SESSION_USER",     SYM(USER)},
+  { "PERCENT_RANK",     SYM(PERCENT_RANK_SYM)},
+  { "RANK",             SYM(RANK_SYM)},
+  { "ROW_NUMBER",       SYM(ROW_NUMBER_SYM)},
+  { "SESSION_USER",     SYM(USER_SYM)},
   { "STD",		SYM(STD_SYM)},
   { "STDDEV",		SYM(STD_SYM)},
   { "STDDEV_POP",	SYM(STD_SYM)},
@@ -702,11 +725,14 @@ static SYMBOL sql_functions[] = {
   { "SUBSTRING",	SYM(SUBSTRING)},
   { "SUM",		SYM(SUM_SYM)},
   { "SYSDATE",		SYM(SYSDATE)},
-  { "SYSTEM_USER",      SYM(USER)},
+  { "SYSTEM_USER",      SYM(USER_SYM)},
   { "TRIM",		SYM(TRIM)},
   { "VARIANCE",		SYM(VARIANCE_SYM)},
   { "VAR_POP",		SYM(VARIANCE_SYM)},
   { "VAR_SAMP",		SYM(VAR_SAMP_SYM)},
 };
+
+size_t symbols_length= sizeof(symbols) / sizeof(SYMBOL);
+size_t sql_functions_length= sizeof(sql_functions) / sizeof(SYMBOL);
 
 #endif /* LEX_INCLUDED */

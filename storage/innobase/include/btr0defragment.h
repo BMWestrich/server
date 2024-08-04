@@ -1,7 +1,7 @@
 /*****************************************************************************
 
 Copyright (C) 2013, 2014 Facebook, Inc. All Rights Reserved.
-Copyright (C) 2014, 2015, MariaDB Corporation.
+Copyright (C) 2014, 2017, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -13,16 +13,12 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
 #ifndef btr0defragment_h
 #define btr0defragment_h
-
-#include "univ.i"
-
-#ifndef UNIV_HOTBACKUP
 
 #include "btr0pcur.h"
 
@@ -68,8 +64,6 @@ is a synchronized defragmentation. */
 os_event_t
 btr_defragment_add_index(
 	dict_index_t*	index,	/*!< index to be added  */
-	bool		async,	/*!< whether this is an async
-				defragmentation */
 	dberr_t*	err);	/*!< out: error code */
 /******************************************************************//**
 When table is dropped, this function is called to mark a table as removed in
@@ -89,16 +83,13 @@ UNIV_INTERN
 void
 btr_defragment_save_defrag_stats_if_needed(
 	dict_index_t*	index);	/*!< in: index */
-/******************************************************************//**
-Thread that merges consecutive b-tree pages into fewer pages to defragment
-the index. */
+
+/** Merge consecutive b-tree pages into fewer pages to defragment indexes */
 extern "C" UNIV_INTERN
 os_thread_ret_t
-DECLARE_THREAD(btr_defragment_thread)(
-/*==========================================*/
-	void*	arg);		/*!< in: a dummy parameter required by
-				os_thread_create */
+DECLARE_THREAD(btr_defragment_thread)(void*);
 
+/** Whether btr_defragment_thread is active */
+extern bool btr_defragment_thread_active;
 
-#endif /* !UNIV_HOTBACKUP */
 #endif

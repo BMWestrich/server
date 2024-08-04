@@ -1,5 +1,5 @@
 /* Copyright (c) 2005, 2012, Oracle and/or its affiliates.
-   Copyright (c) 2009, 2012, Monty Program Ab
+   Copyright (c) 2009, 2017, MariaDB Corporation.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #ifndef _sql_plugin_h
 #define _sql_plugin_h
@@ -22,9 +22,10 @@
   that is defined in plugin.h
 */
 #define SHOW_always_last SHOW_KEY_CACHE_LONG, \
-            SHOW_LONG_STATUS, SHOW_DOUBLE_STATUS, \
             SHOW_HAVE, SHOW_MY_BOOL, SHOW_HA_ROWS, SHOW_SYS, \
-            SHOW_LONG_NOFLUSH, SHOW_LONGLONG_STATUS, SHOW_LEX_STRING
+            SHOW_LONG_NOFLUSH, SHOW_LEX_STRING, \
+      /* SHOW_*_STATUS must be at the end, SHOW_LONG_STATUS being first */ \
+            SHOW_LONG_STATUS, SHOW_DOUBLE_STATUS, SHOW_LONGLONG_STATUS
 #include <my_global.h>
 #undef SHOW_always_last
 
@@ -37,6 +38,7 @@ enum enum_plugin_load_option { PLUGIN_OFF, PLUGIN_ON, PLUGIN_FORCE,
   PLUGIN_FORCE_PLUS_PERMANENT };
 extern const char *global_plugin_typelib_names[];
 
+extern volatile int global_plugin_version;
 extern ulong dlopen_count;
 
 #include <my_sys.h>
@@ -53,9 +55,9 @@ extern ulong dlopen_count;
 /*
   the following flags are valid for plugin_init()
 */
-#define PLUGIN_INIT_SKIP_DYNAMIC_LOADING 1
-#define PLUGIN_INIT_SKIP_PLUGIN_TABLE    2
-#define PLUGIN_INIT_SKIP_INITIALIZATION  4
+#define PLUGIN_INIT_SKIP_DYNAMIC_LOADING 1U
+#define PLUGIN_INIT_SKIP_PLUGIN_TABLE    2U
+#define PLUGIN_INIT_SKIP_INITIALIZATION  4U
 
 #define INITIAL_LEX_PLUGIN_LIST_SIZE    16
 
@@ -71,12 +73,12 @@ typedef struct st_mysql_show_var SHOW_VAR;
   It's a bitmap, because it makes it easier to test
   "whether the state is one of those..."
 */
-#define PLUGIN_IS_FREED         1
-#define PLUGIN_IS_DELETED       2
-#define PLUGIN_IS_UNINITIALIZED 4
-#define PLUGIN_IS_READY         8
-#define PLUGIN_IS_DYING         16
-#define PLUGIN_IS_DISABLED      32
+#define PLUGIN_IS_FREED         1U
+#define PLUGIN_IS_DELETED       2U
+#define PLUGIN_IS_UNINITIALIZED 4U
+#define PLUGIN_IS_READY         8U
+#define PLUGIN_IS_DYING         16U
+#define PLUGIN_IS_DISABLED      32U
 
 struct st_ptr_backup {
   void **ptr;
@@ -120,6 +122,8 @@ struct st_plugin_int
 };
 
 
+extern mysql_mutex_t LOCK_plugin;
+
 /*
   See intern_plugin_lock() for the explanation for the
   conditionally defined plugin_ref type
@@ -152,7 +156,7 @@ typedef int (*plugin_type_init)(struct st_plugin_int *);
 
 extern I_List<i_string> *opt_plugin_load_list_ptr;
 extern char *opt_plugin_dir_ptr;
-extern char opt_plugin_dir[FN_REFLEN];
+extern MYSQL_PLUGIN_IMPORT char opt_plugin_dir[FN_REFLEN];
 extern const LEX_STRING plugin_type_names[];
 extern ulong plugin_maturity;
 extern TYPELIB plugin_maturity_values;
@@ -180,6 +184,7 @@ sys_var *find_plugin_sysvar(st_plugin_int *plugin, st_mysql_sys_var *var);
 void plugin_opt_set_limits(struct my_option *, const struct st_mysql_sys_var *);
 extern SHOW_COMP_OPTION plugin_status(const char *name, size_t len, int type);
 extern bool check_valid_path(const char *path, size_t length);
+extern void plugin_mutex_init();
 
 typedef my_bool (plugin_foreach_func)(THD *thd,
                                       plugin_ref plugin,
@@ -187,7 +192,19 @@ typedef my_bool (plugin_foreach_func)(THD *thd,
 #define plugin_foreach(A,B,C,D) plugin_foreach_with_mask(A,B,C,PLUGIN_IS_READY,D)
 extern bool plugin_foreach_with_mask(THD *thd, plugin_foreach_func *func,
                                      int type, uint state_mask, void *arg);
+extern void sync_dynamic_session_variables(THD* thd, bool global_lock);
+
 extern bool plugin_dl_foreach(THD *thd, const LEX_STRING *dl,
                               plugin_foreach_func *func, void *arg);
 
+sys_var *find_sys_var_ex(THD *thd, const char *str, size_t length,
+                         bool throw_error, bool locked);
+
+extern void sync_dynamic_session_variables(THD* thd, bool global_lock);
 #endif
+
+#ifdef WITH_WSREP
+extern void wsrep_plugins_pre_init();
+extern void wsrep_plugins_post_init();
+#endif /* WITH_WSREP */
+

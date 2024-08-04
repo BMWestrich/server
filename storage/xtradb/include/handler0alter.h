@@ -1,6 +1,7 @@
 /*****************************************************************************
 
-Copyright (c) 2005, 2013, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2005, 2016, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2019, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +13,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -32,7 +33,7 @@ innobase_rec_to_mysql(
 	const dict_index_t*	index,	/*!< in: index */
 	const ulint*		offsets)/*!< in: rec_get_offsets(
 					rec, index, ...) */
-	__attribute__((nonnull));
+	MY_ATTRIBUTE((nonnull));
 
 /*************************************************************//**
 Copies an InnoDB index entry to table->record[0]. */
@@ -43,7 +44,7 @@ innobase_fields_to_mysql(
 	struct TABLE*		table,	/*!< in/out: MySQL table */
 	const dict_index_t*	index,	/*!< in: InnoDB index */
 	const dfield_t*		fields)	/*!< in: InnoDB index fields */
-	__attribute__((nonnull));
+	MY_ATTRIBUTE((nonnull));
 
 /*************************************************************//**
 Copies an InnoDB row to table->record[0]. */
@@ -54,7 +55,7 @@ innobase_row_to_mysql(
 	struct TABLE*		table,	/*!< in/out: MySQL table */
 	const dict_table_t*	itab,	/*!< in: InnoDB table */
 	const dtuple_t*		row)	/*!< in: InnoDB row */
-	__attribute__((nonnull));
+	MY_ATTRIBUTE((nonnull));
 
 /*************************************************************//**
 Resets table->record[0]. */
@@ -63,7 +64,7 @@ void
 innobase_rec_reset(
 /*===============*/
 	struct TABLE*		table)		/*!< in/out: MySQL table */
-	__attribute__((nonnull));
+	MY_ATTRIBUTE((nonnull));
 
 /** Generate the next autoinc based on a snapshot of the session
 auto_increment_increment and auto_increment_offset variables. */
@@ -96,9 +97,13 @@ struct ib_sequence_t {
 		return(m_next_value);
 	}
 
-	/** Maximum calumn value if adding an AUTOINC column else 0. Once
-	we reach the end of the sequence it will be set to ~0. */
-	const ulonglong	m_max_value;
+	/** @return maximum column value
+	@retval	0	if not adding AUTO_INCREMENT column */
+	ulonglong max_value() const { return m_max_value; }
+
+private:
+	/** Maximum value if adding an AUTO_INCREMENT column, else 0 */
+	ulonglong	m_max_value;
 
 	/** Value of auto_increment_increment */
 	ulong		m_increment;

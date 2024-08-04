@@ -1,6 +1,6 @@
-#!/usr/bin/perl
+#!@PERL_PATH@
 
-# Copyright (c) 2000, 2013, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2000, 2017, Oracle and/or its affiliates. All rights reserved.
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Library General Public
@@ -15,7 +15,7 @@
 # You should have received a copy of the GNU Library General Public
 # License along with this library; if not, write to the Free
 # Software Foundation, Inc., 51 Franklin St, Fifth Floor, Boston,
-# MA 02110-1301, USA
+# MA 02110-1335  USA
 
 # ****************************
 package MySQLaccess;
@@ -26,7 +26,7 @@ use Fcntl;
 BEGIN {
 	# ****************************
 	# static information...
-	$VERSION     = "2.06, 20 Dec 2000";
+	$VERSION     = "2.10, 13 Sep 2019";
 	$0           =~ m%/([^/]+)$%o;
 	$script      = $1;
         $script      = 'MySQLAccess' unless $script;
@@ -262,7 +262,7 @@ Release Notes:
     * default values are read from a configuration file $script.conf
       first this file is looked for in the current directory; if not
       found it is looked for in @sysconfdir@
-      Note that when default-values are given, these can't get overriden
+      Note that when default-values are given, these can't get overridden
       by empty (blanc) values!
     * CGI-BIN version with HTML and forms interface.  Simply place the
       script in an ScriptAliased directory, make the configuration file
@@ -441,7 +441,7 @@ use IPC::Open3;
 	$DEBUG   = 0;
 
 # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++>8
-#  Normaly nothing should be changed beneeth this line
+#  Normally nothing should be changed beneeth this line
 
 
 # ****************************
@@ -477,15 +477,22 @@ MySQLaccess::Report::Print_Header();
 # *****************************
 # Read configuration-file
   MySQLaccess::Debug::Print(1, "Reading configuration file...");
-  if (-f "./$script_conf") {
-     require "./$script_conf";
-  }
-  elsif (-f "@prefix@/$script_conf") {
-     require "@prefix@/$script_conf";
-  }
-  elsif (-f "@sysconfdir@/$script_conf") {
+  if (-f "@sysconfdir@/$script_conf") {
+     print "Configuration file '$script_conf' is found in '@sysconfdir@/'\n";
      require "@sysconfdir@/$script_conf";
   }
+  elsif (-f "@prefix@/$script_conf") {
+     print "Configuration file '$script_conf' is found in '@prefix@/'\n";
+     require "@prefix@/$script_conf";
+  }
+  elsif (-f "./$script_conf") {
+     print "\nERROR! Configuration file '$script_conf' is found in the current ";
+     print "directory.\nThe permissible locations for this file are either ";
+     print "@sysconfdir@/ or @prefix@/\n";
+     print "Please move it to one of these locations and retry.\n\n";
+     exit 0;
+  }
+
 
 # ****************************
 # Read in all parameters
@@ -2342,7 +2349,7 @@ BEGIN {
      ."of `$MySQLaccess::script'."
  ,'Access_denied'
    => "Sorry,\n"
-     ."An error occured when trying to connect to the database\n"
+     ."An error occurred when trying to connect to the database\n"
      ."with the grant-tables:\n"
      ."* Maybe YOU do not have READ-access to this database?\n"
      ."* If you used the -U option, you may have supplied an invalid username?\n"
@@ -2352,24 +2359,24 @@ BEGIN {
      ."* If you used the -P option, you may have supplied an invalid password?\n"
  ,'Dbaccess_denied'
    => "Sorry,\n"
-     ."An error occured when trying to connect to the database\n"
+     ."An error occurred when trying to connect to the database\n"
      ."with the grant-tables. (dbaccess denied)\n"
  ,'Unknown_tmp_table'
    => "Sorry,\n"
-     ."An error occured when trying to work with the temporary tables in the database\n"
+     ."An error occurred when trying to work with the temporary tables in the database\n"
      ."with the grant-tables. (One of the temporary tables does not exist)\n"
  ,'Unknown_table'
    => "Sorry,\n"
-     ."An error occured when trying to work with some tables in the database\n"
+     ."An error occurred when trying to work with some tables in the database\n"
      ."with the grant-tables. (table does not exist)\n"
  ,'use_old_server'
    => "Sorry,\n"
-     ."An error occured when executing an SQL statement.\n"
+     ."An error occurred when executing an SQL statement.\n"
      ."You might consider altering the use of the parameter `--old_server' when \n"
      ."calling `$MySQLaccess::script'."
  ,'unknown_error'
    => "Sorry,\n"
-     ."An error occured when trying to connect to the database\n"
+     ."An error occurred when trying to connect to the database\n"
      ."with the grant-tables. (unknown error)\n"
  ,'anonymous_access'
    => "Accessing the db as an anonymous user.\n"
@@ -2422,7 +2429,7 @@ sub Print_Header {
 sub Print_Footer {
     if ($MySQLaccess::CMD) { #command-line mode
     print "\n"
-         ."BUGs can be reported at https://mariadb.atlassian.net/browse/MDEV\n";
+         ."BUGs can be reported at https://jira.mariadb.org\n";
     }
     if ($MySQLaccess::CGI) { #CGI-BIN mode
     if ($MySQLaccess::Param{'brief'}) {
@@ -2430,7 +2437,7 @@ sub Print_Footer {
     }
     print "<HR>\n"
          ."<ADDRESS>\n"
-         ."BUGs can be reported at <a href=\"https://mariadb.atlassian.net/browse/MDEV\">MariaDB JIRA</a><BR>\n"
+         ."BUGs can be reported at <a href=\"https://jira.mariadb.org\">MariaDB JIRA</a><BR>\n"
 #         ."Don't forget to mention the version $VERSION!<BR>\n"
          ."</ADDRESS>\n"
          ."</BODY>\n"

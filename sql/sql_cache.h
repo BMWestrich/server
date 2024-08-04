@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #ifndef _SQL_CACHE_H
 #define _SQL_CACHE_H
@@ -156,8 +156,9 @@ struct Query_cache_query
   Query_cache_block *res;
   Query_cache_tls *wri;
   ulong len;
-  uint8 tbls_type;
   unsigned int last_pkt_nr;
+  uint8 tbls_type;
+  uint8 ready;
 
   Query_cache_query() {}                      /* Remove gcc warning */
   inline void init_n_lock();
@@ -177,6 +178,12 @@ struct Query_cache_query
   {
     return (((uchar*)this) + ALIGN_SIZE(sizeof(Query_cache_query)));
   }
+  /**
+    following used to check if result ready in plugin without
+    locking rw_lock of the query.
+  */
+  inline void set_results_ready()          { ready= 1; }
+  inline bool is_results_ready()           { return ready; }
   void lock_writing();
   void lock_reading();
   bool try_lock_writing();
@@ -538,6 +545,7 @@ struct Query_cache_query_flags
 {
   unsigned int client_long_flag:1;
   unsigned int client_protocol_41:1;
+  unsigned int client_depr_eof:1;
   unsigned int protocol_type:2;
   unsigned int more_results_exists:1;
   unsigned int in_trans:1;
@@ -546,11 +554,11 @@ struct Query_cache_query_flags
   uint character_set_client_num;
   uint character_set_results_num;
   uint collation_connection_num;
+  uint group_concat_max_len;
   ha_rows limit;
   Time_zone *time_zone;
-  ulonglong sql_mode;
-  ulong max_sort_length;
-  ulong group_concat_max_len;
+  sql_mode_t sql_mode;
+  ulonglong max_sort_length;
   ulong default_week_format;
   ulong div_precision_increment;
   MY_LOCALE *lc_time_names;

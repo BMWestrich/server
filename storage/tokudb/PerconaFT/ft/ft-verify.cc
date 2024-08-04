@@ -44,6 +44,7 @@ Copyright (c) 2006, 2015, Percona and/or its affiliates. All rights reserved.
  *   For each nonleaf node:  All the messages have keys that are between the associated pivot keys ( left_pivot_key < message <= right_pivot_key)
  */
 
+#include <my_global.h>
 #include "ft/serialize/block_table.h"
 #include "ft/ft.h"
 #include "ft/ft-cachetable-wrappers.h"
@@ -511,7 +512,7 @@ toku_verify_ft_with_progress (FT_HANDLE ft_handle, int (*progress_callback)(void
     if (r == 0) {
         toku_ft_lock(ft_handle->ft);
         ft_handle->ft->h->time_of_last_verification = time(NULL);
-        ft_handle->ft->h->dirty = 1;
+        ft_handle->ft->h->set_dirty();
         toku_ft_unlock(ft_handle->ft);
     }
     return r;

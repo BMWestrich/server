@@ -1,4 +1,5 @@
 # Copyright (c) 2006, 2014, Oracle and/or its affiliates
+# Copyright (c) 2009, 2018, MariaDB Corporation
 # 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,11 +12,12 @@
 # 
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335 USA
 
 INCLUDE_DIRECTORIES(${ZLIB_INCLUDE_DIR} ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/mysys)
 
 SET(MYSYS_SOURCES  array.c charset-def.c charset.c checksum.c my_default.c
+                get_password.c
 				errors.c hash.c list.c
                                 mf_cache.c mf_dirname.c mf_fn_ext.c
 				mf_format.c mf_getdate.c mf_iocache.c mf_iocache2.c mf_keycache.c 
@@ -39,16 +41,17 @@ SET(MYSYS_SOURCES  array.c charset-def.c charset.c checksum.c my_default.c
 				lf_alloc-pin.c lf_dynarray.c lf_hash.c
                                 safemalloc.c my_new.cc
 				my_atomic.c my_getncpus.c my_safehash.c my_chmod.c my_rnd.c
-                                my_uuid.c wqueue.c waiting_threads.c ma_dyncol.c
+                                my_uuid.c wqueue.c waiting_threads.c ma_dyncol.c ../sql-common/my_time.c
 				my_rdtsc.c my_context.c psi_noop.c
-                                file_logger.c)
+				my_atomic_writes.c
+                                file_logger.c my_dlerror.c)
 
 IF (WIN32)
  SET (MYSYS_SOURCES ${MYSYS_SOURCES} my_winthread.c my_wincond.c my_winerr.c my_winfile.c my_windac.c my_conio.c)
 ENDIF()
 
 IF(UNIX)
- SET (MYSYS_SOURCES ${MYSYS_SOURCES} my_addr_resolve.c)
+ SET (MYSYS_SOURCES ${MYSYS_SOURCES} my_addr_resolve.c my_setuser.c)
 ENDIF()
 
 IF(HAVE_ALARM)
@@ -61,7 +64,7 @@ IF(CMAKE_SYSTEM_NAME MATCHES "SunOS" AND CMAKE_C_COMPILER_ID MATCHES "SunPro")
    PROPERTIES COMPILE_FLAGS "${CMAKE_CURRENT_SOURCE_DIR}/my_timer_cycles.il")
 ENDIF()
 
-IF(HAVE_LARGE_PAGES)
+IF(HAVE_LINUX_LARGE_PAGES)
  SET(MYSYS_SOURCES ${MYSYS_SOURCES} my_largepage.c)
 ENDIF()
 
@@ -70,8 +73,8 @@ IF(HAVE_MLOCK)
 ENDIF()
 
 ADD_CONVENIENCE_LIBRARY(mysys ${MYSYS_SOURCES})
-TARGET_LINK_LIBRARIES(mysys dbug strings mysys_ssl ${ZLIB_LIBRARY} 
- ${LIBNSL} ${LIBM} ${LIBRT} ${LIBDL} ${LIBSOCKET} ${LIBEXECINFO})
+TARGET_LINK_LIBRARIES(mysys dbug strings
+ ${ZLIB_LIBRARY} ${LIBNSL} ${LIBM} ${LIBRT} ${LIBDL} ${LIBSOCKET} ${LIBEXECINFO} ${CRC32_VPMSUM_LIBRARY})
 DTRACE_INSTRUMENT(mysys)
 
 IF(HAVE_BFD_H)
@@ -94,6 +97,10 @@ SET_TARGET_PROPERTIES(thr_lock PROPERTIES COMPILE_FLAGS "-DMAIN")
 ADD_EXECUTABLE(thr_timer thr_timer.c)
 TARGET_LINK_LIBRARIES(thr_timer mysys)
 SET_TARGET_PROPERTIES(thr_timer PROPERTIES COMPILE_FLAGS "-DMAIN")
+
+ADD_EXECUTABLE(test_hash hash.c)
+TARGET_LINK_LIBRARIES(test_hash mysys)
+SET_TARGET_PROPERTIES(test_hash PROPERTIES COMPILE_FLAGS "-DMAIN")
 
 IF(MSVC)
    INSTALL_DEBUG_TARGET(mysys DESTINATION ${INSTALL_LIBDIR}/debug)

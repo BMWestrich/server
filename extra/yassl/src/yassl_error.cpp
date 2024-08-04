@@ -13,7 +13,7 @@
    You should have received a copy of the GNU General Public License
    along with this program; see the file COPYING. If not, write to the
    Free Software Foundation, Inc., 51 Franklin St, Fifth Floor, Boston,
-   MA  02110-1301  USA.
+   MA  02110-1335  USA.
 */
 
 
@@ -121,11 +121,11 @@ void SetErrorString(YasslError error, char* buffer)
         break; 
 
     case certificate_error :
-        strncpy(buffer, "unable to proccess cerificate", max);
+        strncpy(buffer, "unable to process cerificate", max);
         break;
 
     case privateKey_error :
-        strncpy(buffer, "unable to proccess private key, bad format", max);
+        strncpy(buffer, "unable to process private key, bad format", max);
         break;
 
     case badVersion_error :

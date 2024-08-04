@@ -1,6 +1,7 @@
 /*****************************************************************************
 
-Copyright (c) 1996, 2012, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1996, 2016, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2017, 2019, 2020 MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +13,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -26,12 +27,11 @@ Created 4/20/1996 Heikki Tuuri
 #ifndef row0ins_h
 #define row0ins_h
 
-#include "univ.i"
 #include "data0data.h"
 #include "que0types.h"
-#include "dict0types.h"
 #include "trx0types.h"
 #include "row0types.h"
+#include <vector>
 
 /***************************************************************//**
 Checks if foreign key constraint fails for an index entry. Sets shared locks
@@ -39,7 +39,6 @@ which lock either the success or the failure of the constraint. NOTE that
 the caller must have a shared latch on dict_foreign_key_check_lock.
 @return DB_SUCCESS, DB_LOCK_WAIT, DB_NO_REFERENCED_ROW, or
 DB_ROW_IS_REFERENCED */
-UNIV_INTERN
 dberr_t
 row_ins_check_foreign_constraint(
 /*=============================*/
@@ -53,11 +52,10 @@ row_ins_check_foreign_constraint(
 				table, else the referenced table */
 	dtuple_t*	entry,	/*!< in: index entry for index */
 	que_thr_t*	thr)	/*!< in: query thread */
-	__attribute__((nonnull, warn_unused_result));
+	MY_ATTRIBUTE((nonnull, warn_unused_result));
 /*********************************************************************//**
 Creates an insert node struct.
-@return	own: insert node struct */
-UNIV_INTERN
+@return own: insert node struct */
 ins_node_t*
 ins_node_create(
 /*============*/
@@ -68,7 +66,6 @@ ins_node_create(
 Sets a new row to insert for an INS_DIRECT node. This function is only used
 if we have constructed the row separately, which is a rare case; this
 function is quite slow. */
-UNIV_INTERN
 void
 ins_node_set_new_row(
 /*=================*/
@@ -85,7 +82,6 @@ the delete marked record.
 @retval DB_LOCK_WAIT on lock wait when !(flags & BTR_NO_LOCKING_FLAG)
 @retval DB_FAIL if retry with BTR_MODIFY_TREE is needed
 @return error code */
-UNIV_INTERN
 dberr_t
 row_ins_clust_index_entry_low(
 /*==========================*/
@@ -98,7 +94,8 @@ row_ins_clust_index_entry_low(
 	dtuple_t*	entry,	/*!< in/out: index entry to insert */
 	ulint		n_ext,	/*!< in: number of externally stored columns */
 	que_thr_t*	thr)	/*!< in: query thread or NULL */
-	__attribute__((nonnull, warn_unused_result));
+	MY_ATTRIBUTE((warn_unused_result));
+
 /***************************************************************//**
 Tries to insert an entry into a secondary index. If a record with exactly the
 same fields is found, the other record is necessarily marked deleted.
@@ -107,7 +104,6 @@ It is then unmarked. Otherwise, the entry is just inserted to the index.
 @retval DB_LOCK_WAIT on lock wait when !(flags & BTR_NO_LOCKING_FLAG)
 @retval DB_FAIL if retry with BTR_MODIFY_TREE is needed
 @return error code */
-UNIV_INTERN
 dberr_t
 row_ins_sec_index_entry_low(
 /*========================*/
@@ -123,40 +119,14 @@ row_ins_sec_index_entry_low(
 	trx_id_t	trx_id,	/*!< in: PAGE_MAX_TRX_ID during
 				row_log_table_apply(), or 0 */
 	que_thr_t*	thr)	/*!< in: query thread */
-	__attribute__((nonnull, warn_unused_result));
-/***************************************************************//**
-Tries to insert the externally stored fields (off-page columns)
-of a clustered index entry.
-@return DB_SUCCESS or DB_OUT_OF_FILE_SPACE */
-UNIV_INTERN
-dberr_t
-row_ins_index_entry_big_rec_func(
-/*=============================*/
-	const dtuple_t*		entry,	/*!< in/out: index entry to insert */
-	const big_rec_t*	big_rec,/*!< in: externally stored fields */
-	ulint*			offsets,/*!< in/out: rec offsets */
-	mem_heap_t**		heap,	/*!< in/out: memory heap */
-	dict_index_t*		index,	/*!< in: index */
-	const char*		file,	/*!< in: file name of caller */
-#ifndef DBUG_OFF
-	const void*		thd,	/*!< in: connection, or NULL */
-#endif /* DBUG_OFF */
-	ulint			line)	/*!< in: line number of caller */
-	__attribute__((nonnull(1,2,3,4,5,6), warn_unused_result));
-#ifdef DBUG_OFF
-# define row_ins_index_entry_big_rec(e,big,ofs,heap,index,thd,file,line) \
-	row_ins_index_entry_big_rec_func(e,big,ofs,heap,index,file,line)
-#else /* DBUG_OFF */
-# define row_ins_index_entry_big_rec(e,big,ofs,heap,index,thd,file,line) \
-	row_ins_index_entry_big_rec_func(e,big,ofs,heap,index,file,thd,line)
-#endif /* DBUG_OFF */
+	MY_ATTRIBUTE((warn_unused_result));
+
 /***************************************************************//**
 Inserts an entry into a clustered index. Tries first optimistic,
 then pessimistic descent down the tree. If the entry matches enough
 to a delete marked record, performs the insert by updating or delete
 unmarking the delete marked record.
-@return	DB_SUCCESS, DB_LOCK_WAIT, DB_DUPLICATE_KEY, or some other error code */
-UNIV_INTERN
+@return DB_SUCCESS, DB_LOCK_WAIT, DB_DUPLICATE_KEY, or some other error code */
 dberr_t
 row_ins_clust_index_entry(
 /*======================*/
@@ -164,26 +134,24 @@ row_ins_clust_index_entry(
 	dtuple_t*	entry,	/*!< in/out: index entry to insert */
 	que_thr_t*	thr,	/*!< in: query thread */
 	ulint		n_ext)	/*!< in: number of externally stored columns */
-	__attribute__((nonnull, warn_unused_result));
+	MY_ATTRIBUTE((warn_unused_result));
 /***************************************************************//**
 Inserts an entry into a secondary index. Tries first optimistic,
 then pessimistic descent down the tree. If the entry matches enough
 to a delete marked record, performs the insert by updating or delete
 unmarking the delete marked record.
-@return	DB_SUCCESS, DB_LOCK_WAIT, DB_DUPLICATE_KEY, or some other error code */
-UNIV_INTERN
+@return DB_SUCCESS, DB_LOCK_WAIT, DB_DUPLICATE_KEY, or some other error code */
 dberr_t
 row_ins_sec_index_entry(
 /*====================*/
 	dict_index_t*	index,	/*!< in: secondary index */
 	dtuple_t*	entry,	/*!< in/out: index entry to insert */
 	que_thr_t*	thr)	/*!< in: query thread */
-	__attribute__((nonnull, warn_unused_result));
+	MY_ATTRIBUTE((warn_unused_result));
 /***********************************************************//**
 Inserts a row to a table. This is a high-level function used in
 SQL execution graphs.
-@return	query thread to run next or NULL */
-UNIV_INTERN
+@return query thread to run next or NULL */
 que_thr_t*
 row_ins_step(
 /*=========*/
@@ -192,7 +160,10 @@ row_ins_step(
 /* Insert node structure */
 
 struct ins_node_t{
-	que_common_t	common;	/*!< node type: QUE_NODE_INSERT */
+	ins_node_t() : common(QUE_NODE_INSERT, NULL), entry(entry_list.end())
+	{
+	}
+	que_common_t common;	 /*!< node type: QUE_NODE_INSERT */
 	ulint		ins_type;/* INS_VALUES, INS_SEARCHED, or INS_DIRECT */
 	dtuple_t*	row;	/*!< row to insert */
 	dict_table_t*	table;	/*!< table where to insert */
@@ -202,15 +173,17 @@ struct ins_node_t{
 	ulint		state;	/*!< node execution state */
 	dict_index_t*	index;	/*!< NULL, or the next index where the index
 				entry should be inserted */
-	dtuple_t*	entry;	/*!< NULL, or entry to insert in the index;
+	std::vector<dtuple_t*>
+			entry_list;/* list of entries, one for each index */
+	std::vector<dtuple_t*>::iterator
+			entry;	/*!< NULL, or entry to insert in the index;
 				after a successful insert of the entry,
 				this should be reset to NULL */
-	UT_LIST_BASE_NODE_T(dtuple_t)
-			entry_list;/* list of entries, one for each index */
-	byte*		row_id_buf;/* buffer for the row id sys field in row */
+	/** buffer for the system columns */
+	byte		sys_buf[DATA_ROW_ID_LEN
+				+ DATA_TRX_ID_LEN + DATA_ROLL_PTR_LEN];
 	trx_id_t	trx_id;	/*!< trx id or the last trx which executed the
 				node */
-	byte*		trx_id_buf;/* buffer for the trx id sys field in row */
 	mem_heap_t*	entry_sys_heap;
 				/* memory heap used as auxiliary storage;
 				entry_list and sys fields are stored here;
@@ -232,9 +205,5 @@ struct ins_node_t{
 #define INS_NODE_ALLOC_ROW_ID	2	/* row id should be allocated */
 #define	INS_NODE_INSERT_ENTRIES 3	/* index entries should be built and
 					inserted */
-
-#ifndef UNIV_NONINL
-#include "row0ins.ic"
-#endif
 
 #endif

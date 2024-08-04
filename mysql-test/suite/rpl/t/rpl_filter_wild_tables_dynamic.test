@@ -13,6 +13,8 @@ SET @@GLOBAL.replicate_wild_ignore_table="test.b%";
 
 connection slave;
 source include/stop_slave.inc;
+SET @@GLOBAL.replicate_wild_do_table="";
+SET @@GLOBAL.replicate_wild_ignore_table="";
 SET @@GLOBAL.replicate_wild_do_table="test.a%";
 SET @@GLOBAL.replicate_wild_ignore_table="test.b%";
 source include/start_slave.inc;
@@ -33,15 +35,12 @@ INSERT INTO c1 VALUES (3);
 
 # Only a1 should be replicated to slave
 sync_slave_with_master;
-echo [on slave];
 SHOW TABLES LIKE '%1';
 
 connection master;
-echo [on master];
 
 # Clean up
 connection master;
-echo [on master];
 DROP TABLE IF EXISTS a1,b1,c1;
 --source include/rpl_end.inc
 

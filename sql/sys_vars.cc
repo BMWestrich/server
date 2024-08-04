@@ -1,7 +1,7 @@
 /* Copyright (c) 2002, 2015, Oracle and/or its affiliates.
-   Copyright (c) 2012, 2015, MariaDB
+   Copyright (c) 2012, 2018, MariaDB Corporation.
 
-   This program is free software; you can redistribute it and/or modify
+     This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
    the Free Software Foundation; version 2 of the License.
 
@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /**
   @file
@@ -34,7 +34,7 @@
 #include "sql_plugin.h"                         // Includes my_global.h
 #include "sql_priv.h"
 #include "sql_class.h"                          // set_var.h: THD
-#include "sys_vars.ic"
+#include "sys_vars.inl"
 
 #include "events.h"
 #include <thr_alarm.h>
@@ -62,6 +62,7 @@
 #include "sql_repl.h"
 #include "opt_range.h"
 #include "rpl_parallel.h"
+#include <ssl_compat.h>
 
 /*
   The rule for this file: everything should be 'static'. When a sys_var
@@ -283,7 +284,7 @@ static Sys_var_long Sys_pfs_events_stages_history_size(
 /**
   Variable performance_schema_max_statement_classes.
   The default number of statement classes is the sum of:
-  - COM_END for all regular "statement/com/...",
+  - (COM_END - mariadb gap) for all regular "statement/com/...",
   - 1 for "statement/com/new_packet", for unknown enum_server_command
   - 1 for "statement/com/Error", for invalid enum_server_command
   - SQLCOM_END for all regular "statement/sql/...",
@@ -295,7 +296,8 @@ static Sys_var_ulong Sys_pfs_max_statement_classes(
        "Maximum number of statement instruments.",
        PARSED_EARLY READ_ONLY GLOBAL_VAR(pfs_param.m_statement_class_sizing),
        CMD_LINE(REQUIRED_ARG), VALID_RANGE(0, 256),
-       DEFAULT((ulong) SQLCOM_END + (ulong) COM_END + 4),
+       DEFAULT((ulong) SQLCOM_END +
+               (ulong) (COM_END -(COM_MDB_GAP_END - COM_MDB_GAP_BEG + 1)) + 4),
        BLOCK_SIZE(1));
 
 static Sys_var_long Sys_pfs_events_statements_history_long_size(
@@ -321,7 +323,7 @@ static Sys_var_long Sys_pfs_digest_size(
        "Size of the statement digest."
        " Use 0 to disable, -1 for automated sizing.",
        PARSED_EARLY READ_ONLY GLOBAL_VAR(pfs_param.m_digest_sizing),
-       CMD_LINE(REQUIRED_ARG), VALID_RANGE(-1, 200),
+       CMD_LINE(REQUIRED_ARG), VALID_RANGE(-1, 1024 * 1024),
        DEFAULT(-1),
        BLOCK_SIZE(1));
 
@@ -345,13 +347,56 @@ static Sys_var_long Sys_pfs_connect_attrs_size(
 
 #endif /* WITH_PERFSCHEMA_STORAGE_ENGINE */
 
+#ifdef WITH_WSREP
+
+/*
+  We need to keep the original values set by the user, as they will
+  be lost if wsrep_auto_increment_control set to 'ON':
+*/
+static bool update_auto_increment_increment (sys_var *self, THD *thd, enum_var_type type)
+{
+  if (type == OPT_GLOBAL)
+    global_system_variables.saved_auto_increment_increment=
+      global_system_variables.auto_increment_increment;
+  else
+    thd->variables.saved_auto_increment_increment=
+      thd->variables.auto_increment_increment;
+  return false;
+}
+
+#endif /* WITH_WSREP */
+
 static Sys_var_ulong Sys_auto_increment_increment(
        "auto_increment_increment",
        "Auto-increment columns are incremented by this",
        SESSION_VAR(auto_increment_increment),
        CMD_LINE(OPT_ARG),
        VALID_RANGE(1, 65535), DEFAULT(1), BLOCK_SIZE(1),
+#ifdef WITH_WSREP
+       NO_MUTEX_GUARD, IN_BINLOG, ON_CHECK(0),
+       ON_UPDATE(update_auto_increment_increment));
+#else
        NO_MUTEX_GUARD, IN_BINLOG);
+#endif /* WITH_WSREP */
+
+#ifdef WITH_WSREP
+
+/*
+  We need to keep the original values set by the user, as they will
+  be lost if wsrep_auto_increment_control set to 'ON':
+*/
+static bool update_auto_increment_offset (sys_var *self, THD *thd, enum_var_type type)
+{
+  if (type == OPT_GLOBAL)
+    global_system_variables.saved_auto_increment_offset=
+      global_system_variables.auto_increment_offset;
+  else
+    thd->variables.saved_auto_increment_offset=
+      thd->variables.auto_increment_offset;
+  return false;
+}
+
+#endif /* WITH_WSREP */
 
 static Sys_var_ulong Sys_auto_increment_offset(
        "auto_increment_offset",
@@ -360,7 +405,12 @@ static Sys_var_ulong Sys_auto_increment_offset(
        SESSION_VAR(auto_increment_offset),
        CMD_LINE(OPT_ARG),
        VALID_RANGE(1, 65535), DEFAULT(1), BLOCK_SIZE(1),
+#ifdef WITH_WSREP
+       NO_MUTEX_GUARD, IN_BINLOG, ON_CHECK(0),
+       ON_UPDATE(update_auto_increment_offset));
+#else
        NO_MUTEX_GUARD, IN_BINLOG);
+#endif /* WITH_WSREP */
 
 static Sys_var_mybool Sys_automatic_sp_privileges(
        "automatic_sp_privileges",
@@ -370,7 +420,7 @@ static Sys_var_mybool Sys_automatic_sp_privileges(
 
 static Sys_var_ulong Sys_back_log(
        "back_log", "The number of outstanding connection requests "
-       "MariaDB can have. This comes into play when the main MySQL thread "
+       "MariaDB can have. This comes into play when the main MariaDB thread "
        "gets very many connection requests in a very short time",
        AUTO_SET READ_ONLY GLOBAL_VAR(back_log), CMD_LINE(REQUIRED_ARG),
        VALID_RANGE(0, 65535), DEFAULT(150), BLOCK_SIZE(1));
@@ -394,7 +444,7 @@ static Sys_var_ulonglong Sys_binlog_stmt_cache_size(
        "binlog_stmt_cache_size", "The size of the statement cache for "
        "updates to non-transactional engines for the binary log. "
        "If you often use statements updating a great number of rows, "
-       "you can increase this to get more performance",
+       "you can increase this to get more performance.",
        GLOBAL_VAR(binlog_stmt_cache_size),
        CMD_LINE(REQUIRED_ARG),
        VALID_RANGE(IO_SIZE, SIZE_T_MAX), DEFAULT(32768), BLOCK_SIZE(IO_SIZE));
@@ -428,7 +478,7 @@ error_if_in_trans_or_substatement(THD *thd, int in_substatement_error,
   return false;
 }
 
-static bool check_has_super(sys_var *self, THD *thd, set_var *var)
+bool check_has_super(sys_var *self, THD *thd, set_var *var)
 {
   DBUG_ASSERT(self->scope() != sys_var::GLOBAL);// don't abuse check_has_super()
 #ifndef NO_EMBEDDED_ACCESS_CHECKS
@@ -440,6 +490,12 @@ static bool check_has_super(sys_var *self, THD *thd, set_var *var)
 #endif
   return false;
 }
+
+static Sys_var_bit Sys_core_file("core_file", "write a core-file on crashes",
+          READ_ONLY GLOBAL_VAR(test_flags), NO_CMD_LINE,
+          TEST_CORE_ON_SIGNAL, DEFAULT(FALSE), NO_MUTEX_GUARD, NOT_IN_BINLOG,
+          0,0,0);
+
 static bool binlog_format_check(sys_var *self, THD *thd, set_var *var)
 {
   if (check_has_super(self, thd, var))
@@ -448,17 +504,29 @@ static bool binlog_format_check(sys_var *self, THD *thd, set_var *var)
   /*
     MariaDB Galera does not support STATEMENT or MIXED binlog format currently.
   */
-  if (WSREP(thd) && var->save_result.ulonglong_value != BINLOG_FORMAT_ROW)
+  if ((WSREP(thd) || opt_support_flashback) &&
+      var->save_result.ulonglong_value != BINLOG_FORMAT_ROW)
   {
     // Push a warning to the error log.
     push_warning_printf(thd, Sql_condition::WARN_LEVEL_WARN, ER_UNKNOWN_ERROR,
-                        "MariaDB Galera does not support binlog format: %s",
+                        "MariaDB Galera and flashback do not support binlog format: %s",
                         binlog_format_names[var->save_result.ulonglong_value]);
+    /*
+      We allow setting up binlog_format other then ROW for session scope when
+      wsrep/flasback is enabled.This is done because of 2 reasons
+      1. User might want to run pt-table-checksum.
+      2. SuperUser knows what is doing :-)
 
+      For refrence:- MDEV-7322
+    */
     if (var->type == OPT_GLOBAL)
     {
-      WSREP_ERROR("MariaDB Galera does not support binlog format: %s",
-                  binlog_format_names[var->save_result.ulonglong_value]);
+      if (WSREP(thd))
+        WSREP_ERROR("MariaDB Galera does not support binlog format: %s",
+                    binlog_format_names[var->save_result.ulonglong_value]);
+      else
+        my_error(ER_FLASHBACK_NOT_SUPPORTED,MYF(0),"binlog_format",
+                 binlog_format_names[var->save_result.ulonglong_value]);
       return true;
     }
   }
@@ -476,7 +544,8 @@ static bool binlog_format_check(sys_var *self, THD *thd, set_var *var)
      switching @@SESSION.binlog_format from MIXED to STATEMENT when there are
      open temp tables and we are logging in row format.
   */
-  if (thd->temporary_tables && var->type == OPT_SESSION &&
+  if (thd->has_thd_temporary_tables() &&
+      var->type == OPT_SESSION &&
       var->save_result.ulonglong_value == BINLOG_FORMAT_STMT &&
       ((thd->variables.binlog_format == BINLOG_FORMAT_MIXED &&
         thd->is_current_stmt_binlog_format_row()) ||
@@ -511,7 +580,7 @@ static Sys_var_enum Sys_binlog_format(
        "UDFs) or the UUID() function; for those, row-based binary logging is "
        "automatically used.",
        SESSION_VAR(binlog_format), CMD_LINE(REQUIRED_ARG, OPT_BINLOG_FORMAT),
-       binlog_format_names, DEFAULT(BINLOG_FORMAT_STMT),
+       binlog_format_names, DEFAULT(BINLOG_FORMAT_MIXED),
        NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(binlog_format_check),
        ON_UPDATE(fix_binlog_format_after_update));
 
@@ -639,6 +708,7 @@ static bool check_cs_client(sys_var *self, THD *thd, set_var *var)
   if (check_charset_not_null(self, thd, var))
     return true;
 
+  // Currently, UCS-2 cannot be used as a client character set
   if (!is_supported_parser_charset((CHARSET_INFO *)(var->save_result.ptr)))
     return true;
 
@@ -657,6 +727,8 @@ static Sys_var_struct Sys_character_set_client(
        offsetof(CHARSET_INFO, csname), DEFAULT(&default_charset_info),
        NO_MUTEX_GUARD, IN_BINLOG, ON_CHECK(check_cs_client),
        ON_UPDATE(fix_thd_charset));
+// for check changing
+export sys_var *Sys_character_set_client_ptr= &Sys_character_set_client;
 
 static Sys_var_struct Sys_character_set_connection(
        "character_set_connection", "The character set used for "
@@ -666,6 +738,8 @@ static Sys_var_struct Sys_character_set_connection(
        offsetof(CHARSET_INFO, csname), DEFAULT(&default_charset_info),
        NO_MUTEX_GUARD, IN_BINLOG, ON_CHECK(check_charset_not_null),
        ON_UPDATE(fix_thd_charset));
+// for check changing
+export sys_var *Sys_character_set_connection_ptr= &Sys_character_set_connection;
 
 static Sys_var_struct Sys_character_set_results(
        "character_set_results", "The character set used for returning "
@@ -673,6 +747,8 @@ static Sys_var_struct Sys_character_set_results(
        SESSION_VAR(character_set_results), NO_CMD_LINE,
        offsetof(CHARSET_INFO, csname), DEFAULT(&default_charset_info),
        NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(check_charset));
+// for check changing
+export sys_var *Sys_character_set_results_ptr= &Sys_character_set_results;
 
 static Sys_var_struct Sys_character_set_filesystem(
        "character_set_filesystem", "The filesystem character set",
@@ -808,7 +884,15 @@ export bool fix_delay_key_write(sys_var *self, THD *thd, enum_var_type type)
 }
 static const char *delay_key_write_names[]= { "OFF", "ON", "ALL", NullS };
 static Sys_var_enum Sys_delay_key_write(
-       "delay_key_write", "Type of DELAY_KEY_WRITE",
+       "delay_key_write", "Specifies how MyISAM tables handles CREATE "
+       "TABLE DELAY_KEY_WRITE. If set to ON, the default, any DELAY KEY "
+       "WRITEs are honored. The key buffer is then flushed only when the "
+       "table closes, speeding up writes. MyISAM tables should be "
+       "automatically checked upon startup in this case, and "
+       "--external locking should not be used, as it can lead to index "
+       "corruption. If set to OFF, DELAY KEY WRITEs are ignored, while if "
+       "set to ALL, all new opened tables are treated as if created with "
+       "DELAY KEY WRITEs enabled.",
        GLOBAL_VAR(delay_key_write_options), CMD_LINE(OPT_ARG),
        delay_key_write_names, DEFAULT(DELAY_KEY_WRITE_ON),
        NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(0),
@@ -818,7 +902,7 @@ static Sys_var_ulong Sys_delayed_insert_limit(
        "delayed_insert_limit",
        "After inserting delayed_insert_limit rows, the INSERT DELAYED "
        "handler will check if there are any SELECT statements pending. "
-       "If so, it allows these to execute before continuing",
+       "If so, it allows these to execute before continuing.",
        GLOBAL_VAR(delayed_insert_limit), CMD_LINE(REQUIRED_ARG),
        VALID_RANGE(1, UINT_MAX), DEFAULT(DELAYED_LIMIT), BLOCK_SIZE(1));
 
@@ -938,7 +1022,9 @@ static Sys_var_ulong Sys_flush_time(
 static bool check_ftb_syntax(sys_var *self, THD *thd, set_var *var)
 {
   return ft_boolean_check_syntax_string((uchar*)
-                      (var->save_result.string_value.str));
+                      (var->save_result.string_value.str),
+                      var->save_result.string_value.length,
+                      self->charset(thd));
 }
 static bool query_cache_flush(sys_var *self, THD *thd, enum_var_type type)
 {
@@ -1141,7 +1227,7 @@ static Sys_var_ulong Sys_lock_wait_timeout(
        "lock_wait_timeout",
        "Timeout in seconds to wait for a lock before returning an error.",
        SESSION_VAR(lock_wait_timeout), CMD_LINE(REQUIRED_ARG),
-       VALID_RANGE(1, LONG_TIMEOUT), DEFAULT(LONG_TIMEOUT), BLOCK_SIZE(1));
+       VALID_RANGE(1, LONG_TIMEOUT), DEFAULT(24 * 60 * 60), BLOCK_SIZE(1));
 
 #ifdef HAVE_MLOCKALL
 static Sys_var_mybool Sys_locked_in_memory(
@@ -1154,6 +1240,18 @@ static Sys_var_mybool Sys_locked_in_memory(
 static Sys_var_mybool Sys_log_bin(
        "log_bin", "Whether the binary log is enabled",
        READ_ONLY GLOBAL_VAR(opt_bin_log), NO_CMD_LINE, DEFAULT(FALSE));
+
+static Sys_var_mybool Sys_log_bin_compress(
+  "log_bin_compress", "Whether the binary log can be compressed",
+  GLOBAL_VAR(opt_bin_log_compress), CMD_LINE(OPT_ARG), DEFAULT(FALSE));
+
+/* the min length is 10, means that Begin/Commit/Rollback would never be compressed!   */
+static Sys_var_uint Sys_log_bin_compress_min_len(
+  "log_bin_compress_min_len",
+  "Minimum length of sql statement(in statement mode) or record(in row mode)"
+  "that can be compressed.",
+  GLOBAL_VAR(opt_bin_log_compress_min_len),
+  CMD_LINE(OPT_ARG), VALID_RANGE(10, 1024), DEFAULT(256), BLOCK_SIZE(1));
 
 static Sys_var_mybool Sys_trust_function_creators(
        "log_bin_trust_function_creators",
@@ -1183,13 +1281,26 @@ static Sys_var_mybool Sys_log_queries_not_using_indexes(
        GLOBAL_VAR(opt_log_queries_not_using_indexes),
        CMD_LINE(OPT_ARG), DEFAULT(FALSE));
 
+static Sys_var_mybool Sys_log_slow_admin_statements(
+       "log_slow_admin_statements",
+       "Log slow OPTIMIZE, ANALYZE, ALTER and other administrative statements to "
+       "the slow log if it is open.",
+       GLOBAL_VAR(opt_log_slow_admin_statements),
+       CMD_LINE(OPT_ARG), DEFAULT(TRUE));
+
+static Sys_var_mybool Sys_log_slow_slave_statements(
+       "log_slow_slave_statements",
+       "Log slow statements executed by slave thread to the slow log if it is open.",
+       GLOBAL_VAR(opt_log_slow_slave_statements),
+       CMD_LINE(OPT_ARG), DEFAULT(TRUE));
+
 static Sys_var_ulong Sys_log_warnings(
        "log_warnings",
        "Log some not critical warnings to the general log file."
        "Value can be between 0 and 11. Higher values mean more verbosity",
        SESSION_VAR(log_warnings),
        CMD_LINE(OPT_ARG, 'W'),
-       VALID_RANGE(0, UINT_MAX), DEFAULT(1), BLOCK_SIZE(1));
+       VALID_RANGE(0, UINT_MAX), DEFAULT(2), BLOCK_SIZE(1));
 
 static bool update_cached_long_query_time(sys_var *self, THD *thd,
                                           enum_var_type type)
@@ -1206,8 +1317,8 @@ static bool update_cached_long_query_time(sys_var *self, THD *thd,
 static Sys_var_double Sys_long_query_time(
        "long_query_time",
        "Log all queries that have taken more than long_query_time seconds "
-       "to execute to file. The argument will be treated as a decimal value "
-       "with microsecond precision",
+       "to execute to the slow query log file. The argument will be treated "
+       "as a decimal value with microsecond precision",
        SESSION_VAR(long_query_time_double),
        CMD_LINE(REQUIRED_ARG), VALID_RANGE(0, LONG_TIMEOUT), DEFAULT(10),
        NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(0),
@@ -1228,9 +1339,9 @@ static bool update_cached_max_statement_time(sys_var *self, THD *thd,
 
 static Sys_var_double Sys_max_statement_time(
        "max_statement_time",
-       "A SELECT query that have taken more than max_statement_time seconds "
+       "A query that has taken more than max_statement_time seconds "
        "will be aborted. The argument will be treated as a decimal value "
-       "with microsecond precision.  A value of 0 (default) means no timeout",
+       "with microsecond precision. A value of 0 (default) means no timeout",
        SESSION_VAR(max_statement_time_double),
        CMD_LINE(REQUIRED_ARG), VALID_RANGE(0, LONG_TIMEOUT), DEFAULT(0),
        NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(0),
@@ -1309,7 +1420,7 @@ static Sys_var_ulong Sys_max_allowed_packet(
        "max_allowed_packet",
        "Max packet length to send to or receive from the server",
        SESSION_VAR(max_allowed_packet), CMD_LINE(REQUIRED_ARG),
-       VALID_RANGE(1024, 1024*1024*1024), DEFAULT(4*1024*1024),
+       VALID_RANGE(1024, 1024*1024*1024), DEFAULT(16*1024*1024),
        BLOCK_SIZE(1024), NO_MUTEX_GUARD, NOT_IN_BINLOG,
        ON_CHECK(check_max_allowed_packet));
 
@@ -1365,7 +1476,7 @@ static bool fix_max_connections(sys_var *self, THD *thd, enum_var_type type)
 static Sys_var_ulong Sys_max_connections(
        "max_connections", "The number of simultaneous clients allowed",
        PARSED_EARLY GLOBAL_VAR(max_connections), CMD_LINE(REQUIRED_ARG),
-       VALID_RANGE(1, 100000),
+       VALID_RANGE(10, 100000),
        DEFAULT(MAX_CONNECTIONS_DEFAULT), BLOCK_SIZE(1), NO_MUTEX_GUARD,
        NOT_IN_BINLOG, ON_CHECK(0), ON_UPDATE(fix_max_connections));
 
@@ -1420,7 +1531,7 @@ static Sys_var_ulonglong Sys_max_heap_table_size(
        "max_heap_table_size",
        "Don't allow creation of heap tables bigger than this",
        SESSION_VAR(max_heap_table_size), CMD_LINE(REQUIRED_ARG),
-       VALID_RANGE(16384, (ulonglong)~(intptr)0), DEFAULT(16*1024*1024),
+       VALID_RANGE(16384, SIZE_T_MAX), DEFAULT(16*1024*1024),
        BLOCK_SIZE(1024));
 
 static ulong mdl_locks_cache_size;
@@ -1567,7 +1678,6 @@ bool
 Sys_var_gtid_slave_pos::do_check(THD *thd, set_var *var)
 {
   String str, *res;
-  bool running;
 
   DBUG_ASSERT(var->type == OPT_GLOBAL);
 
@@ -1578,10 +1688,7 @@ Sys_var_gtid_slave_pos::do_check(THD *thd, set_var *var)
     return true;
   }
 
-  mysql_mutex_lock(&LOCK_active_mi);
-  running= master_info_index->give_error_if_slave_running();
-  mysql_mutex_unlock(&LOCK_active_mi);
-  if (running)
+  if (give_error_if_slave_running(0))
     return true;
   if (!(res= var->value->val_str(&str)))
     return true;
@@ -1619,7 +1726,7 @@ Sys_var_gtid_slave_pos::global_update(THD *thd, set_var *var)
 
   mysql_mutex_unlock(&LOCK_global_system_variables);
   mysql_mutex_lock(&LOCK_active_mi);
-  if (master_info_index->give_error_if_slave_running())
+  if (give_error_if_slave_running(1))
     err= true;
   else
     err= rpl_gtid_pos_update(thd, var->save_result.string_value.str,
@@ -1704,7 +1811,10 @@ Sys_var_gtid_binlog_state::do_check(THD *thd, set_var *var)
     return true;
   }
   if (res->length() == 0)
+  {
     list= NULL;
+    list_len= 0;
+  }
   else if (!(list= gtid_parse_string_to_list(res->ptr(), res->length(),
                                              &list_len)))
   {
@@ -1780,6 +1890,8 @@ static Sys_var_last_gtid Sys_last_gtid(
        "or the empty string if none.",
        READ_ONLY sys_var::ONLY_SESSION, NO_CMD_LINE);
 
+export sys_var *Sys_last_gtid_ptr= &Sys_last_gtid; // for check changing
+
 
 uchar *
 Sys_var_last_gtid::session_value_ptr(THD *thd, const LEX_STRING *base)
@@ -1790,8 +1902,9 @@ Sys_var_last_gtid::session_value_ptr(THD *thd, const LEX_STRING *base)
   bool first= true;
 
   str.length(0);
-  if ((thd->last_commit_gtid.seq_no > 0 &&
-       rpl_slave_state_tostring_helper(&str, &thd->last_commit_gtid, &first)) ||
+  rpl_gtid gtid= thd->get_last_commit_gtid();
+  if ((gtid.seq_no > 0 &&
+       rpl_slave_state_tostring_helper(&str, &gtid, &first)) ||
       !(p= thd->strmake(str.ptr(), str.length())))
   {
     my_error(ER_OUT_OF_RESOURCES, MYF(0));
@@ -1805,15 +1918,7 @@ Sys_var_last_gtid::session_value_ptr(THD *thd, const LEX_STRING *base)
 static bool
 check_slave_parallel_threads(sys_var *self, THD *thd, set_var *var)
 {
-  bool running;
-
-  mysql_mutex_lock(&LOCK_active_mi);
-  running= master_info_index->give_error_if_slave_running();
-  mysql_mutex_unlock(&LOCK_active_mi);
-  if (running)
-    return true;
-
-  return false;
+  return give_error_if_slave_running(0);
 }
 
 static bool
@@ -1822,9 +1927,7 @@ fix_slave_parallel_threads(sys_var *self, THD *thd, enum_var_type type)
   bool err;
 
   mysql_mutex_unlock(&LOCK_global_system_variables);
-  mysql_mutex_lock(&LOCK_active_mi);
-  err= master_info_index->give_error_if_slave_running();
-  mysql_mutex_unlock(&LOCK_active_mi);
+  err= give_error_if_slave_running(0);
   mysql_mutex_lock(&LOCK_global_system_variables);
 
   return err;
@@ -1856,15 +1959,7 @@ static Sys_var_ulong Sys_slave_parallel_workers(
 static bool
 check_slave_domain_parallel_threads(sys_var *self, THD *thd, set_var *var)
 {
-  bool running;
-
-  mysql_mutex_lock(&LOCK_active_mi);
-  running= master_info_index->give_error_if_slave_running();
-  mysql_mutex_unlock(&LOCK_active_mi);
-  if (running)
-    return true;
-
-  return false;
+  return give_error_if_slave_running(0);
 }
 
 static bool
@@ -1873,12 +1968,10 @@ fix_slave_domain_parallel_threads(sys_var *self, THD *thd, enum_var_type type)
   bool running;
 
   mysql_mutex_unlock(&LOCK_global_system_variables);
-  mysql_mutex_lock(&LOCK_active_mi);
-  running= master_info_index->give_error_if_slave_running();
-  mysql_mutex_unlock(&LOCK_active_mi);
+  running= give_error_if_slave_running(0);
   mysql_mutex_lock(&LOCK_global_system_variables);
 
-  return running ? true : false;
+  return running;
 }
 
 
@@ -1931,7 +2024,7 @@ Sys_var_slave_parallel_mode::global_update(THD *thd, set_var *var)
     if (mi->rli.slave_running)
     {
       my_error(ER_SLAVE_MUST_STOP, MYF(0),
-          mi->connection_name.length, mi->connection_name.str);
+               (int) mi->connection_name.length, mi->connection_name.str);
       res= true;
     }
     else
@@ -2021,15 +2114,7 @@ static Sys_var_bit Sys_skip_parallel_replication(
 static bool
 check_gtid_ignore_duplicates(sys_var *self, THD *thd, set_var *var)
 {
-  bool running;
-
-  mysql_mutex_lock(&LOCK_active_mi);
-  running= master_info_index->give_error_if_slave_running();
-  mysql_mutex_unlock(&LOCK_active_mi);
-  if (running)
-    return true;
-
-  return false;
+  return give_error_if_slave_running(0);
 }
 
 static bool
@@ -2038,12 +2123,10 @@ fix_gtid_ignore_duplicates(sys_var *self, THD *thd, enum_var_type type)
   bool running;
 
   mysql_mutex_unlock(&LOCK_global_system_variables);
-  mysql_mutex_lock(&LOCK_active_mi);
-  running= master_info_index->give_error_if_slave_running();
-  mysql_mutex_unlock(&LOCK_active_mi);
+  running= give_error_if_slave_running(0);
   mysql_mutex_lock(&LOCK_global_system_variables);
 
-  return running ? true : false;
+  return running;
 }
 
 
@@ -2124,12 +2207,18 @@ static Sys_var_ulong Sys_max_long_data_size(
        BLOCK_SIZE(1));
 
 static PolyLock_mutex PLock_prepared_stmt_count(&LOCK_prepared_stmt_count);
-static Sys_var_ulong Sys_max_prepared_stmt_count(
+static Sys_var_uint Sys_max_prepared_stmt_count(
        "max_prepared_stmt_count",
        "Maximum number of prepared statements in the server",
        GLOBAL_VAR(max_prepared_stmt_count), CMD_LINE(REQUIRED_ARG),
-       VALID_RANGE(0, 1024*1024), DEFAULT(16382), BLOCK_SIZE(1),
+       VALID_RANGE(0, UINT_MAX32), DEFAULT(16382), BLOCK_SIZE(1),
        &PLock_prepared_stmt_count);
+
+static Sys_var_ulong Sys_max_recursive_iterations(
+       "max_recursive_iterations",
+       "Maximum number of iterations when executing recursive queries",
+       SESSION_VAR(max_recursive_iterations), CMD_LINE(OPT_ARG),
+       VALID_RANGE(0, UINT_MAX), DEFAULT(UINT_MAX), BLOCK_SIZE(1));
 
 static Sys_var_ulong Sys_max_sort_length(
        "max_sort_length",
@@ -2137,7 +2226,7 @@ static Sys_var_ulong Sys_max_sort_length(
        "the first max_sort_length bytes of each value are used; the rest "
        "are ignored)",
        SESSION_VAR(max_sort_length), CMD_LINE(REQUIRED_ARG),
-       VALID_RANGE(4, 8192*1024L), DEFAULT(1024), BLOCK_SIZE(1));
+       VALID_RANGE(64, 8192*1024L), DEFAULT(1024), BLOCK_SIZE(1));
 
 static Sys_var_ulong Sys_max_sp_recursion_depth(
        "max_sp_recursion_depth",
@@ -2287,10 +2376,10 @@ export sys_var *Sys_old_passwords_ptr= &Sys_old_passwords; // for sql_acl.cc
 static Sys_var_ulong Sys_open_files_limit(
        "open_files_limit",
        "If this is not 0, then mysqld will use this value to reserve file "
-       "descriptors to use with setrlimit(). If this value is 0 then mysqld "
-       "will reserve max_connections*5 or max_connections + table_cache*2 "
-       "(whichever is larger) number of file descriptors",
-       READ_ONLY GLOBAL_VAR(open_files_limit), CMD_LINE(REQUIRED_ARG),
+       "descriptors to use with setrlimit(). If this value is 0 or autoset "
+       "then mysqld will reserve max_connections*5 or max_connections + "
+       "table_cache*2 (whichever is larger) number of file descriptors",
+       AUTO_SET READ_ONLY GLOBAL_VAR(open_files_limit), CMD_LINE(REQUIRED_ARG),
        VALID_RANGE(0, OS_FILE_LIMIT), DEFAULT(0), BLOCK_SIZE(1));
 
 /// @todo change to enum
@@ -2339,7 +2428,7 @@ static Sys_var_ulong Sys_optimizer_search_depth(
        "query plans, but take longer to compile a query. Values smaller "
        "than the number of tables in a relation result in faster "
        "optimization, but may produce very bad query plans. If set to 0, "
-       "the system will automatically pick a reasonable value",
+       "the system will automatically pick a reasonable value.",
        SESSION_VAR(optimizer_search_depth), CMD_LINE(REQUIRED_ARG),
        VALID_RANGE(0, MAX_TABLES+1), DEFAULT(MAX_TABLES+1), BLOCK_SIZE(1),
        NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(0), ON_UPDATE(0));
@@ -2368,7 +2457,10 @@ export const char *optimizer_switch_names[]=
   "table_elimination",
   "extended_keys",
   "exists_to_in",
-  "default", NullS
+  "orderby_uses_equalities",
+  "condition_pushdown_for_derived",
+  "default", 
+  NullS
 };
 static bool fix_optimizer_switch(sys_var *self, THD *thd,
                                  enum_var_type type)
@@ -2381,12 +2473,23 @@ static bool fix_optimizer_switch(sys_var *self, THD *thd,
                         "engine_condition_pushdown=on");
   return false;
 }
+static bool check_legal_optimizer_switch(sys_var *self, THD *thd,
+                                         set_var *var)
+{
+  if (var->save_result.ulonglong_value & (OPTIMIZER_SWITCH_MATERIALIZATION |
+                                          OPTIMIZER_SWITCH_IN_TO_EXISTS))
+  {
+    return false;
+  }
+  my_error(ER_ILLEGAL_SUBQUERY_OPTIMIZER_SWITCHES, MYF(0));
+  return true;
+}
 static Sys_var_flagset Sys_optimizer_switch(
        "optimizer_switch",
        "Fine-tune the optimizer behavior",
        SESSION_VAR(optimizer_switch), CMD_LINE(REQUIRED_ARG),
        optimizer_switch_names, DEFAULT(OPTIMIZER_SWITCH_DEFAULT),
-       NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(NULL),
+       NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(check_legal_optimizer_switch),
        ON_UPDATE(fix_optimizer_switch));
 
 static Sys_var_charptr Sys_pid_file(
@@ -2418,9 +2521,9 @@ static Sys_var_ulong Sys_preload_buff_size(
 
 static Sys_var_uint Sys_protocol_version(
        "protocol_version",
-       "The version of the client/server protocol used by the MySQL server",
+       "The version of the client/server protocol used by the MariaDB server",
        READ_ONLY GLOBAL_VAR(protocol_version), CMD_LINE_HELP_ONLY,
-       VALID_RANGE(0, ~0), DEFAULT(PROTOCOL_VERSION), BLOCK_SIZE(1));
+       VALID_RANGE(0, ~0U), DEFAULT(PROTOCOL_VERSION), BLOCK_SIZE(1));
 
 static Sys_var_proxy_user Sys_proxy_user(
        "proxy_user", "The proxy user account name used when logging in",
@@ -2541,6 +2644,16 @@ static Sys_var_ulong Sys_div_precincrement(
        "operator will be increased on that value",
        SESSION_VAR(div_precincrement), CMD_LINE(REQUIRED_ARG),
        VALID_RANGE(0, DECIMAL_MAX_SCALE), DEFAULT(4), BLOCK_SIZE(1));
+
+static Sys_var_uint Sys_eq_range_index_dive_limit(
+       "eq_range_index_dive_limit",
+       "The optimizer will use existing index statistics instead of "
+       "doing index dives for equality ranges if the number of equality "
+       "ranges for the index is larger than or equal to this number. "
+       "If set to 0, index dives are always used.",
+       SESSION_VAR(eq_range_index_dive_limit), CMD_LINE(REQUIRED_ARG),
+       VALID_RANGE(0, UINT_MAX32), DEFAULT(0),
+       BLOCK_SIZE(1));
 
 static Sys_var_ulong Sys_range_alloc_block_size(
        "range_alloc_block_size",
@@ -2706,7 +2819,7 @@ static Sys_var_enum Sys_thread_handling(
 #ifdef HAVE_QUERY_CACHE
 static bool fix_query_cache_size(sys_var *self, THD *thd, enum_var_type type)
 {
-  ulong new_cache_size= query_cache.resize(query_cache_size);
+  ulong new_cache_size= query_cache.resize((ulong)query_cache_size);
   /*
      Note: query_cache_size is a global variable reflecting the
      requested cache size. See also query_cache_size_arg
@@ -2833,7 +2946,6 @@ static bool fix_server_id(sys_var *self, THD *thd, enum_var_type type)
 {
   if (type == OPT_GLOBAL)
   {
-    server_id_supplied = 1;
     thd->variables.server_id= global_system_variables.server_id;
     /*
       Historically, server_id was a global variable that is exported to
@@ -2850,7 +2962,7 @@ static Sys_var_ulong Sys_server_id(
        "Uniquely identifies the server instance in the community of "
        "replication partners",
        SESSION_VAR(server_id), CMD_LINE(REQUIRED_ARG, OPT_SERVER_ID),
-       VALID_RANGE(0, UINT_MAX32), DEFAULT(0), BLOCK_SIZE(1), NO_MUTEX_GUARD,
+       VALID_RANGE(1, UINT_MAX32), DEFAULT(1), BLOCK_SIZE(1), NO_MUTEX_GUARD,
        NOT_IN_BINLOG, ON_CHECK(check_has_super), ON_UPDATE(fix_server_id));
 
 static Sys_var_mybool Sys_slave_compressed_protocol(
@@ -2869,7 +2981,7 @@ static Sys_var_enum Slave_exec_mode(
        "For example, in row based replication attempts to delete rows that "
        "doesn't exist will be ignored. "
        "In STRICT mode, replication will stop on any unexpected difference "
-       "between the master and the slave",
+       "between the master and the slave.",
        GLOBAL_VAR(slave_exec_mode_options), CMD_LINE(REQUIRED_ARG),
        slave_exec_mode_names, DEFAULT(SLAVE_EXEC_MODE_STRICT));
 
@@ -2936,10 +3048,8 @@ Sys_var_replicate_events_marked_for_skip::global_update(THD *thd, set_var *var)
   DBUG_ENTER("Sys_var_replicate_events_marked_for_skip::global_update");
 
   mysql_mutex_unlock(&LOCK_global_system_variables);
-  mysql_mutex_lock(&LOCK_active_mi);
-  if (!master_info_index->give_error_if_slave_running())
+  if (!give_error_if_slave_running(0))
     result= Sys_var_enum::global_update(thd, var);
-  mysql_mutex_unlock(&LOCK_active_mi);
   mysql_mutex_lock(&LOCK_global_system_variables);
   DBUG_RETURN(result);
 }
@@ -2971,7 +3081,7 @@ static Sys_var_ulonglong Sys_sort_buffer(
        VALID_RANGE(MIN_SORT_MEMORY, SIZE_T_MAX), DEFAULT(MAX_SORT_MEMORY),
        BLOCK_SIZE(1));
 
-export ulonglong expand_sql_mode(ulonglong sql_mode)
+export sql_mode_t expand_sql_mode(sql_mode_t sql_mode)
 {
   if (sql_mode & MODE_ANSI)
   {
@@ -3025,7 +3135,7 @@ export ulonglong expand_sql_mode(ulonglong sql_mode)
 static bool check_sql_mode(sys_var *self, THD *thd, set_var *var)
 {
   var->save_result.ulonglong_value=
-    expand_sql_mode(var->save_result.ulonglong_value);
+    (ulonglong) expand_sql_mode(var->save_result.ulonglong_value);
   return false;
 }
 static bool fix_sql_mode(sys_var *self, THD *thd, enum_var_type type)
@@ -3037,6 +3147,10 @@ static bool fix_sql_mode(sys_var *self, THD *thd, enum_var_type type)
       thd->server_status|= SERVER_STATUS_NO_BACKSLASH_ESCAPES;
     else
       thd->server_status&= ~SERVER_STATUS_NO_BACKSLASH_ESCAPES;
+    if (thd->variables.sql_mode & MODE_ANSI_QUOTES)
+      thd->server_status|= SERVER_STATUS_ANSI_QUOTES;
+    else
+      thd->server_status&= ~SERVER_STATUS_ANSI_QUOTES;
   }
   return false;
 }
@@ -3058,7 +3172,16 @@ static const char *sql_mode_names[]=
   "PAD_CHAR_TO_FULL_LENGTH",
   0
 };
-export bool sql_mode_string_representation(THD *thd, ulonglong sql_mode,
+
+
+const char *sql_mode_string_representation(uint bit_number)
+{
+  DBUG_ASSERT(bit_number < array_elements(sql_mode_names));
+  return sql_mode_names[bit_number];
+}
+
+
+export bool sql_mode_string_representation(THD *thd, sql_mode_t sql_mode,
                                            LEX_STRING *ls)
 {
   set_to_string(thd, ls, sql_mode, sql_mode_names);
@@ -3074,7 +3197,9 @@ static Sys_var_set Sys_sql_mode(
        "Sets the sql mode",
        SESSION_VAR(sql_mode), CMD_LINE(REQUIRED_ARG),
        sql_mode_names,
-       DEFAULT(MODE_NO_ENGINE_SUBSTITUTION |
+       DEFAULT(MODE_STRICT_TRANS_TABLES |
+               MODE_ERROR_FOR_DIVISION_BY_ZERO |
+               MODE_NO_ENGINE_SUBSTITUTION |
                MODE_NO_AUTO_CREATE_USER),
        NO_MUTEX_GUARD, NOT_IN_BINLOG,
        ON_CHECK(check_sql_mode), ON_UPDATE(fix_sql_mode));
@@ -3142,6 +3267,12 @@ static Sys_var_charptr Sys_ssl_crlpath(
        READ_ONLY GLOBAL_VAR(opt_ssl_crlpath), SSL_OPT(OPT_SSL_CRLPATH),
        IN_FS_CHARSET, DEFAULT(0));
 
+static Sys_var_mybool Sys_standard_compliant_cte(
+       "standard_compliant_cte",
+       "Allow only CTEs compliant to SQL standard",
+       SESSION_VAR(only_standard_compliant_cte), CMD_LINE(OPT_ARG),
+       DEFAULT(TRUE));
+
 
 // why ENUM and not BOOL ?
 static const char *updatable_views_with_limit_names[]= {"NO", "YES", 0};
@@ -3167,11 +3298,15 @@ static Sys_var_charptr Sys_system_time_zone(
        CMD_LINE_HELP_ONLY,
        IN_SYSTEM_CHARSET, DEFAULT(system_time_zone));
 
+/*
+  If One use views with prepared statements this should be bigger than
+  table_open_cache (now we allow 2 times bigger value)
+*/
 static Sys_var_ulong Sys_table_def_size(
        "table_definition_cache",
        "The number of cached table definitions",
        GLOBAL_VAR(tdc_size), CMD_LINE(REQUIRED_ARG),
-       VALID_RANGE(TABLE_DEF_CACHE_MIN, 512*1024),
+       VALID_RANGE(TABLE_DEF_CACHE_MIN, 2*1024*1024),
        DEFAULT(TABLE_DEF_CACHE_DEFAULT), BLOCK_SIZE(1));
 
 
@@ -3183,26 +3318,29 @@ static bool fix_table_open_cache(sys_var *, THD *, enum_var_type)
   return false;
 }
 
-
+/* Check the table_definition_cache comment if makes changes */
 static Sys_var_ulong Sys_table_cache_size(
        "table_open_cache", "The number of cached open tables",
        GLOBAL_VAR(tc_size), CMD_LINE(REQUIRED_ARG),
-       VALID_RANGE(1, 512*1024), DEFAULT(TABLE_OPEN_CACHE_DEFAULT),
+       VALID_RANGE(10, 1024*1024), DEFAULT(TABLE_OPEN_CACHE_DEFAULT),
        BLOCK_SIZE(1), NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(0),
        ON_UPDATE(fix_table_open_cache));
 
+static Sys_var_uint Sys_table_cache_instances(
+       "table_open_cache_instances", "Maximum number of table cache instances",
+       READ_ONLY GLOBAL_VAR(tc_instances), CMD_LINE(REQUIRED_ARG),
+       VALID_RANGE(1, 64), DEFAULT(8), BLOCK_SIZE(1));
+
 static Sys_var_ulong Sys_thread_cache_size(
        "thread_cache_size",
-       "How many threads we should keep in a cache for reuse",
+       "How many threads we should keep in a cache for reuse. These are freed after 5 minutes of idle time",
        GLOBAL_VAR(thread_cache_size), CMD_LINE(REQUIRED_ARG),
-       VALID_RANGE(0, 16384), DEFAULT(0), BLOCK_SIZE(1));
+       VALID_RANGE(0, 16384), DEFAULT(256), BLOCK_SIZE(1));
 
 #ifdef HAVE_POOL_OF_THREADS
 static bool fix_tp_max_threads(sys_var *, THD *, enum_var_type)
 {
-#ifdef _WIN32
   tp_set_max_threads(threadpool_max_threads);
-#endif
   return false;
 }
 
@@ -3215,8 +3353,6 @@ static bool fix_tp_min_threads(sys_var *, THD *, enum_var_type)
 }
 #endif
 
-
-#ifndef  _WIN32
 static bool check_threadpool_size(sys_var *self, THD *thd, set_var *var)
 {
   ulonglong v= var->save_result.ulonglong_value;
@@ -3241,7 +3377,6 @@ static bool fix_threadpool_stall_limit(sys_var*, THD*, enum_var_type)
   tp_set_threadpool_stall_limit(threadpool_stall_limit);
   return false;
 }
-#endif
 
 #ifdef _WIN32
 static Sys_var_uint Sys_threadpool_min_threads(
@@ -3252,7 +3387,24 @@ static Sys_var_uint Sys_threadpool_min_threads(
   NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(0),
   ON_UPDATE(fix_tp_min_threads)
   );
-#else
+
+static const char *threadpool_mode_names[]={ "windows", "generic", 0 };
+static Sys_var_enum Sys_threadpool_mode(
+  "thread_pool_mode",
+  "Chose implementation of the threadpool",
+  READ_ONLY GLOBAL_VAR(threadpool_mode), CMD_LINE(REQUIRED_ARG),
+  threadpool_mode_names, DEFAULT(TP_MODE_WINDOWS)
+  );
+#endif
+
+static const char *threadpool_priority_names[]={ "high", "low", "auto", 0 };
+static Sys_var_enum Sys_thread_pool_priority(
+  "thread_pool_priority",
+  "Threadpool priority. High priority connections usually start executing earlier than low priority."
+  "If priority set to 'auto', the the actual priority(low or high) is determined based on whether or not connection is inside transaction.",
+  SESSION_VAR(threadpool_priority), CMD_LINE(REQUIRED_ARG),
+  threadpool_priority_names, DEFAULT(TP_PRIORITY_AUTO));
+
 static Sys_var_uint Sys_threadpool_idle_thread_timeout(
   "thread_pool_idle_timeout",
   "Timeout in seconds for an idle thread in the thread pool."
@@ -3287,14 +3439,21 @@ static Sys_var_uint Sys_threadpool_stall_limit(
   NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(0), 
   ON_UPDATE(fix_threadpool_stall_limit)
 );
-#endif /* !WIN32 */
+
 static Sys_var_uint Sys_threadpool_max_threads(
   "thread_pool_max_threads",
   "Maximum allowed number of worker threads in the thread pool",
    GLOBAL_VAR(threadpool_max_threads), CMD_LINE(REQUIRED_ARG),
-   VALID_RANGE(1, 65536), DEFAULT(1000), BLOCK_SIZE(1),
+   VALID_RANGE(1, 65536), DEFAULT(65536), BLOCK_SIZE(1),
    NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(0), 
    ON_UPDATE(fix_tp_max_threads)
+);
+
+static Sys_var_uint Sys_threadpool_threadpool_prio_kickup_timer(
+ "thread_pool_prio_kickup_timer",
+ "The number of milliseconds before a dequeued low-priority statement is moved to the high-priority queue",
+  GLOBAL_VAR(threadpool_prio_kickup_timer), CMD_LINE(REQUIRED_ARG),
+  VALID_RANGE(0, UINT_MAX), DEFAULT(1000), BLOCK_SIZE(1)
 );
 #endif /* HAVE_POOL_OF_THREADS */
 
@@ -3347,22 +3506,57 @@ bool Sys_var_tx_read_only::session_update(THD *thd, set_var *var)
   {
     // @see Sys_var_tx_isolation::session_update() above for the rules.
     thd->tx_read_only= var->save_result.ulonglong_value;
+
+#ifndef EMBEDDED_LIBRARY
+    if (thd->variables.session_track_transaction_info > TX_TRACK_NONE)
+    {
+      Transaction_state_tracker *tst= (Transaction_state_tracker *)
+             thd->session_tracker.get_tracker(TRANSACTION_INFO_TRACKER);
+
+      if (var->type == OPT_DEFAULT)
+        tst->set_read_flags(thd,
+                            thd->tx_read_only ? TX_READ_ONLY : TX_READ_WRITE);
+      else
+        tst->set_read_flags(thd, TX_READ_INHERIT);
+    }
+#endif //EMBEDDED_LIBRARY
   }
   return false;
 }
 
 
 static Sys_var_tx_read_only Sys_tx_read_only(
-       "tx_read_only", "Set default transaction access mode to read only.",
+       "tx_read_only", "Default transaction access mode. If set to OFF, "
+       "the default, access is read/write. If set to ON, access is read-only. "
+       "The SET TRANSACTION statement can also change the value of this variable. "
+       "See SET TRANSACTION and START TRANSACTION.",
        SESSION_VAR(tx_read_only), NO_CMD_LINE, DEFAULT(0),
        NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(check_tx_read_only));
 
 static Sys_var_ulonglong Sys_tmp_table_size(
        "tmp_table_size",
-       "If an internal in-memory temporary table exceeds this size, MySQL "
-       "will automatically convert it to an on-disk MyISAM or Aria table",
-       SESSION_VAR(tmp_table_size), CMD_LINE(REQUIRED_ARG),
+       "Alias for tmp_memory_table_size. "
+       "If an internal in-memory temporary table exceeds this size, MariaDB "
+       "will automatically convert it to an on-disk MyISAM or Aria table.",
+       SESSION_VAR(tmp_memory_table_size), CMD_LINE(REQUIRED_ARG),
        VALID_RANGE(1024, (ulonglong)~(intptr)0), DEFAULT(16*1024*1024),
+       BLOCK_SIZE(1));
+
+static Sys_var_ulonglong Sys_tmp_memory_table_size(
+       "tmp_memory_table_size",
+       "If an internal in-memory temporary table exceeds this size, MariaDB "
+       "will automatically convert it to an on-disk MyISAM or Aria table. "
+       "Same as tmp_table_size.",
+       SESSION_VAR(tmp_memory_table_size), CMD_LINE(REQUIRED_ARG),
+       VALID_RANGE(1024, (ulonglong)~(intptr)0), DEFAULT(16*1024*1024),
+       BLOCK_SIZE(1));
+
+static Sys_var_ulonglong Sys_tmp_disk_table_size(
+       "tmp_disk_table_size",
+       "Max size for data for an internal temporary on-disk MyISAM or Aria table.",
+       SESSION_VAR(tmp_disk_table_size), CMD_LINE(REQUIRED_ARG),
+       VALID_RANGE(1024, (ulonglong)~(intptr)0),
+       DEFAULT((ulonglong)~(intptr)0),
        BLOCK_SIZE(1));
 
 static Sys_var_mybool Sys_timed_mutexes(
@@ -3373,46 +3567,65 @@ static Sys_var_mybool Sys_timed_mutexes(
        DEPRECATED(""));
 
 static Sys_var_charptr Sys_version(
-       "version", "Server version",
+       "version", "Server version number. It may also include a suffix "
+       "with configuration or build information. -debug indicates "
+       "debugging support was enabled on the server, and -log indicates "
+       "at least one of the binary log, general log or slow query log are "
+       "enabled, for example 10.1.1-MariaDB-mariadb1precise-log.",
        READ_ONLY GLOBAL_VAR(server_version_ptr),
        CMD_LINE_HELP_ONLY,
        IN_SYSTEM_CHARSET, DEFAULT(server_version));
 
 static char *server_version_comment_ptr;
 static Sys_var_charptr Sys_version_comment(
-       "version_comment", "version_comment",
+       "version_comment", "Value of the COMPILATION_COMMENT option "
+       "specified by CMake when building MariaDB, for example "
+       "mariadb.org binary distribution.",
        READ_ONLY GLOBAL_VAR(server_version_comment_ptr),
        CMD_LINE_HELP_ONLY,
        IN_SYSTEM_CHARSET, DEFAULT(MYSQL_COMPILATION_COMMENT));
 
 static char *server_version_compile_machine_ptr;
 static Sys_var_charptr Sys_version_compile_machine(
-       "version_compile_machine", "version_compile_machine",
+       "version_compile_machine", "The machine type or architecture "
+       "MariaDB was built on, for example i686.",
        READ_ONLY GLOBAL_VAR(server_version_compile_machine_ptr),
        CMD_LINE_HELP_ONLY, IN_SYSTEM_CHARSET, DEFAULT(DEFAULT_MACHINE));
 
 static char *server_version_compile_os_ptr;
 static Sys_var_charptr Sys_version_compile_os(
-       "version_compile_os", "version_compile_os",
+       "version_compile_os", "Operating system that MariaDB was built "
+       "on, for example debian-linux-gnu.",
        READ_ONLY GLOBAL_VAR(server_version_compile_os_ptr),
        CMD_LINE_HELP_ONLY,
        IN_SYSTEM_CHARSET, DEFAULT(SYSTEM_TYPE));
 
+static char *guess_malloc_library()
+{
+  if (strcmp(MALLOC_LIBRARY, "system") == 0)
+  {
+#ifdef HAVE_DLOPEN
+    typedef int (*mallctl_type)(const char*, void*, size_t*, void*, size_t);
+    mallctl_type mallctl_func;
+    mallctl_func= (mallctl_type)dlsym(RTLD_DEFAULT, "mallctl");
+    if (mallctl_func)
+    {
+      static char buf[128];
+      char *ver;
+      size_t len = sizeof(ver);
+      mallctl_func("version", &ver, &len, NULL, 0);
+      strxnmov(buf, sizeof(buf)-1, "jemalloc ", ver, NULL);
+      return buf;
+    }
+#endif
+  }
+  return const_cast<char*>(MALLOC_LIBRARY);
+}
 static char *malloc_library;
 static Sys_var_charptr Sys_malloc_library(
        "version_malloc_library", "Version of the used malloc library",
        READ_ONLY GLOBAL_VAR(malloc_library), CMD_LINE_HELP_ONLY,
-       IN_SYSTEM_CHARSET, DEFAULT(MALLOC_LIBRARY));
-
-#ifdef HAVE_YASSL
-#include <openssl/ssl.h>
-#define SSL_LIBRARY "YaSSL " YASSL_VERSION
-#elif HAVE_OPENSSL
-#include <openssl/crypto.h>
-#define SSL_LIBRARY SSLeay_version(SSLEAY_VERSION)
-#else
-#error No SSL?
-#endif
+       IN_SYSTEM_CHARSET, DEFAULT(guess_malloc_library()));
 
 static char *ssl_library;
 static Sys_var_charptr Sys_ssl_library(
@@ -3519,7 +3732,7 @@ static bool fix_autocommit(sys_var *self, THD *thd, enum_var_type type)
     if (trans_commit_stmt(thd) || trans_commit(thd))
     {
       thd->variables.option_bits&= ~OPTION_AUTOCOMMIT;
-      thd->mdl_context.release_transactional_locks();
+      thd->release_transactional_locks();
       WSREP_DEBUG("autocommit, MDL TRX lock released: %lld",
                   (longlong) thd->thread_id);
       return true;
@@ -3558,24 +3771,34 @@ static bool fix_autocommit(sys_var *self, THD *thd, enum_var_type type)
 }
 
 static Sys_var_bit Sys_autocommit(
-       "autocommit", "autocommit",
+       "autocommit", "If set to 1, the default, all queries are committed "
+       "immediately. If set to 0, they are only committed upon a COMMIT statement"
+       ", or rolled back with a ROLLBACK statement. If autocommit is set to 0, "
+       "and then changed to 1, all open transactions are immediately committed.",
        NO_SET_STMT SESSION_VAR(option_bits), NO_CMD_LINE,
        OPTION_AUTOCOMMIT, DEFAULT(TRUE),
        NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(0), ON_UPDATE(fix_autocommit));
 export sys_var *Sys_autocommit_ptr= &Sys_autocommit; // for sql_yacc.yy
 
 static Sys_var_mybool Sys_big_tables(
-       "big_tables", "Allow big result sets by saving all "
-       "temporary sets on file (Solves most 'table full' errors)",
+       "big_tables", "Old variable, which if set to 1, allows large result sets "
+       "by saving all temporary sets to disk, avoiding 'table full' errors. No "
+       "longer needed, as the server now handles this automatically. "
+       "sql_big_tables is a synonym.",
        SESSION_VAR(big_tables), CMD_LINE(OPT_ARG), DEFAULT(FALSE));
 
 static Sys_var_bit Sys_big_selects(
-       "sql_big_selects", "sql_big_selects",
+       "sql_big_selects", "If set to 0, MariaDB will not perform large SELECTs."
+       " See max_join_size for details. If max_join_size is set to anything but "
+       "DEFAULT, sql_big_selects is automatically set to 0. If sql_big_selects "
+       "is again set, max_join_size will be ignored.",
        SESSION_VAR(option_bits), NO_CMD_LINE, OPTION_BIG_SELECTS,
        DEFAULT(FALSE));
 
 static Sys_var_bit Sys_log_off(
-       "sql_log_off", "sql_log_off",
+       "sql_log_off", "If set to 1 (0 is the default), no logging to the general "
+       "query log is done for the client. Only clients with the SUPER privilege "
+       "can update this variable.",
        NO_SET_STMT SESSION_VAR(option_bits), NO_CMD_LINE, OPTION_LOG_OFF,
        DEFAULT(FALSE), NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(check_has_super));
 
@@ -3632,52 +3855,88 @@ static bool check_sql_log_bin(sys_var *self, THD *thd, set_var *var)
   return FALSE;
 }
 
-static Sys_var_mybool Sys_log_binlog(
-       "sql_log_bin", "Controls whether logging to the binary log is done",
+static Sys_var_mybool Sys_log_binlog(	
+       "sql_log_bin", "If set to 0 (1 is the default), no logging to the binary "
+       "log is done for the client. Only clients with the SUPER privilege can "
+       "update this variable. Can have unintended consequences if set globally, "
+       "see SET SQL_LOG_BIN. Starting MariaDB 10.1.7, this variable does not "
+       "affect the replication of events in a Galera cluster.",
        SESSION_VAR(sql_log_bin), NO_CMD_LINE, DEFAULT(TRUE),
        NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(check_sql_log_bin),
        ON_UPDATE(fix_sql_log_bin_after_update));
 
 static Sys_var_bit Sys_sql_warnings(
-       "sql_warnings", "sql_warnings",
+       "sql_warnings", "If set to 1, single-row INSERTs will produce a string "
+       "containing warning information if a warning occurs.",
        SESSION_VAR(option_bits), NO_CMD_LINE, OPTION_WARNINGS,
        DEFAULT(FALSE));
 
 static Sys_var_bit Sys_sql_notes(
-       "sql_notes", "sql_notes",
+       "sql_notes", "If set to 1, the default, warning_count is incremented each "
+       "time a Note warning is encountered. If set to 0, Note warnings are not "
+       "recorded. mysqldump has outputs to set this variable to 0 so that no "
+       "unnecessary increments occur when data is reloaded.",
        SESSION_VAR(option_bits), NO_CMD_LINE, OPTION_SQL_NOTES,
        DEFAULT(TRUE));
 
 static Sys_var_bit Sys_auto_is_null(
-       "sql_auto_is_null", "sql_auto_is_null",
+       "sql_auto_is_null", "If set to 1, the query SELECT * FROM table_name WHERE "
+       "auto_increment_column IS NULL will return an auto-increment that has just "
+       "been successfully inserted, the same as the LAST_INSERT_ID() function. Some"
+       " ODBC programs make use of this IS NULL comparison.",
        SESSION_VAR(option_bits), NO_CMD_LINE, OPTION_AUTO_IS_NULL,
        DEFAULT(FALSE), NO_MUTEX_GUARD, IN_BINLOG);
 
 static Sys_var_bit Sys_safe_updates(
-       "sql_safe_updates", "sql_safe_updates",
+       "sql_safe_updates", "If set to 1, UPDATEs and DELETEs need either a key in "
+       "the WHERE clause, or a LIMIT clause, or else they will aborted. Prevents "
+       "the common mistake of accidentally deleting or updating every row in a table.",
        SESSION_VAR(option_bits), NO_CMD_LINE, OPTION_SAFE_UPDATES,
        DEFAULT(FALSE));
 
 static Sys_var_bit Sys_buffer_results(
-       "sql_buffer_result", "sql_buffer_result",
+       "sql_buffer_result", "If set to 1 (0 is default), results from SELECT "
+       "statements are always placed into temporary tables. This can help the "
+       "server when it takes a long time to send the results to the client by "
+       "allowing the table locks to be freed early.",
        SESSION_VAR(option_bits), NO_CMD_LINE, OPTION_BUFFER_RESULT,
        DEFAULT(FALSE));
 
 static Sys_var_bit Sys_quote_show_create(
-       "sql_quote_show_create", "sql_quote_show_create",
+       "sql_quote_show_create", "If set to 1, the default, the server will "
+       "quote identifiers for SHOW CREATE DATABASE, SHOW CREATE TABLE and "
+       "SHOW CREATE VIEW statements. Quoting is disabled if set to 0. Enable "
+       "to ensure replications works when identifiers require quoting.",
        SESSION_VAR(option_bits), NO_CMD_LINE, OPTION_QUOTE_SHOW_CREATE,
        DEFAULT(TRUE));
 
 static Sys_var_bit Sys_foreign_key_checks(
-       "foreign_key_checks", "foreign_key_checks",
+       "foreign_key_checks", "If set to 1 (the default) foreign key constraints"
+       " (including ON UPDATE and ON DELETE behavior) InnoDB tables are checked,"
+       " while if set to 0, they are not checked. 0 is not recommended for normal "
+       "use, though it can be useful in situations where you know the data is "
+       "consistent, but want to reload data in a different order from that that "
+       "specified by parent/child relationships. Setting this variable to 1 does "
+       "not retrospectively check for inconsistencies introduced while set to 0.",
        SESSION_VAR(option_bits), NO_CMD_LINE,
        REVERSE(OPTION_NO_FOREIGN_KEY_CHECKS),
        DEFAULT(TRUE), NO_MUTEX_GUARD, IN_BINLOG);
 
 static Sys_var_bit Sys_unique_checks(
-       "unique_checks", "unique_checks",
+       "unique_checks", "If set to 1, the default, secondary indexes in InnoDB "
+       "tables are performed. If set to 0, storage engines can (but are not "
+       "required to) assume that duplicate keys are not present in input data. "
+       "Set to 0 to speed up imports of large tables to InnoDB. The storage "
+       "engine will still issue a duplicate key error if it detects one, even "
+       "if set to 0.",
        SESSION_VAR(option_bits), NO_CMD_LINE,
        REVERSE(OPTION_RELAXED_UNIQUE_CHECKS),
+       DEFAULT(TRUE), NO_MUTEX_GUARD, IN_BINLOG);
+
+static Sys_var_bit Sys_no_check_constraint(
+       "check_constraint_checks", "check_constraint_checks",
+       SESSION_VAR(option_bits), NO_CMD_LINE,
+       REVERSE(OPTION_NO_CHECK_CONSTRAINT_CHECKS),
        DEFAULT(TRUE), NO_MUTEX_GUARD, IN_BINLOG);
 
 #ifdef ENABLED_PROFILING
@@ -3689,13 +3948,16 @@ static bool update_profiling(sys_var *self, THD *thd, enum_var_type type)
 }
 
 static Sys_var_bit Sys_profiling(
-       "profiling", "profiling",
+       "profiling", "If set to 1 (0 is default), statement profiling will be "
+       "enabled. See SHOW PROFILES and SHOW PROFILE.",
        NO_SET_STMT SESSION_VAR(option_bits), NO_CMD_LINE, OPTION_PROFILING,
        DEFAULT(FALSE), NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(0),
        ON_UPDATE(update_profiling));
 
 static Sys_var_ulong Sys_profiling_history_size(
-       "profiling_history_size", "Limit of query profiling memory",
+       "profiling_history_size", "Number of statements about which profiling "
+       "information is maintained. If set to 0, no profiles are stored. "
+       "See SHOW PROFILES.",
        NO_SET_STMT SESSION_VAR(profiling_history_size), CMD_LINE(REQUIRED_ARG),
        VALID_RANGE(0, 100), DEFAULT(15), BLOCK_SIZE(1));
 #endif
@@ -3729,7 +3991,11 @@ static bool check_skip_replication(sys_var *self, THD *thd, set_var *var)
 }
 
 static Sys_var_bit Sys_skip_replication(
-       "skip_replication", "skip_replication",
+       "skip_replication", "Changes are logged into the binary log with the "
+       "@@skip_replication flag set. Such events will not be replicated by "
+       "slaves that run with --replicate-events-marked-for-skip set different "
+       "from its default of REPLICATE. See Selectively skipping replication "
+       "of binlog events for more information.",
        NO_SET_STMT SESSION_ONLY(option_bits),
        NO_CMD_LINE, OPTION_SKIP_REPLICATION,
        DEFAULT(FALSE), NO_MUTEX_GUARD, NOT_IN_BINLOG,
@@ -3798,12 +4064,16 @@ static Sys_var_session_special Sys_identity(
 */
 static bool update_insert_id(THD *thd, set_var *var)
 {
-  if (!var->value)
-  {
-    my_error(ER_NO_DEFAULT, MYF(0), var->var->name.str);
-    return true;
-  }
-  thd->force_one_auto_inc_interval(var->save_result.ulonglong_value);
+  /*
+    If we set the insert_id to the DEFAULT or 0
+    it means we 'reset' it so it's value doesn't
+    affect the INSERT.
+  */
+  if (!var->value ||
+      var->save_result.ulonglong_value == 0)
+    thd->auto_inc_intervals_forced.empty();
+  else
+    thd->force_one_auto_inc_interval(var->save_result.ulonglong_value);
   return false;
 }
 
@@ -3811,6 +4081,8 @@ static ulonglong read_insert_id(THD *thd)
 {
   return thd->auto_inc_intervals_forced.minimum();
 }
+
+
 static Sys_var_session_special Sys_insert_id(
        "insert_id", "The value to be used by the following INSERT "
        "or ALTER TABLE statement when inserting an AUTO_INCREMENT value",
@@ -3893,11 +4165,11 @@ static Sys_var_ulong Sys_default_week_format(
        SESSION_VAR(default_week_format), CMD_LINE(REQUIRED_ARG),
        VALID_RANGE(0, 7), DEFAULT(0), BLOCK_SIZE(1));
 
-static Sys_var_ulonglong Sys_group_concat_max_len(
+static Sys_var_uint Sys_group_concat_max_len(
        "group_concat_max_len",
-       "The maximum length of the result of function  GROUP_CONCAT()",
+       "The maximum length of the result of function GROUP_CONCAT()",
        SESSION_VAR(group_concat_max_len), CMD_LINE(REQUIRED_ARG),
-       VALID_RANGE(4, SIZE_T_MAX), DEFAULT(1024), BLOCK_SIZE(1));
+       VALID_RANGE(4, UINT_MAX32), DEFAULT(1024*1024), BLOCK_SIZE(1));
 
 static char *glob_hostname_ptr;
 static Sys_var_charptr Sys_hostname(
@@ -3962,14 +4234,16 @@ static bool check_log_path(sys_var *self, THD *thd, set_var *var)
   if (!var->save_result.string_value.str)
     return true;
 
-  if (var->save_result.string_value.length > FN_REFLEN)
+  LEX_STRING *val= &var->save_result.string_value;
+
+  if (val->length > FN_REFLEN)
   { // path is too long
     my_error(ER_PATH_LENGTH, MYF(0), self->name.str);
     return true;
   }
 
   char path[FN_REFLEN];
-  size_t path_length= unpack_filename(path, var->save_result.string_value.str);
+  size_t path_length= unpack_filename(path, val->str);
 
   if (!path_length)
     return true;
@@ -3982,6 +4256,17 @@ static bool check_log_path(sys_var *self, THD *thd, set_var *var)
      return true;
   }
 
+  static const LEX_CSTRING my_cnf= { STRING_WITH_LEN("my.cnf") };
+  static const LEX_CSTRING my_ini= { STRING_WITH_LEN("my.ini") };
+  if (path_length >= my_cnf.length)
+  {
+    if (strcasecmp(path + path_length - my_cnf.length, my_cnf.str) == 0)
+      return true; // log file name ends with "my.cnf"
+    DBUG_ASSERT(my_cnf.length == my_ini.length);
+    if (strcasecmp(path + path_length - my_ini.length, my_ini.str) == 0)
+      return true; // log file name ends with "my.ini"
+  }
+
   MY_STAT f_stat;
 
   if (my_stat(path, &f_stat, MYF(0)))
@@ -3991,9 +4276,9 @@ static bool check_log_path(sys_var *self, THD *thd, set_var *var)
     return false;
   }
 
-  (void) dirname_part(path, var->save_result.string_value.str, &path_length);
+  (void) dirname_part(path, val->str, &path_length);
 
-  if (var->save_result.string_value.length - path_length >= FN_LEN)
+  if (val->length - path_length >= FN_LEN)
   { // filename is too long
       my_error(ER_PATH_LENGTH, MYF(0), self->name.str);
       return true;
@@ -4059,43 +4344,61 @@ static Sys_var_charptr Sys_slow_log_path(
        ON_CHECK(check_log_path), ON_UPDATE(fix_slow_log_file));
 
 static Sys_var_have Sys_have_compress(
-       "have_compress", "have_compress",
+       "have_compress", "If the zlib compression library is accessible to the "
+       "server, this will be set to YES, otherwise it will be NO. The COMPRESS() "
+       "and UNCOMPRESS() functions will only be available if set to YES.",
        READ_ONLY GLOBAL_VAR(have_compress), NO_CMD_LINE);
 
 static Sys_var_have Sys_have_crypt(
-       "have_crypt", "have_crypt",
+       "have_crypt", "If the crypt() system call is available this variable will "
+       "be set to YES, otherwise it will be set to NO. If set to NO, the "
+       "ENCRYPT() function cannot be used.",
        READ_ONLY GLOBAL_VAR(have_crypt), NO_CMD_LINE);
 
 static Sys_var_have Sys_have_dlopen(
-       "have_dynamic_loading", "have_dynamic_loading",
+       "have_dynamic_loading", "If the server supports dynamic loading of plugins, "
+       "will be set to YES, otherwise will be set to NO.",
        READ_ONLY GLOBAL_VAR(have_dlopen), NO_CMD_LINE);
 
 static Sys_var_have Sys_have_geometry(
-       "have_geometry", "have_geometry",
+       "have_geometry", "If the server supports spatial data types, will be set to "
+       "YES, otherwise will be set to NO.",
        READ_ONLY GLOBAL_VAR(have_geometry), NO_CMD_LINE);
 
 static Sys_var_have Sys_have_openssl(
-       "have_openssl", "have_openssl",
+       "have_openssl", "Comparing have_openssl with have_ssl will indicate whether "
+       "YaSSL or openssl was used. If YaSSL, have_ssl will be YES, but have_openssl "
+       "will be NO.",
        READ_ONLY GLOBAL_VAR(have_openssl), NO_CMD_LINE);
 
 static Sys_var_have Sys_have_profiling(
-       "have_profiling", "have_profiling",
+       "have_profiling", "If statement profiling is available, will be set to YES, "
+       "otherwise will be set to NO. See SHOW PROFILES and SHOW PROFILE.",
        READ_ONLY GLOBAL_VAR(have_profiling), NO_CMD_LINE);
 
 static Sys_var_have Sys_have_query_cache(
-       "have_query_cache", "have_query_cache",
+       "have_query_cache", "If the server supports the query cache, will be set to "
+       "YES, otherwise will be set to NO.",
        READ_ONLY GLOBAL_VAR(have_query_cache), NO_CMD_LINE);
 
 static Sys_var_have Sys_have_rtree_keys(
-       "have_rtree_keys", "have_rtree_keys",
+       "have_rtree_keys", "If RTREE indexes (used for spatial indexes) "
+       "are available, will be set to YES, otherwise will be set to NO.",
        READ_ONLY GLOBAL_VAR(have_rtree_keys), NO_CMD_LINE);
 
 static Sys_var_have Sys_have_ssl(
-       "have_ssl", "have_ssl",
+       "have_ssl", "If the server supports secure connections, will be set to YES, "
+       "otherwise will be set to NO. If set to DISABLED, the server was compiled with "
+       "TLS support, but was not started with TLS support (see the mysqld options). "
+       "See also have_openssl.",
        READ_ONLY GLOBAL_VAR(have_ssl), NO_CMD_LINE);
 
 static Sys_var_have Sys_have_symlink(
-       "have_symlink", "have_symlink",
+       "have_symlink", "If symbolic link support is enabled, will be set to YES, "
+       "otherwise will be set to NO. Required for the INDEX DIRECTORY and DATA "
+       "DIRECTORY table options (see CREATE TABLE) and Windows symlink support. "
+       "Will be set to DISABLED if the server is started with the "
+       "--skip-symbolic-links option.",
        READ_ONLY GLOBAL_VAR(have_symlink), NO_CMD_LINE);
 
 static bool fix_log_state(sys_var *self, THD *thd, enum_var_type type);
@@ -4103,7 +4406,7 @@ static bool fix_log_state(sys_var *self, THD *thd, enum_var_type type);
 static Sys_var_mybool Sys_general_log(
        "general_log", "Log connections and queries to a table or log file. "
        "Defaults logging to a file 'hostname'.log or a table mysql.general_log"
-       "if --log-output=TABLE is used",
+       "if --log-output=TABLE is used.",
        GLOBAL_VAR(opt_log), CMD_LINE(OPT_ARG),
        DEFAULT(FALSE), NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(0),
        ON_UPDATE(fix_log_state));
@@ -4112,7 +4415,7 @@ static Sys_var_mybool Sys_slow_query_log(
        "slow_query_log",
        "Log slow queries to a table or log file. Defaults logging to a file "
        "'hostname'-slow.log or a table mysql.slow_log if --log-output=TABLE is "
-       "used. Must be enabled to activate other slow log options",
+       "used. Must be enabled to activate other slow log options.",
        SESSION_VAR(sql_log_slow), CMD_LINE(OPT_ARG),
        DEFAULT(FALSE), NO_MUTEX_GUARD, NOT_IN_BINLOG,
        ON_CHECK(0), ON_UPDATE(fix_log_state));
@@ -4184,12 +4487,12 @@ static Sys_var_set Sys_log_output(
 static Sys_var_mybool Sys_log_slave_updates(
        "log_slave_updates", "Tells the slave to log the updates from "
        "the slave thread to the binary log. You will need to turn it on if "
-       "you plan to daisy-chain the slaves",
+       "you plan to daisy-chain the slaves.",
        READ_ONLY GLOBAL_VAR(opt_log_slave_updates), CMD_LINE(OPT_ARG),
        DEFAULT(0));
 
 static Sys_var_charptr Sys_relay_log(
-       "relay_log", "The location and name to use for relay logs",
+       "relay_log", "The location and name to use for relay logs.",
        READ_ONLY GLOBAL_VAR(opt_relay_logname), CMD_LINE(REQUIRED_ARG),
        IN_FS_CHARSET, DEFAULT(0));
 
@@ -4200,7 +4503,7 @@ static Sys_var_charptr Sys_relay_log(
 */
 static Sys_var_charptr Sys_relay_log_index(
        "relay_log_index", "The location and name to use for the file "
-       "that keeps a list of the last relay logs",
+       "that keeps a list of the last relay logs.",
        READ_ONLY GLOBAL_VAR(relay_log_index), NO_CMD_LINE,
        IN_FS_CHARSET, DEFAULT(0));
 
@@ -4228,55 +4531,51 @@ static Sys_var_charptr Sys_log_bin_basename(
 
 static Sys_var_charptr Sys_relay_log_info_file(
        "relay_log_info_file", "The location and name of the file that "
-       "remembers where the SQL replication thread is in the relay logs",
+       "remembers where the SQL replication thread is in the relay logs.",
        READ_ONLY GLOBAL_VAR(relay_log_info_file), CMD_LINE(REQUIRED_ARG),
        IN_FS_CHARSET, DEFAULT(0));
 
 static Sys_var_mybool Sys_relay_log_purge(
        "relay_log_purge", "if disabled - do not purge relay logs. "
-       "if enabled - purge them as soon as they are no more needed",
+       "if enabled - purge them as soon as they are no more needed.",
        GLOBAL_VAR(relay_log_purge), CMD_LINE(OPT_ARG), DEFAULT(TRUE));
 
 static Sys_var_mybool Sys_relay_log_recovery(
        "relay_log_recovery", "Enables automatic relay log recovery "
        "right after the database startup, which means that the IO Thread "
        "starts re-fetching from the master right after the last transaction "
-       "processed",
+       "processed.",
        GLOBAL_VAR(relay_log_recovery), CMD_LINE(OPT_ARG), DEFAULT(FALSE));
 
 
 bool Sys_var_rpl_filter::global_update(THD *thd, set_var *var)
 {
   bool result= true;                            // Assume error
-  Master_info *mi;
   LEX_STRING *base_name= &var->base;
 
   if (!base_name->length)
     base_name= &thd->variables.default_master_connection;
 
   mysql_mutex_unlock(&LOCK_global_system_variables);
-  mysql_mutex_lock(&LOCK_active_mi);
-  
-  mi= master_info_index->
-    get_master_info(base_name, !base_name->length ?
-                    Sql_condition::WARN_LEVEL_ERROR :
-                    Sql_condition::WARN_LEVEL_WARN);
-  if (mi)
+
+  if (Master_info *mi= get_master_info(base_name, !var->base.length ?
+                                       Sql_condition::WARN_LEVEL_ERROR :
+                                       Sql_condition::WARN_LEVEL_WARN))
   {
     if (mi->rli.slave_running)
     {
       my_error(ER_SLAVE_MUST_STOP, MYF(0), 
-          mi->connection_name.length,
-          mi->connection_name.str);
+               (int) mi->connection_name.length,
+               mi->connection_name.str);
       result= true;
     }
     else
     {
       result= set_filter_value(var->save_result.string_value.str, mi);
     }
+    mi->release();
   }
 
-  mysql_mutex_unlock(&LOCK_active_mi);
   mysql_mutex_lock(&LOCK_global_system_variables);
   return result;
 }
@@ -4286,6 +4585,8 @@ bool Sys_var_rpl_filter::set_filter_value(const char *value, Master_info *mi)
   bool status= true;
   Rpl_filter* rpl_filter= mi->rpl_filter;
 
+  /* Proctect against other threads */
+  mysql_mutex_lock(&LOCK_active_mi);
   switch (opt_id) {
   case OPT_REPLICATE_DO_DB:
     status= rpl_filter->set_do_db(value);
@@ -4306,7 +4607,7 @@ bool Sys_var_rpl_filter::set_filter_value(const char *value, Master_info *mi)
     status= rpl_filter->set_wild_ignore_table(value);
     break;
   }
-
+  mysql_mutex_unlock(&LOCK_active_mi);
   return status;
 }
 
@@ -4320,23 +4621,20 @@ uchar *Sys_var_rpl_filter::global_value_ptr(THD *thd,
   Rpl_filter *rpl_filter;
 
   mysql_mutex_unlock(&LOCK_global_system_variables);
-  mysql_mutex_lock(&LOCK_active_mi);
-
-  mi= master_info_index->
-    get_master_info(base_name, !base_name->length ?
-                    Sql_condition::WARN_LEVEL_ERROR :
-                    Sql_condition::WARN_LEVEL_WARN);
-
-  mysql_mutex_lock(&LOCK_global_system_variables);
+  mi= get_master_info(base_name, !base_name->length ?
+                      Sql_condition::WARN_LEVEL_ERROR :
+                      Sql_condition::WARN_LEVEL_WARN);
 
   if (!mi)
   {
-    mysql_mutex_unlock(&LOCK_active_mi);
+    mysql_mutex_lock(&LOCK_global_system_variables);
     return 0;
   }
+
   rpl_filter= mi->rpl_filter;
   tmp.length(0);
 
+  mysql_mutex_lock(&LOCK_active_mi);
   switch (opt_id) {
   case OPT_REPLICATE_DO_DB:
     rpl_filter->get_do_db(&tmp);
@@ -4357,9 +4655,12 @@ uchar *Sys_var_rpl_filter::global_value_ptr(THD *thd,
     rpl_filter->get_wild_ignore_table(&tmp);
     break;
   }
+  mysql_mutex_unlock(&LOCK_active_mi);
+  mysql_mutex_lock(&LOCK_global_system_variables);
+
+  mi->release();
 
   ret= (uchar *) thd->strmake(tmp.ptr(), tmp.length());
-  mysql_mutex_unlock(&LOCK_active_mi);
 
   return ret;
 }
@@ -4428,17 +4729,12 @@ get_master_info_ulonglong_value(THD *thd, ptrdiff_t offset)
   Master_info *mi;
   ulonglong res= 0;                                  // Default value
   mysql_mutex_unlock(&LOCK_global_system_variables);
-  mysql_mutex_lock(&LOCK_active_mi);
-  mi= master_info_index->
-    get_master_info(&thd->variables.default_master_connection,
-                    Sql_condition::WARN_LEVEL_WARN);
-  if (mi)
+  if ((mi= get_master_info(&thd->variables.default_master_connection,
+                           Sql_condition::WARN_LEVEL_WARN)))
   {
-    mysql_mutex_lock(&mi->rli.data_lock);
     res= *((ulonglong*) (((uchar*) mi) + master_info_offset));
-    mysql_mutex_unlock(&mi->rli.data_lock);
+    mi->release();
   }
-  mysql_mutex_unlock(&LOCK_active_mi);    
   mysql_mutex_lock(&LOCK_global_system_variables);
   return res;
 }
@@ -4453,19 +4749,16 @@ bool update_multi_source_variable(sys_var *self_var, THD *thd,
 
   if (type == OPT_GLOBAL)
     mysql_mutex_unlock(&LOCK_global_system_variables);
-  mysql_mutex_lock(&LOCK_active_mi);
-  mi= master_info_index->
-    get_master_info(&thd->variables.default_master_connection,
-                    Sql_condition::WARN_LEVEL_ERROR);
-  if (mi)
+  if ((mi= (get_master_info(&thd->variables.default_master_connection,
+                            Sql_condition::WARN_LEVEL_ERROR))))
   {
     mysql_mutex_lock(&mi->rli.run_lock);
     mysql_mutex_lock(&mi->rli.data_lock);
     result= self->update_variable(thd, mi);
     mysql_mutex_unlock(&mi->rli.data_lock);
     mysql_mutex_unlock(&mi->rli.run_lock);
+    mi->release();
   }
-  mysql_mutex_unlock(&LOCK_active_mi);
   if (type == OPT_GLOBAL)
     mysql_mutex_lock(&LOCK_global_system_variables);
   return result;
@@ -4475,7 +4768,7 @@ static bool update_slave_skip_counter(sys_var *self, THD *thd, Master_info *mi)
 {
   if (mi->rli.slave_running)
   {
-    my_error(ER_SLAVE_MUST_STOP, MYF(0), mi->connection_name.length,
+    my_error(ER_SLAVE_MUST_STOP, MYF(0), (int) mi->connection_name.length,
              mi->connection_name.str);
     return true;
   }
@@ -4516,7 +4809,7 @@ static Sys_var_multi_source_ulonglong Sys_slave_skip_counter(
 static bool update_max_relay_log_size(sys_var *self, THD *thd, Master_info *mi)
 {
   mi->rli.max_relay_log_size= thd->variables.max_relay_log_size;
-  mi->rli.relay_log.set_max_size(mi->rli.max_relay_log_size);
+  mi->rli.relay_log.set_max_size((ulong)mi->rli.max_relay_log_size);
   return false;
 }
 
@@ -4535,6 +4828,12 @@ static Sys_var_charptr Sys_slave_skip_errors(
        "provided list",
        READ_ONLY GLOBAL_VAR(opt_slave_skip_errors), CMD_LINE(REQUIRED_ARG),
        IN_SYSTEM_CHARSET, DEFAULT(0));
+
+static Sys_var_ulonglong Sys_read_binlog_speed_limit(
+       "read_binlog_speed_limit", "Maximum speed(KB/s) to read binlog from"
+       " master (0 = no limit)",
+       GLOBAL_VAR(opt_read_binlog_speed_limit), CMD_LINE(REQUIRED_ARG),
+       VALID_RANGE(0, ULONG_MAX), DEFAULT(0), BLOCK_SIZE(1));
 
 static Sys_var_ulonglong Sys_relay_log_space_limit(
        "relay_log_space_limit", "Maximum space to use for all relay logs",
@@ -4615,8 +4914,7 @@ static bool check_locale(sys_var *self, THD *thd, set_var *var)
     mysql_mutex_lock(&LOCK_error_messages);
     res= (!locale->errmsgs->errmsgs &&
           read_texts(ERRMSG_FILE, locale->errmsgs->language,
-                     &locale->errmsgs->errmsgs,
-                     ER_ERROR_LAST - ER_ERROR_FIRST + 1));
+                     &locale->errmsgs->errmsgs));
     mysql_mutex_unlock(&LOCK_error_messages);
     if (res)
     {
@@ -4655,7 +4953,9 @@ static Sys_var_struct Sys_lc_time_names(
        NO_MUTEX_GUARD, IN_BINLOG, ON_CHECK(check_locale));
 
 static Sys_var_tz Sys_time_zone(
-       "time_zone", "time_zone",
+       "time_zone", "The current time zone, used to initialize the time "
+       "zone for a client when it connects. Set to SYSTEM by default, in "
+       "which the client uses the system time zone value.",
        SESSION_VAR(time_zone), NO_CMD_LINE,
        DEFAULT(&default_tz), NO_MUTEX_GUARD, IN_BINLOG);
 
@@ -4666,13 +4966,14 @@ static Sys_var_tz Sys_time_zone(
 
 static Sys_var_charptr Sys_wsrep_provider(
        "wsrep_provider", "Path to replication provider library",
-       PREALLOCATED GLOBAL_VAR(wsrep_provider), CMD_LINE(REQUIRED_ARG),
+       PREALLOCATED READ_ONLY GLOBAL_VAR(wsrep_provider), CMD_LINE(REQUIRED_ARG),
        IN_FS_CHARSET, DEFAULT(WSREP_NONE),
        NO_MUTEX_GUARD, NOT_IN_BINLOG,
        ON_CHECK(wsrep_provider_check), ON_UPDATE(wsrep_provider_update));
 
 static Sys_var_charptr Sys_wsrep_provider_options(
-       "wsrep_provider_options", "provider specific options",
+       "wsrep_provider_options", "Semicolon (;) separated list of wsrep "
+       "options (see wsrep_provider_options documentation).",
        PREALLOCATED GLOBAL_VAR(wsrep_provider_options), 
        CMD_LINE(REQUIRED_ARG),
        IN_SYSTEM_CHARSET, DEFAULT(""), NO_MUTEX_GUARD, NOT_IN_BINLOG,
@@ -4703,13 +5004,17 @@ static Sys_var_charptr Sys_wsrep_cluster_address (
        ON_UPDATE(wsrep_cluster_address_update));
 
 static Sys_var_charptr Sys_wsrep_node_name (
-       "wsrep_node_name", "Node name",
+       "wsrep_node_name", "Name of this node. This name can be used in "
+       "wsrep_sst_donor as a preferred donor. Note that multiple nodes "
+       "in a cluster can have the same name.",
        PREALLOCATED GLOBAL_VAR(wsrep_node_name), CMD_LINE(REQUIRED_ARG),
-       IN_SYSTEM_CHARSET, DEFAULT(""), NO_MUTEX_GUARD, NOT_IN_BINLOG,
+       IN_SYSTEM_CHARSET, DEFAULT(glob_hostname), NO_MUTEX_GUARD, NOT_IN_BINLOG,
        wsrep_node_name_check, wsrep_node_name_update);
 
 static Sys_var_charptr Sys_wsrep_node_address (
-       "wsrep_node_address", "Node address",
+       "wsrep_node_address", "Specifies the node's network address, in "
+       "the format ip address[:port]. Used in situations where autoguessing "
+       "is not reliable. As of MariaDB 10.1.8, supports IPv6.",
        PREALLOCATED GLOBAL_VAR(wsrep_node_address), CMD_LINE(REQUIRED_ARG),
        IN_SYSTEM_CHARSET, DEFAULT(""),
        NO_MUTEX_GUARD, NOT_IN_BINLOG,
@@ -4726,7 +5031,7 @@ static Sys_var_ulong Sys_wsrep_slave_threads(
        GLOBAL_VAR(wsrep_slave_threads), CMD_LINE(REQUIRED_ARG),
        VALID_RANGE(1, 512), DEFAULT(1), BLOCK_SIZE(1),
        &PLock_wsrep_slave_threads, NOT_IN_BINLOG,
-       ON_CHECK(wsrep_slave_threads_check), 
+       ON_CHECK(NULL),
        ON_UPDATE(wsrep_slave_threads_update));
 
 static Sys_var_charptr Sys_wsrep_dbug_option(
@@ -4750,16 +5055,60 @@ static Sys_var_ulong Sys_wsrep_retry_autocommit(
        SESSION_VAR(wsrep_retry_autocommit), CMD_LINE(REQUIRED_ARG),
        VALID_RANGE(0, 10000), DEFAULT(1), BLOCK_SIZE(1));
 
+static bool update_wsrep_auto_increment_control (sys_var *self, THD *thd, enum_var_type type)
+{
+  if (wsrep_auto_increment_control)
+  {
+    /*
+      The variables that control auto increment shall be calculated
+      automaticaly based on the size of the cluster. This usually done
+      within the wsrep_view_handler_cb callback. However, if the user
+      manually sets the value of wsrep_auto_increment_control to 'ON',
+      then we should to re-calculate these variables again (because
+      these values may be required before wsrep_view_handler_cb will
+      be re-invoked, which is rarely invoked if the cluster stays in
+      the stable state):
+    */
+    global_system_variables.auto_increment_increment=
+       wsrep_cluster_size ? wsrep_cluster_size : 1;
+    global_system_variables.auto_increment_offset=
+       wsrep_local_index >= 0 ? wsrep_local_index + 1 : 1;
+    thd->variables.auto_increment_increment=
+      global_system_variables.auto_increment_increment;
+    thd->variables.auto_increment_offset=
+      global_system_variables.auto_increment_offset;
+  }
+  else
+  {
+    /*
+      We must restore the last values of the variables that
+      are explicitly specified by the user:
+    */
+    global_system_variables.auto_increment_increment=
+      global_system_variables.saved_auto_increment_increment;
+    global_system_variables.auto_increment_offset=
+      global_system_variables.saved_auto_increment_offset;
+    thd->variables.auto_increment_increment=
+      thd->variables.saved_auto_increment_increment;
+    thd->variables.auto_increment_offset=
+      thd->variables.saved_auto_increment_offset;
+  }
+  return false;
+}
+
 static Sys_var_mybool Sys_wsrep_auto_increment_control(
        "wsrep_auto_increment_control", "To automatically control the "
        "assignment of autoincrement variables",
        GLOBAL_VAR(wsrep_auto_increment_control), 
-       CMD_LINE(OPT_ARG), DEFAULT(TRUE));
+       CMD_LINE(OPT_ARG), DEFAULT(TRUE),
+       NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(0),
+       ON_UPDATE(update_wsrep_auto_increment_control));
 
 static Sys_var_mybool Sys_wsrep_drupal_282555_workaround(
-       "wsrep_drupal_282555_workaround", "To use a workaround for"
-       "bad autoincrement value", 
-       GLOBAL_VAR(wsrep_drupal_282555_workaround), 
+       "wsrep_drupal_282555_workaround", "Enable a workaround to handle the "
+       "cases where inserting a DEFAULT value into an auto-increment column "
+       "could fail with duplicate key error",
+       GLOBAL_VAR(wsrep_drupal_282555_workaround),
        CMD_LINE(OPT_ARG), DEFAULT(FALSE));
 
 static Sys_var_charptr sys_wsrep_sst_method(
@@ -4803,7 +5152,8 @@ static Sys_var_mybool Sys_wsrep_on (
        "wsrep_on", "To enable wsrep replication ",
        SESSION_VAR(wsrep_on), 
        CMD_LINE(OPT_ARG), DEFAULT(FALSE),
-       NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(0),
+       NO_MUTEX_GUARD, NOT_IN_BINLOG,
+       ON_CHECK(wsrep_on_check),
        ON_UPDATE(wsrep_on_update));
 
 static Sys_var_charptr Sys_wsrep_start_position (
@@ -4818,17 +5168,18 @@ static Sys_var_charptr Sys_wsrep_start_position (
 static Sys_var_ulong Sys_wsrep_max_ws_size (
        "wsrep_max_ws_size", "Max write set size (bytes)",
        GLOBAL_VAR(wsrep_max_ws_size), CMD_LINE(REQUIRED_ARG),
-       /* Upper limit is 65K short of 4G to avoid overlows on 32-bit systems */
-       VALID_RANGE(1024, WSREP_MAX_WS_SIZE), DEFAULT(1073741824UL), BLOCK_SIZE(1));
+       VALID_RANGE(1024, WSREP_MAX_WS_SIZE), DEFAULT(WSREP_MAX_WS_SIZE),
+       BLOCK_SIZE(1), NO_MUTEX_GUARD, NOT_IN_BINLOG,
+       ON_CHECK(wsrep_max_ws_size_check), ON_UPDATE(wsrep_max_ws_size_update));
 
 static Sys_var_ulong Sys_wsrep_max_ws_rows (
        "wsrep_max_ws_rows", "Max number of rows in write set",
        GLOBAL_VAR(wsrep_max_ws_rows), CMD_LINE(REQUIRED_ARG),
-       VALID_RANGE(1, 1048576), DEFAULT(131072), BLOCK_SIZE(1));
+       VALID_RANGE(0, 1048576), DEFAULT(0), BLOCK_SIZE(1));
 
 static Sys_var_charptr Sys_wsrep_notify_cmd(
        "wsrep_notify_cmd", "",
-       GLOBAL_VAR(wsrep_notify_cmd),CMD_LINE(REQUIRED_ARG),
+       READ_ONLY GLOBAL_VAR(wsrep_notify_cmd), CMD_LINE(REQUIRED_ARG),
        IN_SYSTEM_CHARSET, DEFAULT(""));
 
 static Sys_var_mybool Sys_wsrep_certify_nonPK(
@@ -4836,20 +5187,26 @@ static Sys_var_mybool Sys_wsrep_certify_nonPK(
        GLOBAL_VAR(wsrep_certify_nonPK), 
        CMD_LINE(OPT_ARG), DEFAULT(TRUE));
 
-static bool fix_wsrep_causal_reads(sys_var *self, THD* thd, enum_var_type var_type)
-{
-  if (var_type == OPT_GLOBAL)
-    wsrep_causal_reads_update(&global_system_variables);
-  else
-    wsrep_causal_reads_update(&thd->variables);
-  return false;
-}
+static const char *wsrep_certification_rules_names[]= { "strict", "optimized", NullS };
+static Sys_var_enum Sys_wsrep_certification_rules(
+       "wsrep_certification_rules",
+       "Certification rules to use in the cluster. Possible values are: "
+       "\"strict\": stricter rules that could result in more certification "
+       "failures. "
+       "\"optimized\": relaxed rules that allow more concurrency and "
+       "cause less certification failures.",
+       GLOBAL_VAR(wsrep_certification_rules), CMD_LINE(REQUIRED_ARG),
+       wsrep_certification_rules_names, DEFAULT(WSREP_CERTIFICATION_RULES_STRICT),
+       NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(0),
+       ON_UPDATE(0));
+
 static Sys_var_mybool Sys_wsrep_causal_reads(
        "wsrep_causal_reads", "Setting this variable is equivalent "
        "to setting wsrep_sync_wait READ flag",
-       SESSION_VAR(wsrep_causal_reads), CMD_LINE(OPT_ARG), DEFAULT(FALSE),
+       SESSION_VAR(wsrep_causal_reads),
+       CMD_LINE(OPT_ARG, OPT_WSREP_CAUSAL_READS), DEFAULT(FALSE),
        NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(0),
-       ON_UPDATE(fix_wsrep_causal_reads),
+       ON_UPDATE(wsrep_causal_reads_update),
        DEPRECATED("'@@wsrep_sync_wait=1'"));
 
 static Sys_var_uint Sys_wsrep_sync_wait(
@@ -4857,7 +5214,7 @@ static Sys_var_uint Sys_wsrep_sync_wait(
        "an operation of the type specified by bitmask: 1 - READ(includes "
        "SELECT, SHOW and BEGIN/START TRANSACTION); 2 - UPDATE and DELETE; 4 - "
        "INSERT and REPLACE",
-       SESSION_VAR(wsrep_sync_wait), CMD_LINE(OPT_ARG),
+       SESSION_VAR(wsrep_sync_wait), CMD_LINE(OPT_ARG, OPT_WSREP_SYNC_WAIT),
        VALID_RANGE(WSREP_SYNC_WAIT_NONE, WSREP_SYNC_WAIT_MAX),
        DEFAULT(WSREP_SYNC_WAIT_NONE), BLOCK_SIZE(1),
        NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(0),
@@ -4879,6 +5236,14 @@ static Sys_var_mybool Sys_wsrep_desync (
        &PLock_wsrep_desync, NOT_IN_BINLOG,
        ON_CHECK(wsrep_desync_check),
        ON_UPDATE(wsrep_desync_update));
+
+static const char *wsrep_reject_queries_names[]= { "NONE", "ALL", "ALL_KILL", NullS };
+static Sys_var_enum Sys_wsrep_reject_queries(
+       "wsrep_reject_queries", "Variable to set to reject queries",
+       GLOBAL_VAR(wsrep_reject_queries), CMD_LINE(OPT_ARG),
+       wsrep_reject_queries_names, DEFAULT(WSREP_REJECT_NONE),
+       NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(0),
+       ON_UPDATE(wsrep_reject_queries_update));
 
 static const char *wsrep_binlog_format_names[]=
        {"MIXED", "STATEMENT", "ROW", "NONE", NullS};
@@ -4924,12 +5289,13 @@ static Sys_var_mybool Sys_wsrep_slave_UK_checks(
        CMD_LINE(OPT_ARG), DEFAULT(FALSE));
 
 static Sys_var_mybool Sys_wsrep_restart_slave(
-       "wsrep_restart_slave", "Should MySQL slave be restarted automatically, when node joins back to cluster",
+       "wsrep_restart_slave", "Should MariaDB slave be restarted automatically, when node joins back to cluster",
        GLOBAL_VAR(wsrep_restart_slave), CMD_LINE(OPT_ARG), DEFAULT(FALSE));
 
 static Sys_var_mybool Sys_wsrep_dirty_reads(
-       "wsrep_dirty_reads", "Do not reject SELECT queries even when the node "
-       "is not ready.", SESSION_ONLY(wsrep_dirty_reads), NO_CMD_LINE,
+       "wsrep_dirty_reads",
+       "Allow reads even when the node is not in the primary component.",
+       SESSION_VAR(wsrep_dirty_reads), CMD_LINE(OPT_ARG),
        DEFAULT(FALSE), NO_MUTEX_GUARD, NOT_IN_BINLOG);
 
 static Sys_var_uint Sys_wsrep_gtid_domain_id(
@@ -4950,7 +5316,7 @@ static Sys_var_mybool Sys_wsrep_gtid_mode(
 
 static char *wsrep_patch_version_ptr;
 static Sys_var_charptr Sys_wsrep_patch_version(
-       "wsrep_patch_version", "wsrep patch version",
+       "wsrep_patch_version", "Wsrep patch version, for example wsrep_25.10.",
        READ_ONLY GLOBAL_VAR(wsrep_patch_version_ptr), CMD_LINE_HELP_ONLY,
        IN_SYSTEM_CHARSET, DEFAULT(WSREP_PATCH_VERSION));
 
@@ -5087,7 +5453,7 @@ int default_regex_flags_pcre(const THD *thd)
   int i, res;
   for (i= res= 0; default_regex_flags_to_pcre[i]; i++)
   {
-    if (src & (1 << i))
+    if (src & (1ULL << i))
       res|= default_regex_flags_to_pcre[i];
   }
   return res;
@@ -5133,7 +5499,7 @@ static Sys_var_ulong Sys_rowid_merge_buff_size(
        "rowid_merge_buff_size",
        "The size of the buffers used [NOT] IN evaluation via partial matching",
        SESSION_VAR(rowid_merge_buff_size), CMD_LINE(REQUIRED_ARG),
-       VALID_RANGE(0, ((ulonglong)~(intptr)0)/2), DEFAULT(8*1024*1024),
+       VALID_RANGE(0, LONG_MAX), DEFAULT(8*1024*1024),
        BLOCK_SIZE(1));
 
 static Sys_var_mybool Sys_userstat(
@@ -5148,7 +5514,7 @@ static Sys_var_mybool Sys_binlog_annotate_row_events(
        "Tells the master to annotate RBR events with the statement that "
        "caused these events",
        SESSION_VAR(binlog_annotate_row_events), CMD_LINE(OPT_ARG),
-       DEFAULT(FALSE));
+       DEFAULT(TRUE));
 
 #ifdef HAVE_REPLICATION
 static Sys_var_mybool Sys_replicate_annotate_row_events(
@@ -5156,7 +5522,7 @@ static Sys_var_mybool Sys_replicate_annotate_row_events(
        "Tells the slave to write annotate rows events received from the master "
        "to its own binary log. Ignored if log_slave_updates is not set",
        READ_ONLY GLOBAL_VAR(opt_replicate_annotate_row_events),
-       CMD_LINE(OPT_ARG), DEFAULT(0));
+       CMD_LINE(OPT_ARG), DEFAULT(TRUE));
 #endif
 
 static Sys_var_ulonglong Sys_join_buffer_space_limit(
@@ -5352,3 +5718,85 @@ static Sys_var_ulong Sys_log_tc_size(
        DEFAULT(my_getpagesize() * 6),
        BLOCK_SIZE(my_getpagesize()));
 #endif
+
+static Sys_var_ulonglong Sys_max_session_mem_used(
+       "max_session_mem_used", "Amount of memory a single user session "
+       "is allowed to allocate. This limits the value of the "
+       "session variable MEM_USED", SESSION_VAR(max_mem_used),
+       CMD_LINE(REQUIRED_ARG), VALID_RANGE(8192,  ULONGLONG_MAX),
+       DEFAULT(LONGLONG_MAX), BLOCK_SIZE(1));
+
+#ifndef EMBEDDED_LIBRARY
+
+static Sys_var_sesvartrack Sys_track_session_sys_vars(
+       "session_track_system_variables",
+       "Track changes in registered system variables. "
+       "For compatibility with MySQL defaults this variable should be set to "
+       "\"autocommit, character_set_client, character_set_connection, "
+       "character_set_results, time_zone\"",
+       CMD_LINE(REQUIRED_ARG), IN_SYSTEM_CHARSET,
+       DEFAULT(""),
+       NO_MUTEX_GUARD);
+
+static bool update_session_track_schema(sys_var *self, THD *thd,
+                                        enum_var_type type)
+{
+  DBUG_ENTER("update_session_track_schema");
+  DBUG_RETURN(thd->session_tracker.get_tracker(CURRENT_SCHEMA_TRACKER)->
+              update(thd, NULL));
+}
+
+static Sys_var_mybool Sys_session_track_schema(
+       "session_track_schema",
+       "Track changes to the default schema.",
+       SESSION_VAR(session_track_schema),
+       CMD_LINE(OPT_ARG), DEFAULT(TRUE),
+       NO_MUTEX_GUARD, NOT_IN_BINLOG,
+       ON_CHECK(0),
+       ON_UPDATE(update_session_track_schema));
+
+
+static bool update_session_track_tx_info(sys_var *self, THD *thd,
+                                         enum_var_type type)
+{
+  DBUG_ENTER("update_session_track_tx_info");
+  DBUG_RETURN(thd->session_tracker.get_tracker(TRANSACTION_INFO_TRACKER)->
+              update(thd, NULL));
+}
+
+static const char *session_track_transaction_info_names[]=
+  { "OFF", "STATE", "CHARACTERISTICS", NullS };
+
+static Sys_var_enum Sys_session_track_transaction_info(
+       "session_track_transaction_info",
+       "Track changes to the transaction attributes. OFF to disable; "
+       "STATE to track just transaction state (Is there an active transaction? "
+       "Does it have any data? etc.); CHARACTERISTICS to track transaction "
+       "state and report all statements needed to start a transaction with"
+       "the same characteristics (isolation level, read only/read write,"
+       "snapshot - but not any work done / data modified within the "
+       "transaction).",
+       SESSION_VAR(session_track_transaction_info),
+       CMD_LINE(REQUIRED_ARG), session_track_transaction_info_names,
+       DEFAULT(0), NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(0),
+       ON_UPDATE(update_session_track_tx_info));
+
+
+static bool update_session_track_state_change(sys_var *self, THD *thd,
+                                              enum_var_type type)
+{
+  DBUG_ENTER("update_session_track_state_change");
+  DBUG_RETURN(thd->session_tracker.get_tracker(SESSION_STATE_CHANGE_TRACKER)->
+              update(thd, NULL));
+}
+
+static Sys_var_mybool Sys_session_track_state_change(
+       "session_track_state_change",
+       "Track changes to the session state.",
+       SESSION_VAR(session_track_state_change),
+       CMD_LINE(OPT_ARG), DEFAULT(FALSE),
+       NO_MUTEX_GUARD, NOT_IN_BINLOG,
+       ON_CHECK(0),
+       ON_UPDATE(update_session_track_state_change));
+
+#endif //EMBEDDED_LIBRARY

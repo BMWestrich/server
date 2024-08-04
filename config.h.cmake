@@ -11,7 +11,7 @@
  
  You should have received a copy of the GNU General Public License
  along with this program; if not, write to the Free Software
- Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA */
+ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335  USA */
 
 #ifndef MY_CONFIG_H
 #define MY_CONFIG_H
@@ -105,6 +105,8 @@
 /* Libraries */
 #cmakedefine HAVE_LIBWRAP 1
 #cmakedefine HAVE_SYSTEMD 1
+#cmakedefine HAVE_CRC32_VPMSUM 1
+
 /* Does "struct timespec" have a "sec" and "nsec" field? */
 #cmakedefine HAVE_TIMESPEC_TS_SEC 1
 
@@ -129,6 +131,7 @@
 #cmakedefine HAVE_CLOCK_GETTIME 1
 #cmakedefine HAVE_CRYPT 1
 #cmakedefine HAVE_CUSERID 1
+#cmakedefine HAVE_DLADDR 1
 #cmakedefine HAVE_DLERROR 1
 #cmakedefine HAVE_DLOPEN 1
 #cmakedefine HAVE_FCHMOD 1
@@ -160,7 +163,6 @@
 #cmakedefine HAVE_IN_ADDR_T 1
 #cmakedefine HAVE_INITGROUPS 1
 #cmakedefine HAVE_ISNAN 1
-#cmakedefine HAVE_ISINF 1
 #cmakedefine HAVE_LARGE_PAGE_OPTION 1
 #cmakedefine HAVE_LDIV 1
 #cmakedefine HAVE_LRAND48 1
@@ -175,6 +177,7 @@
 #cmakedefine HAVE_DECL_MADVISE 1
 #cmakedefine HAVE_DECL_MHA_MAPSIZE_VA 1
 #cmakedefine HAVE_MALLINFO 1
+#cmakedefine HAVE_MALLINFO2 1
 #cmakedefine HAVE_MEMCPY 1
 #cmakedefine HAVE_MEMMOVE 1
 #cmakedefine HAVE_MKSTEMP 1
@@ -189,6 +192,7 @@
 #cmakedefine HAVE_PREAD 1
 #cmakedefine HAVE_PAUSE_INSTRUCTION 1
 #cmakedefine HAVE_FAKE_PAUSE_INSTRUCTION 1
+#cmakedefine HAVE_HMT_PRIORITY_INSTRUCTION 1
 #cmakedefine HAVE_RDTSCLL 1
 #cmakedefine HAVE_READ_REAL_TIME 1
 #cmakedefine HAVE_PTHREAD_ATTR_CREATE 1
@@ -197,6 +201,7 @@
 #cmakedefine HAVE_PTHREAD_ATTR_SETSCOPE 1
 #cmakedefine HAVE_PTHREAD_ATTR_SETSTACKSIZE 1
 #cmakedefine HAVE_PTHREAD_CONDATTR_CREATE 1
+#cmakedefine HAVE_PTHREAD_GETAFFINITY_NP 1
 #cmakedefine HAVE_PTHREAD_KEY_DELETE 1
 #cmakedefine HAVE_PTHREAD_KILL 1
 #cmakedefine HAVE_PTHREAD_RWLOCK_RDLOCK 1
@@ -246,7 +251,6 @@
 /* Symbols we may use */
 #cmakedefine HAVE_SYS_ERRLIST 1
 /* used by stacktrace functions */
-#cmakedefine HAVE_BSS_START 1
 #cmakedefine HAVE_BACKTRACE 1
 #cmakedefine HAVE_BACKTRACE_SYMBOLS 1
 #cmakedefine HAVE_BACKTRACE_SYMBOLS_FD 1
@@ -390,7 +394,7 @@
 #cmakedefine HAVE_GCC_C11_ATOMICS 1
 #cmakedefine HAVE_SOLARIS_ATOMIC 1
 #cmakedefine HAVE_DECL_SHM_HUGETLB 1
-#cmakedefine HAVE_LARGE_PAGES 1
+#cmakedefine HAVE_LINUX_LARGE_PAGES 1
 #cmakedefine HUGETLB_USE_PROC_MEMINFO 1
 #cmakedefine NO_FCNTL_NONBLOCK 1
 #cmakedefine NO_ALARM 1
@@ -398,7 +402,6 @@
 #cmakedefine _LARGE_FILES 1
 #cmakedefine _LARGEFILE_SOURCE 1
 #cmakedefine _LARGEFILE64_SOURCE 1
-#cmakedefine _FILE_OFFSET_BITS @_FILE_OFFSET_BITS@
 
 #cmakedefine TIME_WITH_SYS_TIME 1
 
@@ -420,7 +423,6 @@
 #cmakedefine mode_t @mode_t@
 #cmakedefine SIGQUIT @SIGQUIT@
 #cmakedefine SIGPIPE @SIGPIPE@
-#cmakedefine isnan @isnan@
 #cmakedefine finite @finite@
 #cmakedefine popen @popen@
 #cmakedefine pclose @pclose@
@@ -450,7 +452,11 @@
 /*
   MySQL features
 */
-#cmakedefine ENABLED_LOCAL_INFILE 1
+#define LOCAL_INFILE_MODE_OFF  0
+#define LOCAL_INFILE_MODE_ON   1
+#define LOCAL_INFILE_MODE_AUTO 2
+#define ENABLED_LOCAL_INFILE LOCAL_INFILE_MODE_@ENABLED_LOCAL_INFILE@
+
 #cmakedefine ENABLED_PROFILING 1
 #cmakedefine EXTRA_DEBUG 1
 #cmakedefine USE_SYMDIR 1
@@ -566,29 +572,10 @@
 #cmakedefine WSREP_PROC_INFO 1
 #endif
 
-#ifdef _AIX
-/*
-  AIX includes inttypes.h from sys/types.h
-  Explicitly request format macros before the first inclusion of inttypes.h
-*/
+#if !defined(__STDC_FORMAT_MACROS)
 #define __STDC_FORMAT_MACROS
-#endif
-
-/*
-  stat structure (from <sys/stat.h>) is conditionally defined
-  to have different layout and size depending on the defined macros.
-  The correct macro is defined in my_config.h, which means it MUST be
-  included first (or at least before <features.h> - so, practically,
-  before including any system headers).
-
-  Check the include order by looking at __GLIBC__ (defined in <features.h>)
-
-  But we cannot force all third-party clients/connectors to include
-  my_config.h first. So, their crashes are their responsibility,
-  we enable this check only for MariaDB sources (SAFE_MUTEX check).
-*/
-#if defined(__GLIBC__) && defined(SAFE_MUTEX)
-#error <my_config.h> MUST be included first!
-#endif
+#endif  // !defined(__STDC_FORMAT_MACROS)
 
 #endif
+
+#cmakedefine HAVE_VFORK 1

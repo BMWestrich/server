@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 
 /* classes to use when handling where clause */
@@ -26,6 +26,8 @@
 
 #include "records.h"                            /* READ_RECORD */
 #include "queues.h"                             /* QUEUE */
+#include "filesort.h"                           /* SORT_INFO */
+
 /*
   It is necessary to include set_var.h instead of item.h because there
   are dependencies on include order for set_var.h and item.h. This
@@ -240,7 +242,7 @@ public:
     Number of children of this element in the RB-tree, plus 1 for this
     element itself.
   */
-  uint16 elements;
+  uint32 elements;
   /*
     Valid only for elements which are RB-tree roots: Number of times this
     RB-tree is referred to (it is referred by SEL_ARG::next_key_part or by
@@ -654,6 +656,7 @@ public:
   bool statement_should_be_aborted() const
   {
     return
+      thd->killed ||
       thd->is_fatal_error ||
       thd->is_error() ||
       alloced_sel_args > SEL_ARG::MAX_SEL_ARGS;
@@ -1004,7 +1007,7 @@ public:
 
     This is used by an optimization in filesort.
   */
-  virtual void add_used_key_part_to_set(MY_BITMAP *col_set)=0;
+  virtual void add_used_key_part_to_set()=0;
 };
 
 
@@ -1035,7 +1038,6 @@ class QUICK_RANGE_SELECT : public QUICK_SELECT_I
 {
 protected:
   /* true if we enabled key only reads */
-  bool doing_key_read;
   handler *file;
 
   /* Members to deal with case when this quick select is a ROR-merged scan */
@@ -1095,7 +1097,7 @@ public:
   virtual void replace_handler(handler *new_file) { file= new_file; }
   QUICK_SELECT_I *make_reverse(uint used_key_parts_arg);
 
-  virtual void add_used_key_part_to_set(MY_BITMAP *col_set);
+  virtual void add_used_key_part_to_set();
 
 private:
   /* Default copy ctor used by QUICK_SELECT_DESC */
@@ -1259,7 +1261,7 @@ public:
   /* used to get rows collected in Unique */
   READ_RECORD read_record;
 
-  virtual void add_used_key_part_to_set(MY_BITMAP *col_set);
+  virtual void add_used_key_part_to_set();
 };
 
 
@@ -1334,7 +1336,7 @@ public:
   void add_keys_and_lengths(String *key_names, String *used_lengths);
   Explain_quick_select *get_explain(MEM_ROOT *alloc);
   bool is_keys_used(const MY_BITMAP *fields);
-  void add_used_key_part_to_set(MY_BITMAP *col_set);
+  void add_used_key_part_to_set();
 #ifndef DBUG_OFF
   void dbug_dump(int indent, bool verbose);
 #endif
@@ -1414,7 +1416,7 @@ public:
   void add_keys_and_lengths(String *key_names, String *used_lengths);
   Explain_quick_select *get_explain(MEM_ROOT *alloc);
   bool is_keys_used(const MY_BITMAP *fields);
-  void add_used_key_part_to_set(MY_BITMAP *col_set);
+  void add_used_key_part_to_set();
 #ifndef DBUG_OFF
   void dbug_dump(int indent, bool verbose);
 #endif
@@ -1558,7 +1560,7 @@ public:
   bool unique_key_range() { return false; }
   int get_type() { return QS_TYPE_GROUP_MIN_MAX; }
   void add_keys_and_lengths(String *key_names, String *used_lengths);
-  void add_used_key_part_to_set(MY_BITMAP *col_set);
+  void add_used_key_part_to_set();
 #ifndef DBUG_OFF
   void dbug_dump(int indent, bool verbose);
 #endif
@@ -1658,9 +1660,13 @@ QUICK_RANGE_SELECT *get_quick_select_for_ref(THD *thd, TABLE *table,
                                              ha_rows records);
 SQL_SELECT *make_select(TABLE *head, table_map const_tables,
 			table_map read_tables, COND *conds,
+                        SORT_INFO* filesort,
                         bool allow_null_cond,  int *error);
 
 bool calculate_cond_selectivity_for_table(THD *thd, TABLE *table, Item **cond);
+
+bool eq_ranges_exceeds_limit(RANGE_SEQ_IF *seq, void *seq_init_param,
+                             uint limit);
 
 #ifdef WITH_PARTITION_STORAGE_ENGINE
 bool prune_partitions(THD *thd, TABLE *table, Item *pprune_cond);

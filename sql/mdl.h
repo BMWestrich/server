@@ -13,24 +13,13 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software Foundation,
-   51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA */
-
-#if defined(__IBMC__) || defined(__IBMCPP__)
-/* Further down, "next_in_lock" and "next_in_context" have the same type,
-   and in "sql_plist.h" this leads to an identical signature, which causes
-   problems in function overloading.
-*/
-#pragma namemangling(v5)
-#endif
-
+   51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 #include "sql_plist.h"
 #include <my_sys.h>
 #include <m_string.h>
 #include <mysql_com.h>
 #include <lf.h>
-
-#include <algorithm>
 
 class THD;
 
@@ -205,6 +194,12 @@ enum enum_mdl_type {
   */
   MDL_SHARED_UPGRADABLE,
   /*
+    A shared metadata lock for cases when we need to read data from table
+    and block all concurrent modifications to it (for both data and metadata).
+    Used by LOCK TABLES READ statement.
+  */
+  MDL_SHARED_READ_ONLY,
+  /*
     An upgradable shared metadata lock which blocks all attempts to update
     table data, allowing reads.
     A connection holding this kind of lock can read table metadata and read
@@ -376,8 +371,7 @@ public:
       character set is utf-8, we can safely assume that no
       character starts with a zero byte.
     */
-    using std::min;
-    return memcmp(m_ptr, rhs->m_ptr, min(m_length, rhs->m_length));
+    return memcmp(m_ptr, rhs->m_ptr, MY_MIN(m_length, rhs->m_length));
   }
 
   MDL_key(const MDL_key *rhs)
@@ -474,6 +468,29 @@ public:
   {
     DBUG_ASSERT(ticket == NULL);
     type= type_arg;
+  }
+  void move_from(MDL_request &from)
+  {
+    type= from.type;
+    duration= from.duration;
+    ticket= from.ticket;
+    next_in_list= from.next_in_list;
+    prev_in_list= from.prev_in_list;
+    key.mdl_key_init(&from.key);
+    from.ticket=  NULL; // that's what "move" means
+  }
+
+  /**
+    Is this a request for a lock which allow data to be updated?
+
+    @note This method returns true for MDL_SHARED_UPGRADABLE type of
+          lock. Even though this type of lock doesn't allow updates
+          it will always be upgraded to one that does.
+  */
+  bool is_write_lock_request() const
+  {
+    return (type >= MDL_SHARED_WRITE &&
+            type != MDL_SHARED_READ_ONLY);
   }
 
   /*

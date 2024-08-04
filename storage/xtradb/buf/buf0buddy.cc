@@ -1,6 +1,7 @@
 /*****************************************************************************
 
-Copyright (c) 2006, 2013, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2006, 2016, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2018, 2019, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +13,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -112,7 +113,7 @@ buf_buddy_mem_invalid(
 /**********************************************************************//**
 Check if a buddy is stamped free.
 @return	whether the buddy is free */
-UNIV_INLINE __attribute__((warn_unused_result))
+UNIV_INLINE MY_ATTRIBUTE((warn_unused_result))
 bool
 buf_buddy_stamp_is_free(
 /*====================*/
@@ -131,7 +132,7 @@ buf_buddy_stamp_free(
 	buf_buddy_free_t*	buf,	/*!< in/out: block to stamp */
 	ulint			i)	/*!< in: block size */
 {
-	ut_d(memset(buf, static_cast<int>(i), BUF_BUDDY_LOW << i));
+	ut_d(memset(&buf->stamp.bytes, int(i), BUF_BUDDY_LOW << i));
 	buf_buddy_mem_invalid(buf, i);
 	mach_write_to_4(buf->stamp.bytes + BUF_BUDDY_STAMP_OFFSET,
 			BUF_BUDDY_STAMP_FREE);
@@ -225,7 +226,7 @@ Checks if a buf is free i.e.: in the zip_free[].
 @retval BUF_BUDDY_STATE_FREE if fully free
 @retval BUF_BUDDY_STATE_USED if currently in use
 @retval BUF_BUDDY_STATE_PARTIALLY_USED if partially in use. */
-static  __attribute__((warn_unused_result))
+static  MY_ATTRIBUTE((warn_unused_result))
 buf_buddy_state_t
 buf_buddy_is_free(
 /*==============*/
@@ -485,7 +486,6 @@ buf_buddy_alloc_low(
 {
 	buf_block_t*	block;
 
-	ut_ad(lru);
 	ut_ad(mutex_own(&buf_pool->LRU_list_mutex));
 	ut_ad(!mutex_own(&buf_pool->zip_mutex));
 	ut_ad(i >= buf_buddy_get_slot(UNIV_ZIP_SIZE_MIN));
@@ -612,7 +612,7 @@ buf_buddy_relocate(
 
 	if (buf_page_can_relocate(bpage)) {
 		/* Relocate the compressed page. */
-		ullint	usec = ut_time_us(NULL);
+		const ulonglong ns = my_interval_timer();
 
 		ut_a(bpage->zip.data == src);
 
@@ -630,11 +630,8 @@ buf_buddy_relocate(
 			reinterpret_cast<buf_buddy_free_t*>(src), i);
 
 		buf_buddy_stat_t*	buddy_stat = &buf_pool->buddy_stat[i];
-
 		++buddy_stat->relocated;
-
-		buddy_stat->relocated_usec += ut_time_us(NULL) - usec;
-
+		buddy_stat->relocated_usec+= (my_interval_timer() - ns) / 1000;
 		return(true);
 	}
 
@@ -668,7 +665,7 @@ buf_buddy_free_low(
 	ut_ad(buf_pool->buddy_stat[i].used > 0);
 	buf_pool->buddy_stat[i].used--;
 recombine:
-	UNIV_MEM_ASSERT_AND_ALLOC(buf, BUF_BUDDY_LOW << i);
+	UNIV_MEM_ALLOC(buf, BUF_BUDDY_LOW << i);
 
 	if (i == BUF_BUDDY_SIZES) {
 		mutex_exit(&buf_pool->zip_free_mutex);

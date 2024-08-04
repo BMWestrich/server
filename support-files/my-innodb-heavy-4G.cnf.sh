@@ -306,7 +306,7 @@ server-id = 1
 
 # Make the slave read-only. Only users with the SUPER privilege and the
 # replication slave thread will be able to modify data on it. You can
-# use this to ensure that no applications will accidently modify data on
+# use this to ensure that no applications will accidentally modify data on
 # the slave instead of the master
 #read_only
 
@@ -355,13 +355,6 @@ myisam_recover
 # but you do not plan to use it. This will save memory and disk space
 # and speed up some things.
 #skip-innodb
-
-# Additional memory pool that is used by InnoDB to store metadata
-# information.  If InnoDB requires more memory for this purpose it will
-# start to allocate it from the OS.  As this is fast enough on most
-# recent operating systems, you normally do not need to change this
-# value. SHOW INNODB STATUS will display the current amount used.
-innodb_additional_mem_pool_size = 16M
 
 # InnoDB, unlike MyISAM, uses a buffer pool to cache both indexes and
 # row data. The bigger you set this the less disk I/O is needed to
@@ -439,7 +432,7 @@ innodb_log_files_in_group = 3
 #innodb_log_group_home_dir
 
 # Maximum allowed percentage of dirty pages in the InnoDB buffer pool.
-# If it is reached, InnoDB will start flushing them out agressively to
+# If it is reached, InnoDB will start flushing them out aggressively to
 # not run out of clean pages at all. This is a soft limit, not
 # guaranteed to be held.
 innodb_max_dirty_pages_pct = 90

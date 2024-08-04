@@ -642,7 +642,7 @@ SELECT @@myisam_sort_buffer_size,
 '# Pre-STATEMENT variable value
 SELECT @@sql_mode;
 @@sql_mode
-NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION
+STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION
 ''
 ''
 SET STATEMENT sql_mode='ansi' FOR PREPARE stmt FROM 'SELECT "t1".* FROM t1';
@@ -652,14 +652,16 @@ v1	v2
 3	4
 ALTER TABLE t1 ADD COLUMN v3 int;
 execute stmt;
-ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near '.* FROM t1' at line 1
+v1	v2	v3
+1	2	NULL
+3	4	NULL
 ALTER TABLE t1 drop COLUMN v3;
 deallocate prepare stmt;
 ''
 '# Post-STATEMENT
 SELECT @@sql_mode;
 @@sql_mode
-NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION
+STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION
 check the same behaviour in normal set
 SET sql_mode='ansi';
 PREPARE stmt FROM 'SELECT "t1".* FROM t1';
@@ -670,12 +672,14 @@ v1	v2
 3	4
 ALTER TABLE t1 ADD COLUMN v3 int;
 execute stmt;
-ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near '.* FROM t1' at line 1
+v1	v2	v3
+1	2	NULL
+3	4	NULL
 ALTER TABLE t1 drop COLUMN v3;
 deallocate prepare stmt;
 SELECT @@sql_mode;
 @@sql_mode
-NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION
+STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION
 SET sql_mode='ansi';
 SELECT @@sql_mode;
 @@sql_mode
@@ -704,7 +708,7 @@ ALTER TABLE t1 drop COLUMN v3;
 drop procedure p6;
 SELECT @@sql_mode;
 @@sql_mode
-NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION
+STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION
 # SET and the statement parsed as one unit before the SET takes effect
 SET STATEMENT sql_mode='ansi' FOR
 CREATE PROCEDURE p6() BEGIN
@@ -715,7 +719,7 @@ ERROR 42000: You have an error in your SQL syntax; check the manual that corresp
 END' at line 4
 SELECT @@sql_mode;
 @@sql_mode
-NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION
+STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION
 SET sql_mode='ansi';
 SELECT @@sql_mode;
 @@sql_mode
@@ -732,7 +736,7 @@ v1	v2
 SET sql_mode=default;
 SELECT @@sql_mode;
 @@sql_mode
-NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION
+STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION
 # SET and the statement parsed as one unit before the SET takes effect
 SET STATEMENT sql_mode='ansi' FOR
 BEGIN NOT ATOMIC
@@ -924,10 +928,10 @@ RETURN mx;
 END|
 SET STATEMENT myisam_repair_threads=(select max(v1) from t1) FOR
 select 1;
-ERROR 42000: SET STATEMENT does not support subqueries or stored functions.
+ERROR 42000: SET STATEMENT does not support subqueries or stored functions
 SET STATEMENT myisam_repair_threads=myProc() FOR
 select 1;
-ERROR 42000: SET STATEMENT does not support subqueries or stored functions.
+ERROR 42000: SET STATEMENT does not support subqueries or stored functions
 drop function myProc;
 drop table t1;
 set session binlog_format=mixed;
@@ -1040,23 +1044,15 @@ set @save_slow_query_log= @@slow_query_log;
 set @save_log_output= @@log_output;
 set statement long_query_time=default for select @@long_query_time;
 @@long_query_time
-10.000000
+DEFAULT
 set statement log_slow_filter=default for select @@log_slow_filter;
-@@log_slow_filter
-admin,filesort,filesort_on_disk,full_join,full_scan,query_cache,query_cache_miss,tmp_table,tmp_table_on_disk
 set statement log_slow_verbosity=default for select @@log_slow_verbosity;
-@@log_slow_verbosity
-
 set statement log_slow_rate_limit=default for select @@log_slow_rate_limit;
-@@log_slow_rate_limit
-1
 set statement slow_query_log=default for select @@slow_query_log;
-@@slow_query_log
-1
 truncate table mysql.slow_log;
 set slow_query_log= 1;
 set global log_output='TABLE';
-select sql_text from mysql.slow_log;
+select sql_text from mysql.slow_log where sql_text not like 'set @@long_query_time%';
 sql_text
 set @@long_query_time=0.01;
 #should be written
@@ -1064,7 +1060,7 @@ select sleep(0.1);
 sleep(0.1)
 0
 set @@long_query_time=@save_long_query_time;
-select sql_text from mysql.slow_log;
+select sql_text from mysql.slow_log where sql_text not like 'set @@long_query_time%';
 sql_text
 select sleep(0.1)
 #---
@@ -1072,7 +1068,7 @@ select sleep(0.1)
 set statement long_query_time=0.01 for select sleep(0.1);
 sleep(0.1)
 0
-select sql_text from mysql.slow_log;
+select sql_text from mysql.slow_log where sql_text not like 'set @@long_query_time%';
 sql_text
 select sleep(0.1)
 set statement long_query_time=0.01 for select sleep(0.1)
@@ -1083,7 +1079,7 @@ set statement slow_query_log=0 for select sleep(0.1);
 sleep(0.1)
 0
 set @@long_query_time=@save_long_query_time;
-select sql_text from mysql.slow_log;
+select sql_text from mysql.slow_log where sql_text not like 'set @@long_query_time%';
 sql_text
 select sleep(0.1)
 set statement long_query_time=0.01 for select sleep(0.1)
@@ -1092,7 +1088,7 @@ set statement long_query_time=0.01 for select sleep(0.1)
 set statement long_query_time=0.01,log_slow_filter='full_scan' for select sleep(0.1);
 sleep(0.1)
 0
-select sql_text from mysql.slow_log;
+select sql_text from mysql.slow_log where sql_text not like 'set @@long_query_time%';
 sql_text
 select sleep(0.1)
 set statement long_query_time=0.01 for select sleep(0.1)
@@ -1101,7 +1097,7 @@ set statement long_query_time=0.01 for select sleep(0.1)
 set statement long_query_time=0.01,log_slow_rate_limit=9999 for select sleep(0.1);
 sleep(0.1)
 0
-select sql_text from mysql.slow_log;
+select sql_text from mysql.slow_log where sql_text not like 'set @@long_query_time%';
 sql_text
 select sleep(0.1)
 set statement long_query_time=0.01 for select sleep(0.1)
@@ -1110,7 +1106,7 @@ set statement long_query_time=0.01 for select sleep(0.1)
 set statement long_query_time=0.01,min_examined_row_limit=50 for select sleep(0.1);
 sleep(0.1)
 0
-select sql_text from mysql.slow_log;
+select sql_text from mysql.slow_log where sql_text not like 'set @@long_query_time%';
 sql_text
 select sleep(0.1)
 set statement long_query_time=0.01 for select sleep(0.1)
@@ -1152,7 +1148,7 @@ explain extended select week(a) from t1;
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	system	NULL	NULL	NULL	NULL	1	100.00	
 Warnings:
-Note	1003	select week('2000-01-01',@@default_week_format) AS `week(a)` from dual
+Note	1003	select week('2000-01-01') AS `week(a)` from dual
 prepare stmt1 from "select week(a) from t1";
 execute stmt1;
 week(a)
@@ -1221,3 +1217,28 @@ set @rnd=1;
 select @rnd;
 @rnd
 0
+#
+# MDEV-24860: Incorrect behaviour of SET STATEMENT in case
+#             it is executed as a prepared statement
+#
+PREPARE stmt FROM "SET STATEMENT sql_mode = 'NO_ENGINE_SUBSTITUTION' FOR CREATE TABLE t1 AS SELECT CONCAT('abc') AS c1";
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+# Show definition of the table t1 created using Prepared Statement
+SHOW CREATE TABLE t1;
+Table	Create Table
+t1	CREATE TABLE `t1` (
+  `c1` varchar(3) NOT NULL
+) ENGINE=MyISAM DEFAULT CHARSET=latin1
+DROP TABLE t1;
+# Create the table t1 with the same definition as it used before
+# using regular statement execution mode.
+SET STATEMENT sql_mode = 'NO_ENGINE_SUBSTITUTION' FOR CREATE TABLE t1 AS SELECT CONCAT('abc') AS c1;
+# Show that the table has the same definition as it is in case the table
+# created in prepared statement mode.
+SHOW CREATE TABLE t1;
+Table	Create Table
+t1	CREATE TABLE `t1` (
+  `c1` varchar(3) NOT NULL
+) ENGINE=MyISAM DEFAULT CHARSET=latin1
+DROP TABLE t1;

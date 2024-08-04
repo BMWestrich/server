@@ -1,7 +1,7 @@
 /*****************************************************************************
 
 Copyright (c) 1996, 2012, Oracle and/or its affiliates. All Rights Reserved.
-Copyright (c) 2016, MariaDB Corporation.
+Copyright (c) 2016, 2017, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -13,7 +13,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -464,12 +464,22 @@ dict_boot(void)
 	if (err == DB_SUCCESS) {
 		if (srv_read_only_mode && !ibuf_is_empty()) {
 
-			ib_logf(IB_LOG_LEVEL_ERROR,
-				"Change buffer must be empty when --innodb-read-only "
-				"is set!");
+			if (srv_force_recovery < SRV_FORCE_NO_IBUF_MERGE) {
+				ib_logf(IB_LOG_LEVEL_ERROR,
+					"Change buffer must be empty when --innodb-read-only "
+					"is set!"
+					"You can try to recover the database with innodb_force_recovery=5");
 
-			err = DB_ERROR;
-		} else {
+				err = DB_ERROR;
+			} else {
+				ib_logf(IB_LOG_LEVEL_WARN,
+					"Change buffer not empty when --innodb-read-only "
+					"is set! but srv_force_recovery = %lu, ignoring.",
+					srv_force_recovery);
+			}
+		}
+
+		if (err == DB_SUCCESS) {
 			/* Load definitions of other indexes on system tables */
 
 			dict_load_sys_table(dict_sys->sys_tables);

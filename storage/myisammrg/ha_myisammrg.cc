@@ -1,4 +1,5 @@
 /* Copyright (c) 2000, 2011, Oracle and/or its affiliates
+   Copyright (c) 2009, 2016, MariaDB
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -11,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 
 /*
@@ -358,7 +359,7 @@ int ha_myisammrg::open(const char *name, int mode __attribute__((unused)),
                        uint test_if_locked_arg)
 {
   DBUG_ENTER("ha_myisammrg::open");
-  DBUG_PRINT("myrg", ("name: '%s'  table: 0x%lx", name, (long) table));
+  DBUG_PRINT("myrg", ("name: '%s'  table: %p", name, table));
   DBUG_PRINT("myrg", ("test_if_locked_arg: %u", test_if_locked_arg));
 
   /* Must not be used when table is open. */
@@ -412,8 +413,8 @@ int ha_myisammrg::open(const char *name, int mode __attribute__((unused)),
     DBUG_RETURN(my_errno ? my_errno : -1);
     /* purecov: end */
   }
-  DBUG_PRINT("myrg", ("MYRG_INFO: 0x%lx  child tables: %u",
-                      (long) file, file->tables));
+  DBUG_PRINT("myrg", ("MYRG_INFO: %p  child tables: %u",
+                      file, file->tables));
   DBUG_RETURN(0);
 }
 
@@ -439,8 +440,8 @@ int ha_myisammrg::add_children_list(void)
   List_iterator_fast<Mrg_child_def> it(child_def_list);
   Mrg_child_def *mrg_child_def;
   DBUG_ENTER("ha_myisammrg::add_children_list");
-  DBUG_PRINT("myrg", ("table: '%s'.'%s' 0x%lx", this->table->s->db.str,
-                      this->table->s->table_name.str, (long) this->table));
+  DBUG_PRINT("myrg", ("table: '%s'.'%s' %p", this->table->s->db.str,
+                      this->table->s->table_name.str, this->table));
 
   /* Must call this with open table. */
   DBUG_ASSERT(this->file);
@@ -698,12 +699,12 @@ extern "C" MI_INFO *myisammrg_attach_children_callback(void *callback_param)
   if ((child->file->ht->db_type != DB_TYPE_MYISAM) ||
       !(myisam= ((ha_myisam*) child->file)->file_ptr()))
   {
-    DBUG_PRINT("error", ("no MyISAM handle for child table: '%s'.'%s' 0x%lx",
+    DBUG_PRINT("error", ("no MyISAM handle for child table: '%s'.'%s' %p",
                          child->s->db.str, child->s->table_name.str,
-                         (long) child));
+                         child));
   }
 
-  DBUG_PRINT("myrg", ("MyISAM handle: 0x%lx", (long) myisam));
+  DBUG_PRINT("myrg", ("MyISAM handle: %p", myisam));
 
  end:
 
@@ -809,8 +810,8 @@ int ha_myisammrg::attach_children(void)
   int           error;
   Mrg_attach_children_callback_param param(parent_l, this->children_l, child_def_list);
   DBUG_ENTER("ha_myisammrg::attach_children");
-  DBUG_PRINT("myrg", ("table: '%s'.'%s' 0x%lx", table->s->db.str,
-                      table->s->table_name.str, (long) table));
+  DBUG_PRINT("myrg", ("table: '%s'.'%s' %p", table->s->db.str,
+                      table->s->table_name.str, table));
   DBUG_PRINT("myrg", ("test_if_locked: %u", this->test_if_locked));
 
   /* Must call this with open table. */
@@ -1465,48 +1466,40 @@ void ha_myisammrg::update_create_info(HA_CREATE_INFO *create_info)
 
   if (!(create_info->used_fields & HA_CREATE_USED_UNION))
   {
-    TABLE_LIST *child_table;
-    THD *thd=current_thd;
-
-    create_info->merge_list.next= &create_info->merge_list.first;
-    create_info->merge_list.elements=0;
+    TABLE_LIST *child_table, *end= NULL;
+    THD *thd=ha_thd();
 
     if (children_l != NULL)
     {
-      for (child_table= children_l;;
-           child_table= child_table->next_global)
+      for (child_table= children_l;; child_table= child_table->next_global)
       {
         TABLE_LIST *ptr;
 
         if (!(ptr= (TABLE_LIST *) thd->calloc(sizeof(TABLE_LIST))))
-          goto err;
+          DBUG_VOID_RETURN;
 
         if (!(ptr->table_name= thd->strmake(child_table->table_name,
                                             child_table->table_name_length)))
-          goto err;
-        if (child_table->db && !(ptr->db= thd->strmake(child_table->db,
-                                   child_table->db_length)))
-          goto err;
+          DBUG_VOID_RETURN;
+        if (child_table->db &&
+            !(ptr->db= thd->strmake(child_table->db, child_table->db_length)))
+          DBUG_VOID_RETURN;
 
-        create_info->merge_list.elements++;
-        (*create_info->merge_list.next)= ptr;
-        create_info->merge_list.next= &ptr->next_local;
+        if (create_info->merge_list)
+          end->next_local= ptr;
+        else
+          create_info->merge_list= ptr;
+        end= ptr;
 
         if (&child_table->next_global == children_last_l)
           break;
       }
     }
-    *create_info->merge_list.next=0;
   }
   if (!(create_info->used_fields & HA_CREATE_USED_INSERT_METHOD))
   {
     create_info->merge_insert_method = file->merge_insert_method;
   }
-  DBUG_VOID_RETURN;
-
-err:
-  create_info->merge_list.elements=0;
-  create_info->merge_list.first=0;
   DBUG_VOID_RETURN;
 }
 
@@ -1515,18 +1508,21 @@ int ha_myisammrg::create_mrg(const char *name, HA_CREATE_INFO *create_info)
 {
   char buff[FN_REFLEN];
   const char **table_names, **pos;
-  TABLE_LIST *tables= create_info->merge_list.first;
-  THD *thd= current_thd;
+  TABLE_LIST *tables= create_info->merge_list;
+  THD *thd= ha_thd();
   size_t dirlgt= dirname_length(name);
+  uint ntables= 0;
   DBUG_ENTER("ha_myisammrg::create_mrg");
 
+  for (tables= create_info->merge_list; tables; tables= tables->next_local)
+    ntables++;
+
   /* Allocate a table_names array in thread mem_root. */
-  if (!(table_names= (const char**)
-        thd->alloc((create_info->merge_list.elements+1) * sizeof(char*))))
+  if (!(pos= table_names= (const char**) thd->alloc((ntables + 1) * sizeof(char*))))
     DBUG_RETURN(HA_ERR_OUT_OF_MEM); /* purecov: inspected */
 
   /* Create child path names. */
-  for (pos= table_names; tables; tables= tables->next_local)
+  for (tables= create_info->merge_list; tables; tables= tables->next_local)
   {
     const char *table_name= buff;
 
@@ -1571,7 +1567,7 @@ int ha_myisammrg::create_mrg(const char *name, HA_CREATE_INFO *create_info)
 }
 
 
-int ha_myisammrg::create(const char *name, register TABLE *form,
+int ha_myisammrg::create(const char *name, TABLE *form,
 			 HA_CREATE_INFO *create_info)
 {
   char buff[FN_REFLEN];
@@ -1683,7 +1679,7 @@ uint ha_myisammrg::count_query_cache_dependant_tables(uint8 *tables_type)
   (*tables_type)|= HA_CACHE_TBL_NONTRANSACT;
     but it has no effect because HA_CACHE_TBL_NONTRANSACT is 0
   */
-  return (file->end_table - file->open_tables);
+  return (uint)(file->end_table - file->open_tables);
 }
 
 

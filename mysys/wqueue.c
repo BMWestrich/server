@@ -13,7 +13,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 #include <wqueue.h>
 
@@ -211,7 +211,7 @@ void wqueue_release_one_locktype_from_queue(WQUEUE *wqueue)
 /*
   Add thread and wait
 
-  SYNOPSYS
+  SYNOPSIS
     wqueue_add_and_wait()
     wqueue               queue to add to
     thread               thread which is waiting
@@ -224,17 +224,17 @@ void wqueue_add_and_wait(WQUEUE *wqueue,
 {
   DBUG_ENTER("wqueue_add_and_wait");
   DBUG_PRINT("enter",
-             ("thread: 0x%lx  cond: 0x%lx  mutex: 0x%lx",
-              (ulong) thread, (ulong) &thread->suspend, (ulong) lock));
+             ("thread: %p cond: %p mutex: %p",
+              thread, &thread->suspend, lock));
   wqueue_add_to_queue(wqueue, thread);
   do
   {
-    DBUG_PRINT("info", ("wait... cond:  0x%lx  mutex:  0x%lx",
-                        (ulong) &thread->suspend, (ulong) lock));
+    DBUG_PRINT("info", ("wait... cond:  %p  mutex:  %p",
+                        &thread->suspend, lock));
     mysql_cond_wait(&thread->suspend, lock);
-    DBUG_PRINT("info", ("wait done cond: 0x%lx  mutex: 0x%lx   next: 0x%lx",
-                        (ulong) &thread->suspend, (ulong) lock,
-                        (ulong) thread->next));
+    DBUG_PRINT("info", ("wait done cond: %p mutex: %p next: %p",
+                        &thread->suspend, lock,
+                        thread->next));
   }
   while (thread->next);
   DBUG_VOID_RETURN;

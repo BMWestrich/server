@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 /*
   mysql_upgrade_service upgrades mysql service on Windows.
@@ -146,6 +146,12 @@ static void die(const char *fmt, ...)
   exit(1);
 }
 
+#define WRITE_LOG(fmt,...) {\
+  char log_buf[1024]; \
+  DWORD nbytes; \
+  snprintf(log_buf,sizeof(log_buf), fmt, __VA_ARGS__);\
+  WriteFile(logfile_handle,log_buf, strlen(log_buf), &nbytes , 0);\
+}
 
 /*
   spawn-like function to run subprocesses. 
@@ -187,16 +193,21 @@ static intptr_t run_tool(int wait_flag, const char *program,...)
   {
     char tmpdir[FN_REFLEN];
     GetTempPath(FN_REFLEN, tmpdir);
-    sprintf_s(logfile_path, "%s\\mysql_upgrade_service.%s.log", tmpdir, 
+    sprintf_s(logfile_path, "%smysql_upgrade_service.%s.log", tmpdir,
       opt_service);
-    logfile_handle= CreateFile(logfile_path, GENERIC_WRITE,  FILE_SHARE_READ, 
-      NULL, TRUNCATE_EXISTING, 0, NULL);
-    if (!logfile_handle)
+    SECURITY_ATTRIBUTES attr= {0};
+    attr.nLength= sizeof(SECURITY_ATTRIBUTES);
+    attr.bInheritHandle=  TRUE;
+    logfile_handle= CreateFile(logfile_path, FILE_APPEND_DATA,
+      FILE_SHARE_READ|FILE_SHARE_WRITE, &attr, CREATE_ALWAYS, 0, NULL);
+    if (logfile_handle == INVALID_HANDLE_VALUE)
     {
       die("Cannot open log file %s, windows error %u", 
         logfile_path, GetLastError());
     }
   }
+
+  WRITE_LOG("Executing %s\r\n", cmdline);
 
   /* Start child process */
   STARTUPINFO si= {0};
@@ -306,9 +317,6 @@ void initiate_mysqld_shutdown()
 */
 static void change_service_config()
 {
-
-  char defaults_file[MAX_PATH];
-  char default_character_set[64];
   char buf[MAX_PATH];
   char commandline[3*MAX_PATH + 19];
   int i;
@@ -370,22 +378,6 @@ static void change_service_config()
     the new version, and will complain about mismatched message file.
   */
   WritePrivateProfileString("mysqld", "basedir",NULL, props.inifile);
-
-  /* 
-    Replace default-character-set  with character-set-server, to avoid 
-    "default-character-set is deprecated and will be replaced ..."
-    message.
-  */
-  default_character_set[0]= 0;
-  GetPrivateProfileString("mysqld", "default-character-set", NULL,
-    default_character_set, sizeof(default_character_set), defaults_file);
-  if (default_character_set[0])
-  {
-    WritePrivateProfileString("mysqld", "default-character-set", NULL, 
-      defaults_file);
-    WritePrivateProfileString("mysqld", "character-set-server",
-      default_character_set, defaults_file);
-  }
 
   sprintf(defaults_file_param,"--defaults-file=%s", props.inifile);
   sprintf_s(commandline, "\"%s\" \"%s\" \"%s\"", mysqld_path, 
@@ -458,7 +450,7 @@ int main(int argc, char **argv)
   log("Phase 3/8: Starting mysqld for upgrade");
   mysqld_process= (HANDLE)run_tool(P_NOWAIT, mysqld_path,
     defaults_file_param, "--skip-networking",  "--skip-grant-tables", 
-    "--enable-named-pipe",  socket_param, NULL);
+    "--enable-named-pipe",  socket_param,"--skip-slave-start", NULL);
 
   if (mysqld_process == INVALID_HANDLE_VALUE)
   {
@@ -472,8 +464,8 @@ int main(int argc, char **argv)
     if (WaitForSingleObject(mysqld_process, 0) != WAIT_TIMEOUT)
       die("mysqld.exe did not start");
 
-    if (run_tool(P_WAIT, mysqladmin_path, "--protocol=pipe",
-      socket_param, "ping",  NULL) == 0)
+    if (run_tool(P_WAIT, mysqladmin_path, "--protocol=pipe", socket_param,
+                 "ping", "--no-beep", NULL) == 0)
     {
       break;
     }

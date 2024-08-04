@@ -1,9 +1,13 @@
 # General purpose bug fix tests go here : subselect.test too large
 
+--source include/default_optimizer_switch.inc
+
 --disable_warnings
 drop table if exists t0,t1,t2,t3,t4,t5,t6;
 drop view if exists v1, v2;
 --enable_warnings
+
+--source include/have_sequence.inc
 
 set @subselect4_tmp= @@optimizer_switch;
 set optimizer_switch='semijoin=on,firstmatch=on,loosescan=on';
@@ -1035,6 +1039,8 @@ INSERT IGNORE INTO t3 VALUES (0),(0);
 
 set @@optimizer_switch='semijoin=off';
 
+--echo # NOTE: the following should have 'SUBQUERY', not 'DEPENDENT SUBQUERY'
+--echo # for line with id=2, see MDEV-27794.
 EXPLAIN
 SELECT * FROM t1 WHERE
 (SELECT f2 FROM t2
@@ -1956,5 +1962,408 @@ SELECT x FROM t1 WHERE id > (SELECT MAX(id) - 1000 FROM t1) ORDER BY x LIMIT 1;
 
 drop table t1;
 
+--echo #
+--echo # MDEV-7691: Assertion `outer_context || !*from_field || *from_field == not_found_field' ...
+--echo #
+set optimizer_switch=default;
+CREATE TABLE t1 (a INT) ENGINE=MyISAM;
+INSERT INTO t1 VALUES (4),(6);
+ 
+CREATE TABLE t2 (b INT) ENGINE=MyISAM;
+INSERT INTO t2 VALUES (1),(8);
+ 
+PREPARE stmt FROM "
+SELECT * FROM t2
+HAVING 0 IN (
+  SELECT a FROM t1
+  WHERE a IN ( 
+    SELECT a FROM t1
+    WHERE b = a
+  )
+)
+"; 
+ 
+EXECUTE stmt;
+EXECUTE stmt;
+
+--echo # Alternative test case, without HAVING
+CREATE TABLE t3 (i INT) ENGINE=MyISAM;
+INSERT INTO t3 VALUES (4),(6);
+ 
+PREPARE stmt FROM "
+SELECT * FROM t3 AS t10
+WHERE EXISTS ( 
+  SELECT * FROM t3 AS t20 WHERE t10.i IN ( 
+    SELECT i FROM t3 
+  ) 
+)";
+ 
+EXECUTE stmt;
+EXECUTE stmt;
+
+drop table t1, t2, t3;
+
+--echo #
+--echo # MDEV-11078: NULL NOT IN (non-empty subquery) should never return results
+--echo #
+
+create table t1(a int,b int);
+create table t2(a int,b int);
+insert into t1 value (1,2);
+select (NULL)  in (select 1 from t1);
+select (null)  in (select 1 from t2);
+select 1 in (select 1 from t1);
+select 1 in (select 1 from t2);
+select 1 from dual where null in (select 1 from t1);
+select 1 from dual where null in (select 1 from t2);
+select (null,null) in (select * from t1);
+select (null,null) in (select * from t2);
+select 1 from dual where null not in (select 1 from t1);
+select 1 from dual where null not in (select 1 from t2);
+drop table t1,t2;
+
+
+--echo #
+--echo # MDEV-6486: Assertion `!table || (!table->read_set || bitmap_is_set(table->read_set, field_index))'
+--echo # failed with SELECT SQ, TEXT field
+--echo #
+
+CREATE TABLE t1 (a VARCHAR(8), KEY(a)) ENGINE=MyISAM;
+INSERT INTO t1 VALUES ('foo'),( 'bar');
+
+CREATE TABLE t2 (b VARCHAR(8), c TINYTEXT, KEY(b)) ENGINE=MyISAM;
+INSERT INTO t2 VALUES ('baz','baz'),('qux', 'qux');
+
+SELECT ( SELECT COUNT(*) FROM t1 WHERE a = c ) AS field, COUNT(DISTINCT c)
+FROM t2 WHERE b <= 'quux' GROUP BY field;
+drop table t1,t2;
+
+--echo #
+--echo # MDEV-15555: select from DUAL where false yielding wrong result when in a IN
+--echo #
+
+explain 
+SELECT 2 IN (SELECT 2 from DUAL WHERE 1 != 1);
+SELECT 2 IN (SELECT 2 from DUAL WHERE 1 != 1);
+
 SET optimizer_switch= @@global.optimizer_switch;
 set @@tmp_table_size= @@global.tmp_table_size;
+
+--echo #
+--echo # MDEV-14515: Wrong results for tableless query with subquery in WHERE
+--echo #             and implicit aggregation
+--echo #
+
+create table t1 (i1 int, i2 int);
+insert into t1 values (1314, 1084),(1330, 1084),(1401, 1084),(580, 1084);
+
+create table t2 (cd int);
+insert into t2 values
+  (1330), (1330), (1330), (1330), (1330), (1330), (1330), (1330),
+  (1330), (1330), (1330), (1330), (1330), (1330), (1330), (1330);
+
+select max(10) from dual
+  where exists (select 1 from t2 join t1 on t1.i1 = t2.cd  and t1.i2 = 345);
+
+insert into t2 select * from t2;
+
+select max(10) from dual
+  where exists (select 1 from t2 join t1 on t1.i1 = t2.cd  and t1.i2 = 345);
+
+DROP TABLE t1,t2;
+
+--echo #
+--echo # MDEV-10232 Scalar result of subquery changes after adding an outer select stmt
+--echo #
+
+create table t1(c1 int, c2 int, primary key(c2));
+insert into t1 values(2,1),(1,2);
+select (select c1 from t1 group by c1,c2 order by c1 limit 1) as x;
+(select c1 from t1 group by c1,c2 order by c1 limit 1);
+drop table t1;
+
+--echo #
+--echo # MDEV-22498: SIGSEGV in Bitmap<64u>::merge on SELECT
+--echo #
+
+set @save_sql_select_limit= @@sql_select_limit;
+SET sql_select_limit=0;
+
+CREATE TABLE t1(b INT, c INT);
+CREATE TABLE t2(a INT, b INT);
+INSERT INTO t1 VALUES (1,1),(2,2),(3,3);
+INSERT INTO t2 VALUES (1,1),(2,2),(3,3);
+
+let $query=
+SELECT sum(a), t2.a, t2.b FROM t2 HAVING t2.a IN (SELECT t2.b FROM t1);
+
+eval EXPLAIN EXTENDED $query;
+eval $query;
+
+SET @@sql_select_limit= @save_sql_select_limit;
+
+eval EXPLAIN EXTENDED $query;
+eval $query;
+DROP TABLE t1,t2;
+
+--echo #
+--echo # MDEV-17606: Query returns wrong results (while using CHARACTER SET utf8)
+--echo #
+
+CREATE TABLE t1(l1 varchar(10), i2 int);
+INSERT INTO t1 VALUES ('e',2),('o',6),('x',4);
+CREATE TABLE t2 (v1 varchar(10) CHARACTER SET utf8, KEY v1 (v1(3)));
+INSERT INTO t2 VALUES  ('k'),('rid'),('f'),('x');
+
+EXPLAIN EXTENDED SELECT * FROM t1 where  ( t1.l1 < ANY (SELECT MAX(t2.v1) FROM t2));
+SELECT * FROM t1 where  ( t1.l1 < ANY (SELECT MAX(t2.v1) FROM t2));
+DROP TABLE t1, t2;
+
+--echo #
+--echo # MDEV-19232: Floating point precision / value comparison problem
+--echo #
+
+CREATE TABLE t1 (region varchar(60), area decimal(10,0), population decimal(11,0));
+INSERT INTO t1 VALUES ('Central America and the Caribbean',91,11797);
+INSERT INTO t1 VALUES ('Central America and the Caribbean',442,66422);
+
+SET @save_optimizer_switch=@@optimizer_switch;
+SET optimizer_switch='subquery_cache=on';
+
+SELECT
+population, area, population/area,
+cast(population/area as DECIMAL(20,9)) FROM t1 LIMIT 1;
+
+SELECT * FROM t1 A
+WHERE population/area = (SELECT MAX(population/area) from t1 B where A.region = B.region);
+
+SET optimizer_switch='subquery_cache=off';
+SELECT * FROM t1 A
+WHERE population/area = (SELECT MAX(population/area) from t1 B where A.region = B.region);
+
+SET @@optimizer_switch= @save_optimizer_switch;
+
+DROP TABLE t1;
+
+--echo #
+--echo # MDEV-9513: Assertion `join->group_list || !join->is_in_subquery()' failed in create_sort_index
+--echo #
+
+CREATE TABLE t1 (a INT);
+INSERT INTO t1 VALUES (1),(2);
+
+CREATE TABLE t2 (a INT);
+INSERT INTO t2 VALUES (2),(3);
+EXPLAIN
+SELECT t1.a FROM t1 WHERE t1.a IN ( SELECT A.a FROM t1 A UNION SELECT B.a FROM t2 B ORDER BY 1);
+SELECT t1.a FROM t1 WHERE t1.a IN ( SELECT A.a FROM t1 A UNION SELECT B.a FROM t2 B ORDER BY 1);
+
+EXPLAIN
+SELECT t1.a FROM t1 WHERE EXISTS (SELECT A.a FROM t1 A UNION SELECT B.a FROM t2 B ORDER BY 1);
+SELECT t1.a FROM t1 WHERE EXISTS (SELECT A.a FROM t1 A UNION SELECT B.a FROM t2 B ORDER BY 1);
+
+EXPLAIN
+SELECT t1.a FROM t1 WHERE t1.a IN ( SELECT A.a FROM t1 A UNION ALL SELECT B.a FROM t2 B ORDER BY 1);
+SELECT t1.a FROM t1 WHERE t1.a IN ( SELECT A.a FROM t1 A UNION ALL SELECT B.a FROM t2 B ORDER BY 1);
+
+DROP TABLE t1,t2;
+
+--echo # end of 10.1 tests
+
+--echo #
+--echo # MDEV-22852: SIGSEGV in sortlength (optimized builds)
+--echo #
+
+SET @save_optimizer_switch=@@optimizer_switch;
+SET optimizer_switch='subquery_cache=off';
+CREATE TABLE t1 (a INT,b INT);
+INSERT INTO t1 VALUES (0,0),(0,0);
+SELECT (SELECT DISTINCT t1i.b FROM t1 t1i GROUP BY t1i.a ORDER BY MAX(t1o.b)) FROM t1 AS t1o;
+SET @@optimizer_switch= @save_optimizer_switch;
+DROP TABLE t1;
+
+--echo #
+--echo # MDEV-17066: Bytes lost or Assertion `status_var.local_memory_used == 0 after DELETE
+--echo # with subquery with ROLLUP
+--echo #
+
+CREATE TABLE t1 (i INT DEFAULT 0, c VARCHAR(2048));
+INSERT INTO t1  SELECT 0, seq FROM seq_1_to_6000;
+
+CREATE TABLE t2 (f VARCHAR(2048) DEFAULT '');
+INSERT INTO t2 VALUES ('1'),('bar');
+
+EXPLAIN
+SELECT * FROM t2 WHERE f IN ( SELECT MAX(c) FROM t1 GROUP BY c WITH ROLLUP);
+SELECT * FROM t2 WHERE f IN ( SELECT MAX(c) FROM t1 GROUP BY c WITH ROLLUP);
+
+SELECT * FROM t2;
+DELETE FROM t2 WHERE f IN ( SELECT MAX(c) FROM t1 GROUP BY c WITH ROLLUP );
+SELECT * FROM t2;
+
+DROP TABLE t1, t2;
+
+--echo #
+--echo # MDEV-23449: alias do not exist and a query do not report an error
+--echo #
+
+CREATE TABLE t1(a INT, b INT);
+INSERT INTO t1 VALUES (1,1), (2,2), (3,3), (4,4), (5,5);
+
+--error ER_BAD_FIELD_ERROR
+SELECT a, b FROM t1 WHERE a IN (SELECT A.a FROM t1 A GROUP BY s.id);
+DROP TABLE t1;
+
+--echo #
+--echo # MDEV-24519: Server crashes in Charset::set_charset upon SELECT
+--echo #
+
+CREATE TABLE t1 (a VARBINARY(8));
+INSERT INTO t1 VALUES ('foo'),('bar');
+CREATE TABLE t2 (b VARBINARY(8));
+
+EXPLAIN
+SELECT a FROM t1 WHERE (a, a) IN (SELECT 'qux', 'qux') AND a = (SELECT MIN(b) FROM t2);
+SELECT a FROM t1 WHERE (a, a) IN (SELECT 'qux', 'qux') AND a = (SELECT MIN(b) FROM t2);
+
+DROP TABLE t1,t2;
+
+CREATE TABLE t1 (a INT);
+INSERT INTO t1 VALUES (1),(2);
+CREATE TABLE t2 (b VARBINARY(8));
+
+EXPLAIN
+SELECT a FROM t1 WHERE (a, a) IN (SELECT 1, 2) AND a = (SELECT MIN(b) FROM t2);
+SELECT a FROM t1 WHERE (a, a) IN (SELECT 1, 2) AND a = (SELECT MIN(b) FROM t2);
+
+DROP TABLE t1,t2;
+
+--echo #
+--echo # MDEV-22462: Item_in_subselect::create_single_in_to_exists_cond(JOIN *, Item **, Item **): Assertion `false' failed.
+--echo #
+
+select 1 from dual where 1 in (select 5 from dual where 1);
+
+create table t1 (a int);
+insert into t1 values (1),(2),(3);
+
+update t1 set a = 2 where a in (select a from dual where a = a);
+drop table t1;
+
+--echo #
+--echo # MDEV-24925: Server crashes in Item_subselect::init_expr_cache_tracker
+--echo #
+CREATE TABLE t1 (id INT PRIMARY KEY);
+INSERT INTO t1 VALUES (1),(2);
+
+SELECT
+  1 IN (
+    SELECT
+      (SELECT COUNT(id)
+       FROM t1
+       WHERE t1_outer.id <> id
+       ) AS f
+    FROM
+      t1 AS t1_outer
+    GROUP BY f
+  );
+
+SELECT
+  1 IN (
+    SELECT
+      (SELECT COUNT(id)
+       FROM t1
+       WHERE t1_outer.id <> id
+       ) AS f
+    FROM
+      t1 AS t1_outer
+    GROUP BY 1
+  );
+
+DROP TABLE t1;
+
+--echo #
+--echo #  MDEV-24898: Server crashes in st_select_lex::next_select / Item_subselect::is_expensive
+--echo #  (Testcase)
+--echo #
+CREATE TABLE t1 (a INT);
+INSERT INTO t1 VALUES (1),(2); # Optional, fails either way
+CREATE TABLE t2 (b INT);
+INSERT INTO t2 VALUES (3),(4); # Optional, fails either way
+
+--error ER_SUBQUERY_NO_1_ROW
+SELECT 1 IN (SELECT (SELECT a FROM t1) AS x FROM t2 GROUP BY x);
+drop table t1,t2;
+
+--echo #
+--echo # MDEV-25629: Crash in get_sort_by_table() in subquery with order by having outer ref
+--echo #
+CREATE TABLE t1 (i1 int);
+insert into t1 values (1),(2);
+
+--error ER_SUBQUERY_NO_1_ROW
+SELECT 1
+FROM (t1 JOIN t1 AS ref_t1 ON
+	(t1.i1 > (SELECT ref_t1.i1 AS c0 FROM t1 b ORDER BY -c0)));
+
+DROP TABLE t1;
+
+--echo #
+--echo # MDEV-22377: Subquery in an UPDATE query uses full scan instead of range
+--echo #
+
+CREATE TABLE t1 (
+  key1 varchar(30) NOT NULL,
+  col1 int(11) NOT NULL,
+  filler char(100)
+);
+insert into t1 select seq, seq, seq from seq_1_to_100;
+
+CREATE TABLE t10 (
+  key1 varchar(30) NOT NULL,
+  col1 int,
+  filler char(100),
+  PRIMARY KEY (key1)
+);
+insert into t10 select seq, seq, seq from seq_1_to_1000;
+
+CREATE TABLE t11 (
+  key1 varchar(30) NOT NULL,
+  filler char(100),
+  PRIMARY KEY (key1)
+);
+insert into t11 select seq, seq from seq_1_to_1000;
+
+
+set @tmp_os=@@optimizer_switch;
+set optimizer_switch='semijoin=off,materialization=off';
+
+--echo # Must use range access (not full scan) for table tms:
+explain select * from t1 hist
+WHERE
+  key1 IN ('1','2','3','4','5','6','7','8','9','10') AND
+  hist.col1 NOT IN (SELECT tn.col1
+                    FROM t10 tn JOIN t11 tms ON tms.key1 = tn.key1
+                    WHERE tn.key1 IN ('1','2','3','4','5','6','7','8','9','10')
+                   );
+
+set optimizer_switch=@tmp_os;
+
+drop table t1, t10, t11;
+
+--echo #
+--echo # MDEV-28268: Server crashes in Expression_cache_tracker::fetch_current_stats
+--echo #
+CREATE TABLE t1 (a INT, b INT);
+INSERT INTO t1 VALUES (1,2),(3,4);
+
+--source include/analyze-format.inc
+ANALYZE FORMAT=JSON
+SELECT DISTINCT
+  (SELECT MIN(a) FROM t1 WHERE b <= ANY (SELECT a FROM t1)) AS f
+FROM t1;
+
+# Cleanup
+DROP TABLE t1;
+
+--echo # End of 10.2 tests

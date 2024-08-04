@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 
 # Copyright (c) 2009, 2012, Oracle and/or its affiliates. All rights reserved.
 # 
@@ -13,7 +13,7 @@
 # 
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335 USA
 
 use strict;
 use Cwd 'abs_path';
@@ -165,19 +165,24 @@ foreach my $option (@ARGV)
     $cmakeargs = $cmakeargs." -DWITH_LIBEVENT=bundled";
     next;
   }
-  if($option =~ /with-ssl=/)
+  if($option =~ /with-ssl=yes/)
   {
     $cmakeargs = $cmakeargs." -DWITH_SSL=yes";
+    next;
+  }
+  if($option =~ /with-ssl=system/)
+  {
+    $cmakeargs = $cmakeargs." -DWITH_SSL=system";
+    next;
+  }
+  if($option =~ /with-ssl$/)
+  {
+    $cmakeargs = $cmakeargs." -DWITH_SSL=bundled";
     next;
   }
   if($option =~ /with-debug/)
   {
     $cmakeargs = $cmakeargs." -DCMAKE_BUILD_TYPE=Debug -DSECURITY_HARDENED=OFF";
-    next;
-  }
-  if($option =~ /with-ssl/)
-  {
-    $cmakeargs = $cmakeargs." -DWITH_SSL=bundled";
     next;
   }
   if($option =~ /prefix=/)

@@ -1,6 +1,7 @@
 /*****************************************************************************
 
-Copyright (c) 1994, 2009, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1994, 2016, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2017, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +13,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -59,7 +60,7 @@ ut_dbg_assertion_failed(
 	const char*	expr,	/*!< in: the failed assertion */
 	const char*	file,	/*!< in: source file containing the assertion */
 	ulint		line)	/*!< in: line number of the assertion */
-	UNIV_COLD __attribute__((nonnull(2)));
+	UNIV_COLD MY_ATTRIBUTE((nonnull(2)));
 
 /** Abort the execution. */
 # define UT_DBG_PANIC abort()
@@ -84,7 +85,7 @@ ut_dbg_assertion_failed(
 /** Debug assertion. Does nothing unless UNIV_DEBUG is defined. */
 #define ut_ad(EXPR)	ut_a(EXPR)
 /** Debug statement. Does nothing unless UNIV_DEBUG is defined. */
-#define ut_d(EXPR)	do {EXPR;} while (0)
+#define ut_d(EXPR)	EXPR
 #else
 /** Debug assertion. Does nothing unless UNIV_DEBUG is defined. */
 #define ut_ad(EXPR)

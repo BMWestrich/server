@@ -8,6 +8,8 @@
 # Save the initial number of concurrent sessions
 --source include/count_sessions.inc
 
+call mtr.add_suppression("Deadlock found when trying to get lock; try restarting transaction");
+
 --disable_warnings
 drop table if exists t1, t2;
 --enable_warnings
@@ -258,19 +260,16 @@ DROP TABLE IF EXISTS t1;
 CREATE TABLE t1(a INT, b INT, PRIMARY KEY(a)) engine=InnoDB;
 INSERT INTO t1 VALUES (1, 1), (2, 2);
 
---echo # Connection con1
 connect (con1, localhost, root);
 XA START 'a';
 UPDATE t1 SET b= 3 WHERE a=1;
 
---echo # Connection default
 connection default;
 XA START 'b';
 UPDATE t1 SET b=4 WHERE a=2;
 --echo # Sending:
 --send UPDATE t1 SET b=5 WHERE a=1
 
---echo # Connection con1
 connection con1;
 --sleep 1
 --error ER_LOCK_DEADLOCK
@@ -279,7 +278,6 @@ UPDATE t1 SET b=6 WHERE a=2;
 --error ER_XA_RBDEADLOCK
 XA COMMIT 'a';
 
---echo # Connection default
 connection default;
 --echo # Reaping: UPDATE t1 SET b=5 WHERE a=1
 --reap
@@ -328,9 +326,23 @@ DROP TABLE t1;
 
 
 --echo #
+--echo # MDEV-14609 XA Transction unable to ROLLBACK TO SAVEPOINT
+--echo #
+
+CREATE TABLE t1 (c1 INT) ENGINE=INNODB;
+XA START 'xa1';
+SAVEPOINT savepoint1;
+INSERT INTO t1 (c1) VALUES (1),(2),(3),(4);
+ROLLBACK TO SAVEPOINT savepoint1;
+XA END 'xa1';
+XA ROLLBACK 'xa1';
+DROP TABLE t1;
+
+
+--echo #
 --echo # Bug#12352846 - TRANS_XA_START(THD*):
 --echo #                ASSERTION THD->TRANSACTION.XID_STATE.XID.IS_NULL()
---echo #                FAILED 
+--echo #                FAILED
 --echo #
 
 --disable_warnings
@@ -343,13 +355,11 @@ CREATE TABLE t2 (a INT) ENGINE=InnoDB;
 START TRANSACTION;
 INSERT INTO t1 VALUES (1);
 
---echo # Connection con2
 --connect (con2,localhost,root)
 XA START 'xid1';
 --echo # Sending:
 --send INSERT INTO t2 SELECT a FROM t1
 
---echo # Connection default
 --connection default
 let $wait_condition=
   SELECT COUNT(*) = 1 FROM information_schema.processlist
@@ -360,7 +370,6 @@ let $wait_condition=
 --sleep 0.1
 DELETE FROM t1;
 
---echo # Connection con2
 --connection con2
 --echo # Reaping: INSERT INTO t2 SELECT a FROM t1
 --error ER_LOCK_DEADLOCK
@@ -368,12 +377,10 @@ DELETE FROM t1;
 --error ER_XA_RBDEADLOCK
 XA COMMIT 'xid1';
 
---echo # Connection default
 connection default;
 
 COMMIT;
 
---echo # Connection con2
 connection con2;
 # This caused the assert to be triggered
 XA START 'xid1';
@@ -382,12 +389,119 @@ XA END 'xid1';
 XA PREPARE 'xid1';
 XA ROLLBACK 'xid1';
 
---echo # Connection default
 connection default;
 DROP TABLE t1, t2;
 disconnect con2;
 
 
-# Wait till all disconnects are completed
+#
+# MDEV 15217 Assertion `thd->transaction.xid_state.xid.is_null()' failed in trans_xa_start.
+#
+CREATE TABLE t1 (pk INT PRIMARY KEY) ENGINE=InnoDB;
+CREATE TABLE t2 (pk INT PRIMARY KEY) ENGINE=InnoDB;
+INSERT INTO t2 VALUES (1),(2);
+CREATE TABLE t3 (i INT) ENGINE=InnoDB;
+
+XA BEGIN 'xid1';
+REPLACE INTO t1 SELECT * FROM t2;
+
+--connect (con1,localhost,root,,test)
+XA BEGIN 'xid2';
+--send
+INSERT INTO t1 SELECT * FROM t2;
+
+--connection default
+REPLACE INTO t2 SELECT * FROM t2;
+
+--connection con1
+--error 0, ER_LOCK_DEADLOCK, ER_LOCK_WAIT_TIMEOUT
+--reap
+--disconnect con1
+
+--connect (con2,localhost,root,,test)
+INSERT INTO t3 VALUES (1);
+XA BEGIN 'xid3';
+
+
+#Cleanup
+--disconnect con2
+--connection default
+XA END 'xid1';
+XA ROLLBACK 'xid1';
+DROP TABLE t1, t2, t3;
+
+--echo #
+--echo # MDEV 15532 XA: Assertion `!log->same_pk' failed in
+--echo # row_log_table_apply_delete
+--echo #
+
+CREATE TABLE t1 (a INT) ENGINE=InnoDB;
+INSERT INTO t1 VALUES (1),(2);
+
+--connect (con1,localhost,root,,test)
+
+XA START 'xid';
+UPDATE t1 SET a = 5;
+
+--connection default
+SET innodb_lock_wait_timeout= 2, lock_wait_timeout= 2;
+
+--error ER_NO_SUCH_TABLE
+ALTER TABLE non_existing_table1;
+
+--send ALTER TABLE t1 FORCE;
+
+--connection con1
+--error ER_XAER_RMFAIL
+
+ALTER TABLE non_existing_table2;
+DELETE FROM t1 LIMIT 1;
+
+--connection default
+--error ER_LOCK_WAIT_TIMEOUT
+--reap
+
+# Cleanup
+--connection con1
+XA END 'xid';
+XA ROLLBACK 'xid';
+DROP TABLE t1;
+--disconnect con1
+connection default;
+
 --source include/wait_until_count_sessions.inc
 
+--echo #
+--echo # XA states and SHOW commands
+--echo #
+create table t1 (pk int primary key) engine=innodb;
+xa start 'foo';
+insert t1 set pk=1;
+xa end 'foo';
+xa prepare 'foo';
+show status like 'foo';
+--query_vertical select table_name,table_comment from information_schema.tables where table_schema='test'
+--query_vertical select table_name,table_rows,table_comment from information_schema.tables where table_schema='test'
+xa commit 'foo';
+drop table t1;
+
+--echo #
+--echo # MDEV-22445 Crash on HANDLER READ NEXT after XA PREPARE
+--echo #
+
+CREATE TABLE t (a INT KEY) ENGINE=InnoDB;
+HANDLER t OPEN AS t;
+XA START '0';
+SELECT * FROM t;
+XA END '0';
+XA PREPARE '0';
+--error ER_XAER_RMFAIL
+HANDLER t READ NEXT;
+
+--echo # Cleanup
+XA COMMIT '0';
+DROP TABLE t;
+
+--echo #
+--echo # End of 10.2 tests
+--echo #

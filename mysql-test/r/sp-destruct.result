@@ -12,7 +12,7 @@ create function bug14233_f() returns int
 return 42;
 create table t1 (id int);
 create trigger t1_ai after insert on t1 for each row call bug14233();
-alter table mysql.proc drop type;
+alter table mysql.proc drop security_type;
 call bug14233();
 ERROR HY000: Column count of mysql.proc is wrong. Expected 20, found 19. The table is probably corrupted
 create view v1 as select bug14233_f();
@@ -142,7 +142,7 @@ drop database if exists mysqltest;
 flush table mysql.proc;
 create database mysqltest;
 # Corrupt mysql.proc to make it unusable by current version of server.
-alter table mysql.proc drop column type;
+alter table mysql.proc drop column security_type;
 # The below statement should not cause assertion failure.
 drop database mysqltest;
 Warnings:
@@ -171,3 +171,9 @@ create database mysqltest1;
 create procedure mysqltest1.foo() select "foo";
 update mysql.proc set name='' where db='mysqltest1';
 drop database mysqltest1;
+create procedure p1() set @foo = 10;
+alter table mysql.proc drop primary key;
+drop procedure p1;
+ERROR HY000: Cannot load from mysql.proc. The table is probably corrupted
+alter table mysql.proc add primary key (db,name,type);
+drop procedure p1;

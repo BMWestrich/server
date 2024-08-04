@@ -11,7 +11,7 @@ insert into t1 values("10:22:33"),("12:34:56.78"),(10),(1234),(123456.78),(12345
 insert t1 values (30),(1230),("1230"),("12:30"),("12:30:35"),("1 12:30:31.32");
 select * from t1;
 # Test wrong values
-insert into t1 values("10.22.22"),(1234567),(123456789),(123456789.10),("10 22:22"),("12.45a");
+insert ignore into t1 values("10.22.22"),(1234567),(123456789),(123456789.10),("10 22:22"),("12.45a");
 select * from t1;
 drop table t1;
 
@@ -219,7 +219,7 @@ CREATE TABLE t1 (a TIME(6));
 --error ER_TRUNCATED_WRONG_VALUE
 INSERT INTO t1 VALUES (CAST(0xFFFFFFFF00000000 AS UNSIGNED)); 
 SET sql_mode=DEFAULT;
-INSERT INTO t1 VALUES (CAST(0xFFFFFFFF00000000 AS UNSIGNED)); 
+INSERT IGNORE INTO t1 VALUES (CAST(0xFFFFFFFF00000000 AS UNSIGNED)); 
 SELECT * FROM t1;
 DROP TABLE t1;
 SELECT TIME'00:00:00'> CAST(0xFFFFFFFF00000000 AS UNSIGNED);
@@ -506,7 +506,7 @@ SELECT * FROM t1 WHERE a=TIMESTAMP'0000-00-00 10:20:30' AND LENGTH(a)=8;
 EXPLAIN EXTENDED
 SELECT * FROM t1 WHERE a=TIMESTAMP'0000-00-00 10:20:30' AND LENGTH(a)=30+RAND();
 
---echo # Old mode, TIMESTAMP literal, zon-zero YYYYMMDD, no propagation
+--echo # Old mode, TIMESTAMP literal, non-zero YYYYMMDD, no propagation
 SELECT * FROM t1 WHERE a=TIMESTAMP'0000-00-01 10:20:30';
 SELECT * FROM t1 WHERE a=TIMESTAMP'0000-00-01 10:20:30' AND LENGTH(a)=8;
 EXPLAIN EXTENDED
@@ -522,7 +522,7 @@ SELECT * FROM t1 WHERE a='0000-00-00 10:20:30' AND LENGTH(a)=8;
 EXPLAIN EXTENDED
 SELECT * FROM t1 WHERE a='0000-00-00 10:20:30' AND LENGTH(a)=30+RAND();
 
---echo # Old mode, TIMESTAMP-alike literal, zon-zero YYYYMMDD, no propagation
+--echo # Old mode, TIMESTAMP-alike literal, non-zero YYYYMMDD, no propagation
 SELECT * FROM t1 WHERE a='0000-00-01 10:20:30';
 SELECT * FROM t1 WHERE a='0000-00-01 10:20:30' AND LENGTH(a)=8;
 EXPLAIN EXTENDED
@@ -724,6 +724,63 @@ SELECT MAX(a), MAX(COALESCE(a)) FROM t1;
 DROP TABLE t1;
 
 --echo #
+--echo # MDEV-15321: different results when using value of optimizer_use_condition_selectivity=4 and =1
+--echo #
+
+SET @save_old_mode=@@old_mode;
+SET @@old_mode=zero_date_time_cast;
+CREATE TABLE t1 (a TIME);
+INSERT INTO t1 VALUES ('0000-00-00 10:20:30'),('0000-00-00 10:20:31');
+INSERT INTO t1 VALUES ('0000-00-01 10:20:30'),('0000-00-01 10:20:31');
+INSERT INTO t1 VALUES ('31 10:20:30'),('32 10:20:30'),('33 10:20:30'),('34 10:20:30');
+
+SET @save_optimizer_use_condition_selectivity= @@optimizer_use_condition_selectivity;
+SET @@optimizer_use_condition_selectivity=1;
+SELECT * FROM t1 WHERE a='0000-00-01 10:20:30' AND LENGTH(a)=8;
+EXPLAIN EXTENDED SELECT * FROM t1 WHERE a='0000-00-01 10:20:30' AND LENGTH(a)=8;
+
+SET @@optimizer_use_condition_selectivity=4;
+SELECT * FROM t1 WHERE a='0000-00-01 10:20:30' AND LENGTH(a)=8;
+EXPLAIN EXTENDED SELECT * FROM t1 WHERE a='0000-00-01 10:20:30' AND LENGTH(a)=8;
+drop table t1;
+SET @@optimizer_use_condition_selectivity= @save_optimizer_use_condition_selectivity;
+set @@old_mode= @save_old_mode;
+
+--echo #
+--echo # MDEV-21319 COUNT(*) returns 1, actual SELECT returns no result in 10.3.21, but 1 result in 10.1.41
+--echo #
+
+CREATE OR REPLACE TABLE t1
+(
+  id INT NOT NULL PRIMARY KEY,
+  id2 INT,
+  k TINYINT,
+  j INT,
+  t TIME,
+  KEY k1 (id2,k,j,t)
+);
+INSERT INTO t1 VALUES
+(53,54,1,0,'10:09:59'),
+(54,54,1,0,'16:28:41'),
+(55,54,1,0,'16:29:10'),
+(56,54,1,0,'16:29:43'),
+(57,54,1,0,'16:30:16'),
+(58,54,1,0,'16:30:49'),
+(59,54,1,0,'16:31:23'),
+(60,54,1,0,'16:31:55'),
+(61,54,1,0,'16:32:28'),
+(62,54,1,0,'16:33:01'),
+(63,54,1,0,'16:33:34'),
+(64,54,1,0,'16:34:07'),
+(65,54,1,0,'16:34:40'),
+(66,54,1,0,'16:35:13'),
+(67,54,1,0,'16:35:46'),
+(68,54,1,0,'16:36:19');
+SELECT t FROM t1 GROUP BY t HAVING t=MAX(t);
+SELECT t FROM t1 WHERE id2=54 AND j=0 AND k=1 GROUP BY t HAVING t=MAX(t);
+DROP TABLE t1;
+
+--echo #
 --echo # End of 10.1 tests
 --echo #
 
@@ -740,10 +797,41 @@ CREATE TABLE t1 (a YEAR, b TIME, c YEAR);
 CREATE TABLE t2 (a YEAR);
 INSERT INTO t2 VALUES (0),(1999),(2000),(2030),(2050),(2070);
 INSERT INTO t1 (a,b,c) SELECT a,a,a FROM t2;
+SET STATEMENT sql_mode = 'NO_ENGINE_SUBSTITUTION' FOR
 ALTER TABLE t1 MODIFY c TIME;
 SELECT * FROM t1;
 DROP TABLE t1,t2;
 
+
+--echo #
+--echo # MDEV-10817 CAST(MAX(DATE'2001-01-01') AS TIME) returns a wrong result
+--echo #
+
+SELECT CAST(DATE'2001-01-01' AS TIME);
+SELECT CAST(MAX(DATE'2001-01-01') AS TIME);
+CREATE FUNCTION f1() RETURNS DATE RETURN DATE'2001-01-01';
+SELECT CAST(f1() AS TIME);
+DROP FUNCTION  f1;
+
+
+--echo #
+--echo # MDEV-21619 Server crash or assertion failures in my_datetime_to_str
+--echo #
+
+CREATE TABLE t1 (f TIME, KEY(f));
+INSERT INTO t1 VALUES ('10:10:10'),('20:20:20');
+EXPLAIN EXTENDED SELECT * FROM t1 WHERE 1995.0000000 BETWEEN f AND '23:59:59';
+DROP TABLE t1;
+
+--echo #
+--echo # MDEV-27098 Subquery using the ALL keyword on TIME columns produces a wrong result
+--echo #
+
+CREATE TABLE t1 (d TIME);
+INSERT INTO t1 VALUES ('120:00:00'), ('20:00:00'), ('-120:00:00'), ('-220:00:00');
+SELECT * FROM t1 WHERE d >= ALL (SELECT * FROM t1);
+SELECT * FROM t1 WHERE d <= ALL (SELECT * FROM t1);
+DROP TABLE t1;
 
 --echo #
 --echo # End of 10.2 tests

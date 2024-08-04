@@ -4,9 +4,9 @@
 --source include/not_embedded.inc
 --source include/have_debug_sync.inc
 
---enable_connect_log
 --connect (con1,localhost,root,,)
 --let $con_id = `SELECT CONNECTION_ID()`
+--replace_result Execute Query
 --replace_column 1 # 3 # 6 # 7 #
 SHOW PROCESSLIST;
 SET DEBUG_SYNC='before_execute_sql_command SIGNAL ready WAIT_FOR go';
@@ -23,5 +23,13 @@ SET DEBUG_SYNC='now SIGNAL go';
 --error ER_QUERY_INTERRUPTED
 reap;
 SET DEBUG_SYNC='reset';
+
+# Wait until default connection has reset query string
+let $wait_condition=
+  SELECT COUNT(*) = 1 from information_schema.processlist
+  WHERE info is NULL;
+--source include/wait_condition.inc
+
+--replace_result Execute Query
 --replace_column 1 # 3 # 6 # 7 #
 SHOW PROCESSLIST;

@@ -1,17 +1,25 @@
 /* Copyright (c) 2008, 2011, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2017, MariaDB Corporation.
 
   This program is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; version 2 of the License.
+  it under the terms of the GNU General Public License, version 2.0,
+  as published by the Free Software Foundation.
+
+  This program is also distributed with certain software (including
+  but not limited to OpenSSL) that is licensed under separate terms,
+  as designated in a particular file or component or in included license
+  documentation.  The authors of MySQL hereby grant you an additional
+  permission to link the program and your derivative works with the
+  separately licensed software that they have included with MySQL.
 
   This program is distributed in the hope that it will be useful,
   but WITHOUT ANY WARRANTY; without even the implied warranty of
   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
+  GNU General Public License, version 2.0, for more details.
 
   You should have received a copy of the GNU General Public License
   along with this program; if not, write to the Free Software Foundation,
-  51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA */
+  51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 #ifndef PFS_EVENTS_WAITS_H
 #define PFS_EVENTS_WAITS_H
@@ -54,6 +62,23 @@ enum events_waits_class
 /** A wait event record. */
 struct PFS_events_waits : public PFS_events
 {
+  /** Executing thread. */
+  PFS_thread *m_thread;
+  /** Table share, for table operations only. */
+  PFS_table_share *m_weak_table_share;
+  /** File, for file operations only. */
+  PFS_file *m_weak_file;
+  /** Address in memory of the object instance waited on. */
+  const void *m_object_instance_addr;
+  /** Socket, for socket operations only. */
+  PFS_socket *m_weak_socket;
+  /**
+    Number of bytes read/written.
+    This member is populated for file READ/WRITE operations only.
+  */
+  size_t m_number_of_bytes;
+  /** Flags */
+  ulong m_flags;
   /**
     The type of wait.
     Readers:
@@ -66,44 +91,27 @@ struct PFS_events_waits : public PFS_events
     - TRUNCATE EVENTS_WAITS_HISTORY_LONG
   */
   events_waits_class m_wait_class;
-  /** Executing thread. */
-  PFS_thread *m_thread;
   /** Object type */
   enum_object_type m_object_type;
-  /** Table share, for table operations only. */
-  PFS_table_share *m_weak_table_share;
-  /** File, for file operations only. */
-  PFS_file *m_weak_file;
-  /** Socket, for socket operations only. */
-  PFS_socket *m_weak_socket;
   /** For weak pointers, target object version. */
   uint32 m_weak_version;
-  /** Address in memory of the object instance waited on. */
-  const void *m_object_instance_addr;
   /** Operation performed. */
   enum_operation_type m_operation;
-  /**
-    Number of bytes read/written.
-    This member is populated for file READ/WRITE operations only.
-  */
-  size_t m_number_of_bytes;
   /**
     Index used.
     This member is populated for TABLE IO operations only.
   */
   uint m_index;
-  /** Flags */
-  ulong m_flags;
 };
 
 /** TIMED bit in the state flags bitfield. */
-#define STATE_FLAG_TIMED (1<<0)
+#define STATE_FLAG_TIMED (1U<<0)
 /** THREAD bit in the state flags bitfield. */
-#define STATE_FLAG_THREAD (1<<1)
+#define STATE_FLAG_THREAD (1U<<1)
 /** EVENT bit in the state flags bitfield. */
-#define STATE_FLAG_EVENT (1<<2)
+#define STATE_FLAG_EVENT (1U<<2)
 /** DIGEST bit in the state flags bitfield. */
-#define STATE_FLAG_DIGEST (1<<3)
+#define STATE_FLAG_DIGEST (1U<<3)
 
 void insert_events_waits_history(PFS_thread *thread, PFS_events_waits *wait);
 

@@ -1,4 +1,4 @@
-# Copyright (c) 2006, 2015, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2006, 2017, Oracle and/or its affiliates. All rights reserved.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,9 +11,10 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335 USA
 
 # This is the CMakeLists for XtraDB
+RETURN() # until upgraded to 5.7 XtraDB doesn't compile at all
 
 INCLUDE(CheckFunctionExists)
 INCLUDE(CheckCSourceCompiles)
@@ -23,12 +24,14 @@ INCLUDE(lzo)
 INCLUDE(lzma)
 INCLUDE(bzip2)
 INCLUDE(snappy)
+INCLUDE(numa)
 
 MYSQL_CHECK_LZ4()
 MYSQL_CHECK_LZO()
 MYSQL_CHECK_LZMA()
 MYSQL_CHECK_BZIP2()
 MYSQL_CHECK_SNAPPY()
+MYSQL_CHECK_NUMA()
 
 IF(CMAKE_CROSSCOMPILING)
   # Use CHECK_C_SOURCE_COMPILES instead of CHECK_C_SOURCE_RUNS when
@@ -62,9 +65,6 @@ IF(UNIX)
       LINK_LIBRARIES(${AIO_LIBRARY})
     ENDIF()
     ADD_DEFINITIONS("-DUNIV_LINUX -D_GNU_SOURCE=1")
-    IF(HAVE_LIBNUMA)
-      LINK_LIBRARIES(numa)
-    ENDIF()
   ELSEIF(CMAKE_SYSTEM_NAME MATCHES "HP*")
     ADD_DEFINITIONS("-DUNIV_HPUX")
   ELSEIF(CMAKE_SYSTEM_NAME STREQUAL "AIX")
@@ -95,11 +95,14 @@ IF(HAVE_SCHED_GETCPU)
   ADD_DEFINITIONS(-DHAVE_SCHED_GETCPU)
 ENDIF()
 
+MY_CHECK_AND_SET_COMPILER_FLAG("-Wno-class-memaccess")
+
 IF(NOT MSVC)
+
   # either define HAVE_IB_GCC_ATOMIC_BUILTINS or not
-  # workaround for gcc 4.1.2 RHEL5/x86, gcc atomic ops only work under -march=i686
+  # workaround for old gcc on x86, gcc atomic ops only work under -march=i686
   IF(CMAKE_SYSTEM_PROCESSOR STREQUAL "i686" AND CMAKE_COMPILER_IS_GNUCC AND
-     CMAKE_C_COMPILER_VERSION VERSION_LESS "4.1.3")
+     CMAKE_C_COMPILER_VERSION VERSION_LESS "4.4.0")
     SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -march=i686")
     SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=i686")
   ENDIF()
@@ -493,8 +496,7 @@ SET(INNOBASE_SOURCES
 	ut/ut0rnd.cc
 	ut/ut0ut.cc
 	ut/ut0vec.cc
-	ut/ut0wqueue.cc
-	ut/ut0timer.cc)
+	ut/ut0wqueue.cc)
 
 IF(CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64le")
     enable_language(ASM)
@@ -504,10 +506,24 @@ IF(CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64le")
        )
 ENDIF()
 
-MYSQL_ADD_PLUGIN(xtradb ${INNOBASE_SOURCES} STORAGE_ENGINE
-  DEFAULT RECOMPILE_FOR_EMBEDDED
-  LINK_LIBRARIES ${ZLIB_LIBRARY} ${LINKER_SCRIPT})
-
-IF(TARGET xtradb AND NOT XTRADB_OK)
-  MESSAGE(FATAL_ERROR "Percona XtraDB is not supported on this platform")
+UNSET(NUMA_LIBRARY)
+IF(HAVE_LIBNUMA)
+   SET(NUMA_LIBRARY "numa")
 ENDIF()
+
+MYSQL_ADD_PLUGIN(xtradb ${INNOBASE_SOURCES} STORAGE_ENGINE
+  DEFAULT
+  RECOMPILE_FOR_EMBEDDED
+  LINK_LIBRARIES
+    ${ZLIB_LIBRARY}
+    ${CRC32_VPMSUM_LIBRARY}
+    ${NUMA_LIBRARY}
+    ${LINKER_SCRIPT})
+
+IF(TARGET xtradb)
+  IF(NOT XTRADB_OK)
+    MESSAGE(FATAL_ERROR "Percona XtraDB is not supported on this platform")
+  ENDIF()
+ENDIF()
+
+ADD_SUBDIRECTORY(${CMAKE_SOURCE_DIR}/extra/mariabackup ${CMAKE_BINARY_DIR}/extra/mariabackup)

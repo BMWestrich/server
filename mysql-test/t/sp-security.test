@@ -3,7 +3,9 @@
 #
 
 # Can't test with embedded server that doesn't support grants
--- source include/not_embedded.inc
+--source include/not_embedded.inc
+--source include/default_charset.inc
+set @@global.character_set_server=@@session.character_set_server;
 
 # Save the initial number of concurrent sessions
 --source include/count_sessions.inc
@@ -580,8 +582,6 @@ drop database db_bug14533;
 
 # Setup the environment.
 
---echo
---echo ---> connection: root
 --connection con1root
 
 --disable_warnings
@@ -602,8 +602,6 @@ GRANT ALL PRIVILEGES ON mysqltest.* TO mysqltest_2@localhost;
 
 # test case (1).
 
---echo
---echo ---> connection: mysqltest_2_con
 --connection mysqltest_2_con
 
 USE mysqltest;
@@ -614,8 +612,6 @@ CREATE FUNCTION wl2897_f1() RETURNS INT RETURN 1;
 
 # test case (2).
 
---echo
---echo ---> connection: mysqltest_1_con
 --connection mysqltest_1_con
 
 USE mysqltest;
@@ -628,8 +624,6 @@ CREATE DEFINER=root@localhost FUNCTION wl2897_f2() RETURNS INT RETURN 2;
 
 # test case (3).
 
---echo
---echo ---> connection: mysqltest_2_con
 --connection mysqltest_2_con
 
 use mysqltest;
@@ -640,8 +634,6 @@ CREATE DEFINER='a @ b @ c'@localhost FUNCTION wl2897_f3() RETURNS INT RETURN 3;
 
 # test case (4).
 
---echo
---echo ---> connection: con1root
 --connection con1root
 
 USE mysqltest;
@@ -669,8 +661,6 @@ DROP DATABASE mysqltest;
 
 # Prepare environment.
 
---echo
---echo ---> connection: root
 --connection con1root
 
 --disable_warnings
@@ -690,8 +680,6 @@ GRANT ALL PRIVILEGES ON mysqltest.* TO mysqltest_2@localhost;
 
 # Create a procedure/function under u1.
 
---echo
---echo ---> connection: mysqltest_1_con
 --connection mysqltest_1_con
 
 USE mysqltest;
@@ -708,8 +696,6 @@ SELECT bug13198_f1();
 
 # Check that u2 can call the procedure/function.
 
---echo
---echo ---> connection: mysqltest_2_con
 --connection mysqltest_2_con
 
 USE mysqltest;
@@ -720,8 +706,6 @@ SELECT bug13198_f1();
 
 # Drop user u1 (definer of the object);
 
---echo
---echo ---> connection: root
 --connection con1root
 
 --disconnect mysqltest_1_con
@@ -730,8 +714,6 @@ DROP USER mysqltest_1@localhost;
 
 # Check that u2 can not call the procedure/function.
 
---echo
---echo ---> connection: mysqltest_2_con
 --connection mysqltest_2_con
 
 USE mysqltest;
@@ -744,8 +726,6 @@ SELECT bug13198_f1();
 
 # Cleanup.
 
---echo
---echo ---> connection: root
 --connection con1root
 
 --disconnect mysqltest_2_con
@@ -767,8 +747,6 @@ user19857@localhost;
 SELECT Host,User,Password FROM mysql.user WHERE User='user19857';
 
 --connect (mysqltest_2_con,localhost,user19857,meow,test)
---echo
---echo ---> connection: mysqltest_2_con
 --connection mysqltest_2_con
 
 USE test;
@@ -790,8 +768,6 @@ SHOW CREATE PROCEDURE test.sp19857;
 
 DROP PROCEDURE IF EXISTS test.sp19857;
 
---echo
---echo ---> connection: root
 --connection con1root
 
 --disconnect mysqltest_2_con
@@ -949,7 +925,6 @@ create database mysqltest_db;
 create user bug57061_user@localhost;
 create function mysqltest_db.f1() returns int return 0;
 create procedure mysqltest_db.p1() begin end;
---echo # Connect as user 'bug57061_user@localhost'
 connect (conn1, localhost, bug57061_user,,);
 --echo # Attempt to drop routine on which user doesn't have privileges
 --echo # should result in the same 'access denied' type of error whether
@@ -962,7 +937,6 @@ drop procedure if exists mysqltest_db.p_does_not_exist;
 drop function if exists mysqltest_db.f1;
 --error ER_PROCACCESS_DENIED_ERROR
 drop procedure if exists mysqltest_db.p1;
---echo # Connection 'default'.
 connection default;
 disconnect conn1;
 drop user bug57061_user@localhost;
@@ -983,27 +957,51 @@ CREATE PROCEDURE db1.p1() SELECT 1;
 CREATE USER user2@localhost IDENTIFIED BY '';
 GRANT SELECT(db) ON mysql.proc TO user2@localhost;
  
---echo # Connection con2 as user2
 connect (con2, localhost, user2);
 --echo # The statement below before disclosed info from body_utf8 column.
 --error ER_SP_DOES_NOT_EXIST
 SHOW CREATE PROCEDURE db1.p1;
 
 --echo # Check that SHOW works with SELECT grant on whole table
---echo # Connection default
 connection default;
 GRANT SELECT ON mysql.proc TO user2@localhost;
 
---echo # Connection con2
 connection con2;
 --echo # This should work
 SHOW CREATE PROCEDURE db1.p1;
 
---echo # Connection default
 connection default;
 disconnect con2;
 DROP USER user2@localhost;
 DROP DATABASE db1;
+
+#
+# Bug#27407480: AUTOMATIC_SP_PRIVILEGES REQUIRES NEED THE INSERT PRIVILEGES FOR MYSQL.USER TABLE
+#
+create user foo@local_ost;
+#
+# Create a user with an authentification plugin 'foobar'.
+# Instead of using a normal "CREATE USER <user> IDENTIFIED VIA <plugin>"
+# we do CREATE (without VIA) followed by UPDATE and FLUSH.
+# This is to avoid installing a real plugin and thus avoid the test dependency.
+# We won't login under this user in the below test, so this is fine.
+#
+create user foo@`local\_ost`;
+update mysql.user set plugin='foobar' where host='local\\_ost';
+flush privileges;
+create database foodb;
+grant create routine on foodb.* to foo@local_ost;
+connect con1,localhost,foo;
+select user(), current_user();
+show grants;
+create procedure fooproc() select 'i am fooproc';
+show grants;
+disconnect con1;
+connection default;
+drop user foo@local_ost;
+drop user foo@`local\_ost`;
+drop procedure fooproc;
+drop database foodb;
 
 --echo #
 --echo # Test for bug#12602983 - User without privilege on routine can discover
@@ -1020,7 +1018,6 @@ create procedure mysqltest_db.p1() begin end;
 --echo # Create user with no privileges on mysqltest_db database.
 create user bug12602983_user@localhost;
 
---echo # Connect as user 'bug12602983_user@localhost'
 connect (conn1, localhost, bug12602983_user,,);
 
 --echo # Attempt to execute routine on which user doesn't have privileges
@@ -1041,7 +1038,6 @@ create view bug12602983_v1 as select mysqltest_db.f_does_not_exist();
 --error ER_PROCACCESS_DENIED_ERROR
 create view bug12602983_v1 as select mysqltest_db.f1();
 
---echo # Connection 'default'.
 connection default;
 disconnect conn1;
 drop user bug12602983_user@localhost;
@@ -1057,3 +1053,34 @@ grant execute on procedure sp1 to current_user() identified by 'barfoo';
 show grants;
 drop procedure sp1;
 set password='';
+#cleanup after MDEV-16238
+update mysql.user set plugin='';
+
+--echo #
+--echo # MDEV-13396 Unexpected "alter routine comand defined" during CREATE OR REPLACE PROCEDURE
+--echo #
+
+CREATE DATABASE u1;
+DELIMITER $$;
+CREATE PROCEDURE u1.p1() BEGIN SELECT 1; END; $$
+CREATE FUNCTION u1.f1() RETURNS INT BEGIN RETURN 1; END; $$
+DELIMITER ;$$
+
+CREATE USER u1@localhost;
+GRANT CREATE ROUTINE ON u1.* TO u1@localhost;
+GRANT ALTER ROUTINE ON FUNCTION u1.f1 TO u1@localhost;
+GRANT ALTER ROUTINE ON PROCEDURE u1.p1 TO u1@localhost;
+
+connect (u1, localhost, u1,,);
+USE u1;
+DELIMITER $$;
+CREATE OR REPLACE FUNCTION f1() RETURNS INT BEGIN RETURN 2; END; $$
+CREATE OR REPLACE PROCEDURE p1() BEGIN SELECT 1; END; $$
+DELIMITER ;$$
+
+disconnect u1;
+connection default;
+DROP DATABASE u1;
+DROP USER u1@localhost;
+
+set @@global.character_set_server=@save_character_set_server;

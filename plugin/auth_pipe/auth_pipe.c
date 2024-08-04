@@ -12,7 +12,7 @@
     
     You should have received a copy of the GNU General Public License
     along with this program; if not, write to the Free Software
-    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA */
+    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335 USA */
 
 /**
   @file
@@ -36,7 +36,7 @@ static int pipe_auth(MYSQL_PLUGIN_VIO *vio, MYSQL_SERVER_AUTH_INFO *info)
   unsigned char *pkt;
   MYSQL_PLUGIN_VIO_INFO vio_info;
   char username[UNLEN + 1];
-  size_t username_length;
+  DWORD username_length;
   int ret;
 
   /* no user name yet ? read the client handshake packet with the user name */
@@ -54,7 +54,7 @@ static int pipe_auth(MYSQL_PLUGIN_VIO *vio, MYSQL_SERVER_AUTH_INFO *info)
   if (!ImpersonateNamedPipeClient(vio_info.handle))
     return CR_ERROR;
 
-  username_length= sizeof(username) - 1;
+  username_length=UNLEN;
   ret= CR_ERROR;
   if (GetUserName(username, &username_length))
   {

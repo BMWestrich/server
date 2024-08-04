@@ -13,7 +13,7 @@
 
   You should have received a copy of the GNU Lesser General Public
   License along with this library; if not, write to the Free Software
-  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA
 */
 
 #include "../grn_ctx_impl.h"
@@ -40,7 +40,9 @@ mrb_grn_table_sort_key_free(mrb_state *mrb, void *data)
   }
 
   if (sort_key->key) {
-    grn_obj_unlink(ctx, sort_key->key);
+    if (sort_key->key->header.type == GRN_ACCESSOR) {
+      grn_obj_unlink(ctx, sort_key->key);
+    }
   }
   mrb_free(mrb, sort_key);
 }

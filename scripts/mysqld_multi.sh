@@ -1,23 +1,7 @@
-#!/usr/bin/perl
-# Copyright (c) 2000, 2010, Oracle and/or its affiliates.
-# Copyright (c) 2000-2011 Monty Program Ab, Jani Tolonen
-#
-# This program is free software; you can redistribute it and/or
-# modify it under the terms of the GNU Library General Public
-# License as published by the Free Software Foundation; version 2
-# of the License.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-# Library General Public License for more details.
-#
-# You should have received a copy of the GNU Library General Public
-# License along with this library; if not, write to the Free
-# Software Foundation, Inc., 51 Franklin St, Fifth Floor, Boston,
-# MA 02110-1301, USA
+#!@PERL_PATH@
 
-# Copyright (c) 2000, 2010, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2000, 2017, Oracle and/or its affiliates.
+# Copyright (c) 2010, 2017, MariaDB Corporation
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Library General Public
@@ -32,7 +16,7 @@
 # You should have received a copy of the GNU Library General Public
 # License along with this library; if not, write to the Free
 # Software Foundation, Inc., 51 Franklin St, Fifth Floor, Boston,
-# MA 02110-1301, USA
+# MA 02110-1335  USA
 
 use Getopt::Long;
 use POSIX qw(strftime getcwd);
@@ -46,7 +30,7 @@ $opt_example       = 0;
 $opt_help          = 0;
 $opt_log           = undef();
 $opt_mysqladmin    = "@bindir@/mysqladmin";
-$opt_mysqld        = "@libexecdir@/mysqld";
+$opt_mysqld        = "@sbindir@/mysqld";
 $opt_no_log        = 0;
 $opt_password      = undef();
 $opt_tcp_ip        = 0;
@@ -54,6 +38,7 @@ $opt_user          = "root";
 $opt_version       = 0;
 $opt_silent        = 0;
 $opt_verbose       = 0;
+$opt_wsrep_new_cluster = 0;
 
 my $my_print_defaults_exists= 1;
 my $logdir= undef();
@@ -126,7 +111,7 @@ sub main
   # We've already handled --no-defaults, --defaults-file, etc.
   if (!GetOptions("help", "example", "version", "mysqld=s", "mysqladmin=s",
                   "user=s", "password=s", "log=s", "no-log",
-                  "tcp-ip",  "silent", "verbose"))
+                  "tcp-ip",  "silent", "verbose", "wsrep-new-cluster"))
   {
     $flag_exit= 1;
   }
@@ -323,7 +308,9 @@ sub report_mysqlds
 
 sub start_mysqlds()
 {
-  my (@groups, $com, $tmp, $i, @options, $j, $mysqld_found, $info_sent);
+  my (@groups, $com, $tmp, $i, @options, $j, $mysqld_found, $suffix_found, $info_sent);
+
+  $suffix_found= 0;
 
   if (!$opt_no_log)
   {
@@ -342,6 +329,7 @@ sub start_mysqlds()
     $mysqld_found= 1; # The default
     $mysqld_found= 0 if (!length($mysqld));
     $com= "$mysqld";
+
     for ($j = 0, $tmp= ""; defined($options[$j]); $j++)
     {
       if ("--mysqladmin=" eq substr($options[$j], 0, 13))
@@ -362,6 +350,10 @@ sub start_mysqlds()
         $options[$j]= quote_shell_word($options[$j]);
         $tmp.= " $options[$j]";
       }
+      elsif ("--defaults-group-suffix=" eq substr($options[$j], 0, 24))
+      {
+        $suffix_found= 1;
+      }
       else
       {
 	$options[$j]= quote_shell_word($options[$j]);
@@ -377,7 +369,19 @@ sub start_mysqlds()
       print "wanted mysqld binary.\n\n";
       $info_sent= 1;
     }
+
+    if (!$suffix_found)
+    {
+      $com.= " --defaults-group-suffix=";
+      $com.= substr($groups[$i],6);
+    }
+
     $com.= $tmp;
+
+    if ($opt_wsrep_new_cluster) {
+      $com.= " --wsrep-new-cluster";
+    }
+
     $com.= " >> $opt_log 2>&1" if (!$opt_no_log);
     $com.= " &";
     if (!$mysqld_found)
@@ -502,12 +506,19 @@ sub list_defaults_files
 
   return ($opt{file}) if exists $opt{file};
 
-  return      ('@sysconfdir@/my.cnf',
-               '@sysconfdir@/mysql/my.cnf',
-               '@prefix@/my.cnf',
-               ($ENV{MYSQL_HOME} ? "$ENV{MYSQL_HOME}/my.cnf" : undef),
-               $opt{'extra-file'},
-               ($ENV{HOME} ? "$ENV{HOME}/.my.cnf" : undef));
+  my @dirs;
+
+  # same rule as in mysys/my_default.c
+  if ('@sysconfdir@') {
+    push @dirs, '@sysconfdir@/my.cnf';
+  } else {
+    push @dirs, '/etc/my.cnf', '/etc/mysql/my.cnf';
+  }
+  push @dirs, "$ENV{MYSQL_HOME}/my.cnf" if $ENV{MYSQL_HOME};
+  push @dirs, $opt{'extra-file'} if $opt{'extra-file'};
+  push @dirs, "$ENV{HOME}/.my.cnf" if $ENV{HOME};
+
+  return @dirs;
 }
 
 
@@ -625,7 +636,11 @@ sub my_which
   my ($command) = @_;
   my (@paths, $path);
 
-  return $command if (-f $command && -x $command);
+ # If the argument is not 'my_print_defaults' then it would be of the format
+ # <absolute_path>/<program>
+ return $command if ($command ne 'my_print_defaults' && -f $command &&
+                     -x $command);
+
   @paths = split(':', $ENV{'PATH'});
   foreach $path (@paths)
   {
@@ -848,6 +863,7 @@ Using:  @{[join ' ', @defaults_options]}
 --user=...         mysqladmin user. Using: $opt_user
 --verbose          Be more verbose.
 --version          Print the version number and exit.
+--wsrep-new-cluster  Bootstrap a cluster.
 EOF
   exit(0);
 }

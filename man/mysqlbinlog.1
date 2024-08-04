@@ -1,6 +1,6 @@
 '\" t
 .\"
-.TH "\FBMYSQLBINLOG\FR" "1" "14/12/2015" "MariaDB 10\&.1" "MariaDB Database System"
+.TH "\FBMYSQLBINLOG\FR" "1" "14 April 2021" "MariaDB 10\&.2" "MariaDB Database System"
 .\" -----------------------------------------------------------------
 .\" * set default formatting
 .\" -----------------------------------------------------------------
@@ -708,6 +708,22 @@ entries in the log\&.
 .sp -1
 .IP \(bu 2.3
 .\}
+.\" mysqlbinlog: open-files-limit option
+.\" open-files-limit option: mysqlbinlog
+\fB\-\-open\-files\-limit=\fR\fB\fINUM\fR\fR
+.sp
+Sets the open_files_limit variable, which is used to reserve file descriptors for
+\fBmysqlbinlog\fR\&.
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
 .\" mysqlbinlog: password option
 .\" password option: mysqlbinlog
 \fB\-\-password[=\fR\fB\fIpassword\fR\fR\fB]\fR,
@@ -800,12 +816,11 @@ The connection protocol to use for connecting to the server\&. It is useful when
 .sp -1
 .IP \(bu 2.3
 .\}
-.\" mysqlbinlog: open-files-limit option
-.\" open-files-limit option: mysqlbinlog
-\fB\-\-open\-files\-limit=\fR\fB\fINUM\fR\fR
+.\" mysqlbinlog: raw option
+.\" raw option: mysqlbinlog
+\fB\-\-raw\fR
 .sp
-Sets the open_files_limit variable, which is used to reserve file descriptors for
-\fBmysqlbinlog\fR\&.
+Requires \fB-R\fR\&. Output raw binlog data instead of SQL statements\&. Output files named after server logs\&.
 .RE
 .sp
 .RS 4
@@ -845,7 +860,7 @@ This option requires that the remote server be running\&. It works only for bina
 \fB\-\-result\-file=\fR\fB\fIname\fR\fR,
 \fB\-r \fR\fB\fIname\fR\fR
 .sp
-Direct output to the given file\&.
+Direct output to the given file\&. With --raw this is a prefix for the file names\&.
 .RE
 .sp
 .RS 4
@@ -1028,6 +1043,36 @@ This option is useful for point\-in\-time recovery\&.
 .sp -1
 .IP \(bu 2.3
 .\}
+.\" mysqlbinlog: stop-never option
+.\" stop-never option: mysqlbinlog
+\fB\-\-stop\-never\fR
+.sp
+Wait for more data from the server instead of stopping at the end of the last log\&. Implies \fB--to-last-log\fR\&.
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+.\" mysqlbinlog: stop-never-slave-server-id option
+.\" stop-never-slave-server-id option: mysqlbinlog
+\fB\-\-stop\-never-slave-server-id\fR
+.sp
+The slave server_id used for \fB--read-from-remote-server --stop-never\fR\&.
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
 .\" mysqlbinlog: stop-position option
 .\" stop-position option: mysqlbinlog
 \fB\-\-stop\-position=\fR\fB\fIN\fR\fR
@@ -1046,6 +1091,23 @@ This option is useful for point\-in\-time recovery\&.
 .sp -1
 .IP \(bu 2.3
 .\}
+.\" mysqlbinlog: table option
+.\" table option: mysqlbinlog
+\fB\-\-table\fR,
+\fB\-T\fR
+.sp
+List entries for just this table (local log only)\&.
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+
 .\" mysqlbinlog: to-last-log option
 .\" to-last-log option: mysqlbinlog
 \fB\-\-to\-last\-log\fR,
@@ -2062,13 +2124,13 @@ option can be used to prevent this header from being written\&.
 .SH "COPYRIGHT"
 .br
 .PP
-Copyright 2007-2008 MySQL AB, 2008-2010 Sun Microsystems, Inc., 2010-2015 MariaDB Foundation
+Copyright 2007-2008 MySQL AB, 2008-2010 Sun Microsystems, Inc., 2010-2021 MariaDB Foundation
 .PP
 This documentation is free software; you can redistribute it and/or modify it only under the terms of the GNU General Public License as published by the Free Software Foundation; version 2 of the License.
 .PP
 This documentation is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 .PP
-You should have received a copy of the GNU General Public License along with the program; if not, write to the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA or see http://www.gnu.org/licenses/.
+You should have received a copy of the GNU General Public License along with the program; if not, write to the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA or see http://www.gnu.org/licenses/.
 .sp
 .SH "NOTES"
 .IP " 1." 4

@@ -513,6 +513,10 @@ SELECT TIME_TO_SEC('916:40:00');
 SELECT ADDTIME('500:00:00', '416:40:00');
 SELECT ADDTIME('916:40:00', '416:40:00');
 
+# check if ADDTIME() handles NOT_FIXED_DEC correctly
+SELECT ADDTIME(20010101,1e0), ADDTIME(20010101,1.1e0);
+SELECT ADDTIME(ADDTIME(20010101,1e0), 0);
+
 # check if SUBTIME() handles out-of-range values correctly
 SELECT SUBTIME('916:40:00', '416:40:00');
 SELECT SUBTIME('-916:40:00', '416:40:00');
@@ -531,7 +535,7 @@ SELECT EXTRACT(HOUR FROM '10000:02:03');
 # check if we get proper warnings if both input string truncation
 # and out-of-range value occur
 CREATE TABLE t1(f1 TIME);
-INSERT INTO t1 VALUES('916:00:00 a');
+INSERT IGNORE INTO t1 VALUES('916:00:00 a');
 SELECT * FROM t1;
 DROP TABLE t1;
 
@@ -1294,6 +1298,7 @@ CREATE TABLE t1 (a DATE);
 INSERT INTO t1 VALUES ('2005-05-04');
 SELECT CONCAT(FROM_UNIXTIME(CONCAT(a,'10')) MOD FROM_UNIXTIME(CONCAT(a,'10'))) AS f2 FROM t1; 
 SELECT CHAR_LENGTH(CONCAT(FROM_UNIXTIME(CONCAT(a,'10')) MOD FROM_UNIXTIME(CONCAT(a,'10')))) AS f2 FROM t1; 
+SET STATEMENT sql_mode = 'NO_ENGINE_SUBSTITUTION' FOR
 CREATE TABLE t2 AS SELECT CONCAT(FROM_UNIXTIME(CONCAT(a,'10')) MOD FROM_UNIXTIME(CONCAT(a,'10'))) AS f2 FROM t1;
 SHOW CREATE TABLE t2;
 SELECT * FROM t2;
@@ -1672,9 +1677,91 @@ INSERT INTO t1 VALUES (18, '2010-10-13');
 SELECT a.id,a.date1,FROM_DAYS(TO_DAYS(a.date1)-10) as date2, DATE_ADD(a.date1,INTERVAL -10 DAY),TO_DAYS(a.date1)-10 FROM t1 a ORDER BY a.id;
 DROP TABLE t1;
 
+--echo #
+--echo # MDEV-10524 Assertion `arg1_int >= 0' failed in Item_func_additive_op::result_precision()
+--echo #
+SELECT 1 MOD ADDTIME( '13:58:57', '00:00:01' ) + 2;
 
 --echo #
---echo # Start of 10.0 tests
+--echo # MDEV-11819 NO_ZERO_IN_DATE: Incorrect generated column value
+--echo #
+
+SET sql_mode='NO_ZERO_IN_DATE';
+CREATE TABLE t1 (a TIME(6));
+INSERT INTO t1 SELECT timediff(timestamp'2008-12-31 23:59:59.000001',timestamp'2008-12-30 01:01:01.000002');
+SELECT * FROM t1;
+DROP TABLE t1;
+SET sql_mode=DEFAULT;
+
+
+--echo #
+--echo # MDEV-13972 crash in Item_func_sec_to_time::get_date
+--echo #
+
+# The below query can return warning sporadically
+--disable_warnings
+DO TO_DAYS(SEC_TO_TIME(TIME(CEILING(UUID()))));
+--enable_warnings
+
+DO TO_DAYS(SEC_TO_TIME(MAKEDATE('',RAND(~('')))));
+SELECT SEC_TO_TIME(MAKEDATE(0,RAND(~0)));
+
+#
+# MDEV-16810 AddressSanitizer: stack-buffer-overflow in int10_to_str
+#
+SELECT PERIOD_DIFF(2018, AES_ENCRYPT('Rae Bareli', 'Rae Bareli'));
+
+
+--echo #
+--echo # MDEV-17249 MAKETIME(-1e50,0,0) returns a wrong result
+--echo #
+
+--vertical_results
+SELECT
+  MAKETIME(1e10,0,0),
+  MAKETIME(-1e10,0,0),
+  MAKETIME(1e50,0,0),
+  MAKETIME(-1e50,0,0),
+  MAKETIME(COALESCE(1e50),0,0),
+  MAKETIME(COALESCE(-1e50),0,0);
+--horizontal_results
+
+CREATE TABLE t1 (a FLOAT);
+INSERT INTO t1 VALUES (1e30),(-1e30);
+SELECT MAKETIME(a,0,0) FROM t1;
+DROP TABLE t1;
+
+--echo #
+--echo # MDEV-17244 MAKETIME(900,0,0.111) returns a wrong result
+--echo #
+
+SELECT MAKETIME(900,0,0);
+SELECT MAKETIME(900,0,0.1);
+SELECT MAKETIME(900,0,0.11);
+SELECT MAKETIME(900,0,0.111);
+SELECT MAKETIME(900,0,0.1111);
+SELECT MAKETIME(900,0,0.11111);
+SELECT MAKETIME(900,0,0.111111);
+SELECT MAKETIME(900,0,0.1111111);
+SELECT MAKETIME(900,0,0.11111111);
+SELECT MAKETIME(900,0,0.111111111);
+SELECT MAKETIME(900,0,EXP(1));
+
+SELECT MAKETIME(-900,0,0);
+SELECT MAKETIME(-900,0,0.1);
+SELECT MAKETIME(-900,0,0.11);
+SELECT MAKETIME(-900,0,0.111);
+SELECT MAKETIME(-900,0,0.1111);
+SELECT MAKETIME(-900,0,0.11111);
+SELECT MAKETIME(-900,0,0.111111);
+SELECT MAKETIME(-900,0,0.1111111);
+SELECT MAKETIME(-900,0,0.11111111);
+SELECT MAKETIME(-900,0,0.111111111);
+SELECT MAKETIME(-900,0,EXP(1));
+
+
+--echo #
+--echo # End of 5.5 tests
 --echo #
 
 --echo #
@@ -1709,6 +1796,191 @@ SELECT
   TIMEDIFF(20140101000000.000    , 20140302010000.000    ) AS dec_dec,
   TIMEDIFF(20140101000000.000    , '2014-03-02 01:00:00' ) AS dec_str;
 
+
+--echo #
+--echo # MDEV-10787 Assertion `ltime->neg == 0' failed in void date_to_datetime(MYSQL_TIME*)
+--echo #
+CREATE TABLE t1 (d DATE);
+INSERT INTO t1 VALUES ('2005-07-20'),('2012-12-21');
+SELECT REPLACE( ADDDATE( d, INTERVAL 0.6732771076944444 HOUR_SECOND ), '2', 'x' ) FROM t1;
+SELECT REPLACE( ADDDATE( d, INTERVAL '0.6732771076944444' HOUR_SECOND ), '2', 'x' ) FROM t1;
+SELECT CAST(ADDDATE( d, INTERVAL 6732771076944444 SECOND) AS CHAR) FROM t1;
+SELECT CAST(ADDDATE( d, INTERVAL '67327710769444:44' HOUR_SECOND) AS CHAR) FROM t1;
+SELECT CAST(ADDDATE( d, INTERVAL '673277107694:44:44' HOUR_SECOND) AS CHAR) FROM t1;
+DROP TABLE t1;
+
+# Maximum possible DAY_SECOND values in various formats
+SELECT ADDDATE(DATE'0000-01-01', INTERVAL '3652423:23:59:59' DAY_SECOND);
+SELECT ADDDATE(DATE'0000-01-01', INTERVAL '0:87658175:59:59' DAY_SECOND);
+SELECT ADDDATE(DATE'0000-01-01', INTERVAL '0:0:5259490559:59' DAY_SECOND);
+SELECT ADDDATE(DATE'0000-01-01', INTERVAL '0:0:0:315569433599' DAY_SECOND);
+
+# Out-of-range INTERVAL DAY_SECOND values
+SELECT ADDDATE(DATE'0000-01-01', INTERVAL '3652423:0:0:315569433559' DAY_SECOND);
+SELECT ADDDATE(DATE'0000-01-01', INTERVAL '0:87658175:0:315569433559' DAY_SECOND);
+SELECT ADDDATE(DATE'0000-01-01', INTERVAL '0:0:5259490559:315569433599' DAY_SECOND);
+
+--echo #
+--echo # MDEV-13202 Assertion `ltime->neg == 0' failed in date_to_datetime
+--echo #
+
+CREATE TABLE t1 (i INT, d DATE);
+INSERT INTO t1 VALUES (1, '1970-01-01');
+SELECT MAX(NULLIF(i,1)) FROM t1 ORDER BY DATE_SUB(d,INTERVAL 17300000 HOUR);
+DROP TABLE t1;
+
+CREATE TABLE t1 (i INT, d DATE);
+INSERT INTO t1 VALUES (1, '1970-01-01');
+SELECT CONCAT(DATE_SUB(d, INTERVAL 17300000 HOUR)) FROM t1;
+DROP TABLE t1;
+
+SELECT CONCAT(DATE_SUB(TIMESTAMP'1970-01-01 00:00:00', INTERVAL 17300000 HOUR));
+
+
 --echo #
 --echo # End of 10.0 tests
+--echo #
+
+--echo #
+--echo # Start of 10.1 tests
+--echo #
+
+--echo #
+--echo # MDEV-10317 EXCTACT(MINUTE_MICROSECOND) truncates data
+--echo #
+
+let $query=
+SELECT
+  a,
+  EXTRACT(YEAR FROM a),
+  EXTRACT(YEAR_MONTH FROM a),
+  EXTRACT(QUARTER FROM a),
+  EXTRACT(MONTH FROM a),
+  EXTRACT(WEEK FROM a),
+  EXTRACT(DAY FROM a),
+  EXTRACT(DAY_HOUR FROM a),
+  EXTRACT(DAY_MINUTE FROM a),
+  EXTRACT(DAY_SECOND FROM a),
+  EXTRACT(HOUR FROM a),
+  EXTRACT(HOUR_MINUTE FROM a),
+  EXTRACT(HOUR_SECOND FROM a),
+  EXTRACT(MINUTE FROM a),
+  EXTRACT(MINUTE_SECOND FROM a),
+  EXTRACT(SECOND FROM a),
+  EXTRACT(MICROSECOND FROM a),
+  EXTRACT(DAY_MICROSECOND FROM a),
+  EXTRACT(HOUR_MICROSECOND FROM a),
+  EXTRACT(MINUTE_MICROSECOND FROM a),
+  EXTRACT(SECOND_MICROSECOND FROM a)
+FROM t1;
+
+
+CREATE TABLE t1 (a DATETIME(6));
+INSERT INTO t1 VALUES ('1999-12-31 23:59:59.999999');
+
+--vertical_results
+--enable_metadata
+--disable_ps_protocol
+--eval $query
+--enable_ps_protocol
+--disable_metadata
+--horizontal_results
+
+--eval CREATE TABLE t2 AS $query
+--vertical_results
+SELECT * FROM t2;
+--horizontal_results
+SHOW CREATE TABLE t2;
+DROP TABLE t1,t2;
+
+CREATE TABLE t1 (a TIME(6));
+INSERT INTO t1 VALUES ('-838:59:59.999999'),('838:59:59.999999');
+
+--vertical_results
+--enable_metadata
+--disable_ps_protocol
+--eval $query
+--enable_ps_protocol
+--disable_metadata
+--horizontal_results
+
+--eval CREATE TABLE t2 AS $query
+--vertical_results
+SELECT * FROM t2;
+--horizontal_results
+SHOW CREATE TABLE t2;
+DROP TABLE t1,t2;
+
+
+--echo #
+--echo # MDEV-14926 AddressSanitizer: heap-use-after-free in make_date_time on weird combination of functions
+--echo #
+
+DO INET_ATON( FROM_UNIXTIME( @@timestamp, ( TRIM( UNHEX(HEX('%m.%d.%Y') ) ) ) ) );
+
+CREATE TABLE t1 (d DATE);
+INSERT INTO t1 VALUES ('1989-03-10');
+SELECT TIME_FORMAT('23:59:43', BINARY d) AS f FROM t1 GROUP BY 'foo';
+DROP TABLE t1;
+
+CREATE TABLE t1 (d DATE) ENGINE=MyISAM;
+INSERT INTO t1 VALUES ('1900-01-01');
+SELECT LENGTH( DATE_FORMAT( d, BINARY DATABASE() ) ) AS f FROM t1 GROUP BY d;
+DROP TABLE t1;
+
+--echo #
+--echo # MDEV-18667 ASAN heap-use-after-free in make_date_time / Arg_comparator::compare_string / Item_func_nullif::compare
+--echo #
+
+SELECT NULLIF('foo', FROM_UNIXTIME('2012-12-12 12:12:12', TRIM(0)));
+
+--echo #
+--echo # MDEV-18626 ASAN stack-buffer-overflow in int10_to_str / make_date_time upon DATE_FORMAT
+--echo #
+
+SELECT DATE_FORMAT(100000000000, '%j');
+
+
+--echo #
+--echo # End of 10.1 tests
+--echo #
+
+--echo #
+--echo # MDEV-16217: Assertion `!table || (!table->read_set ||
+--echo # bitmap_is_set(table->read_set, field_index))'
+--echo # failed in Field_num::get_date
+--echo #
+CREATE TABLE t1 (pk int  default 0, a1 date);
+INSERT INTO t1 VALUES (1,'1900-01-01'),(2,NULL),(3,NULL),(4,NULL);
+
+CREATE VIEW v1 AS
+SELECT t1.pk AS pk, t1.a1 AS a1 FROM t1;
+
+SELECT a1 BETWEEN (('2018-08-24')) AND (DEFAULT(pk)) FROM v1;
+SELECT a1 BETWEEN (('2018-08-24')) AND (~ DEFAULT(pk)) FROM v1;
+
+CREATE TABLE t2 (pk int  default 1, a1 date);
+INSERT INTO t2 VALUES (4,NULL);
+CREATE view v2 as SELECT default(t1.pk), default(t2.pk), t1.pk from t1,t2;
+select * from v2;
+show create view v2;
+CREATE view v3 as SELECT default(pk) from t2;
+select * from v3;
+explain extended select * from v3;
+explain extended select default(pk) from t2;
+show create view v3;
+
+DROP VIEW v1,v2,v3;
+DROP TABLE t1,t2;
+
+--echo #
+--echo # MDEV-21388 Wrong result of DAYNAME()=xxx in combination with condition_pushdown_for_derived=on
+--echo #
+
+SELECT DAYNAME('2019-01-05')+0;
+SELECT CAST(DAYNAME('2019-01-05') AS SIGNED);
+
+
+--echo #
+--echo # End of 10.2 tests
 --echo #

@@ -13,7 +13,7 @@
 
   You should have received a copy of the GNU Lesser General Public
   License along with this library; if not, write to the Free Software
-  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA
 */
 
 #include <string.h>
@@ -122,9 +122,8 @@ grn_command_input_at(grn_ctx *ctx,
 
   GRN_API_ENTER;
   if (input->arguments) {
-    uint32_t size;
     argument = (grn_obj *)grn_hash_get_value_(ctx, input->arguments,
-                                              offset + 1, &size);
+                                              offset + 1, NULL);
   }
   GRN_API_RETURN(argument);
 }

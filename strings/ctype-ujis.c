@@ -15,7 +15,7 @@
    You should have received a copy of the GNU Library General Public
    License along with this library; if not, write to the Free
    Software Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
-   MA 02110-1301, USA */
+   MA 02110-1335  USA */
 
 /* This file is for Japanese EUC charset, and created by tommy@valley.ne.jp.
  */
@@ -198,8 +198,9 @@ static const uchar sort_order_ujis[]=
 #define IS_MB2_KATA(x,y)      (isujis_ss2(x)    && iskata(y))
 #define IS_MB2_CHAR(x, y)     (IS_MB2_KATA(x,y) || IS_MB2_JIS(x,y))
 #define IS_MB3_CHAR(x, y, z)  (isujis_ss3(x)    && IS_MB2_JIS(y,z))
+#define IS_MB_PREFIX2(x,y)    (isujis_ss3(x)    && isujis(y))
 #define DEFINE_ASIAN_ROUTINES
-#include "ctype-mb.ic"
+#include "ctype-mb.inl"
 
 #define MY_FUNCTION_NAME(x)  my_ ## x ## _ujis_japanese_ci
 #define WEIGHT_ILSEQ(x)      (0xFF0000 + (uchar) (x))
@@ -207,7 +208,7 @@ static const uchar sort_order_ujis[]=
 #define WEIGHT_MB2(x,y)      ((((uint) (uchar)(x)) << 16) | \
                              (((uint) (uchar) (y)) <<  8))
 #define WEIGHT_MB3(x,y,z)    (WEIGHT_MB2(x,y) | ((uint) (uchar) z))
-#include "strcoll.ic"
+#include "strcoll.inl"
 
 
 #define MY_FUNCTION_NAME(x)  my_ ## x ## _ujis_bin
@@ -216,23 +217,27 @@ static const uchar sort_order_ujis[]=
 #define WEIGHT_MB2(x,y)      ((((uint) (uchar)(x)) << 16) | \
                              (((uint) (uchar) (y)) <<  8))
 #define WEIGHT_MB3(x,y,z)    (WEIGHT_MB2(x,y) | ((uint) (uchar) z))
-#include "strcoll.ic"
+#include "strcoll.inl"
 
 
-static uint ismbchar_ujis(CHARSET_INFO *cs __attribute__((unused)),
-		  const char* p, const char *e)
-{
-  return ((*(uchar*)(p)<0x80)? 0:\
-    isujis(*(p)) && (e)-(p)>1 && isujis(*((p)+1))? 2:\
-    isujis_ss2(*(p)) && (e)-(p)>1 && iskata(*((p)+1))? 2:\
-    isujis_ss3(*(p)) && (e)-(p)>2 && isujis(*((p)+1)) && isujis(*((p)+2))? 3:\
-    0);
-}
+#define DEFINE_STRNNCOLLSP_NOPAD
+#define MY_FUNCTION_NAME(x)  my_ ## x ## _ujis_japanese_nopad_ci
+#define WEIGHT_ILSEQ(x)      (0xFF0000 + (uchar) (x))
+#define WEIGHT_MB1(x)        ((int) sort_order_ujis[(uchar) (x)])
+#define WEIGHT_MB2(x,y)      ((((uint) (uchar)(x)) << 16) | \
+                             (((uint) (uchar) (y)) <<  8))
+#define WEIGHT_MB3(x,y,z)    (WEIGHT_MB2(x,y) | ((uint) (uchar) z))
+#include "strcoll.inl"
 
-static uint mbcharlen_ujis(CHARSET_INFO *cs __attribute__((unused)),uint c)
-{
-  return (isujis(c)? 2: isujis_ss2(c)? 2: isujis_ss3(c)? 3: 1);
-}
+
+#define DEFINE_STRNNCOLLSP_NOPAD
+#define MY_FUNCTION_NAME(x)  my_ ## x ## _ujis_nopad_bin
+#define WEIGHT_ILSEQ(x)      (0xFF0000 + (uchar) (x))
+#define WEIGHT_MB1(x)        ((int) (uchar) (x))
+#define WEIGHT_MB2(x,y)      ((((uint) (uchar)(x)) << 16) | \
+                             (((uint) (uchar) (y)) <<  8))
+#define WEIGHT_MB3(x,y,z)    (WEIGHT_MB2(x,y) | ((uint) (uchar) z))
+#include "strcoll.inl"
 
 
 static
@@ -67156,12 +67161,12 @@ get_case_info_for_ch(CHARSET_INFO *cs, uint plane, uint page, uint offs)
 */
 static size_t
 my_casefold_ujis(CHARSET_INFO *cs,
-                 char *src, size_t srclen,
+                 const char *src, size_t srclen,
                  char *dst, size_t dstlen __attribute__((unused)),
                  const uchar * const map,
                  size_t is_upper)
 {
-  char *srcend= src + srclen, *dst0= dst;
+  const char *srcend= src + srclen, *dst0= dst;
 
   while (src < srcend)
   {
@@ -67203,7 +67208,7 @@ my_casefold_ujis(CHARSET_INFO *cs,
   LOWER()
 */
 size_t
-my_casedn_ujis(CHARSET_INFO * cs, char *src, size_t srclen,
+my_casedn_ujis(CHARSET_INFO * cs, const char *src, size_t srclen,
                char *dst, size_t dstlen)
 {
   DBUG_ASSERT(dstlen >= srclen * cs->casedn_multiply); 
@@ -67216,7 +67221,7 @@ my_casedn_ujis(CHARSET_INFO * cs, char *src, size_t srclen,
   UPPER()
 */
 size_t
-my_caseup_ujis(CHARSET_INFO * cs, char *src, size_t srclen,
+my_caseup_ujis(CHARSET_INFO * cs, const char *src, size_t srclen,
                char *dst, size_t dstlen)
 {
   DBUG_ASSERT(dstlen >= srclen * cs->caseup_multiply);
@@ -67261,14 +67266,43 @@ static MY_COLLATION_HANDLER my_collation_ujis_bin_handler =
 };
 
 
+static MY_COLLATION_HANDLER my_collation_ujis_japanese_nopad_ci_handler =
+{
+    NULL,                    /* init */
+    my_strnncoll_ujis_japanese_ci,
+    my_strnncollsp_ujis_japanese_nopad_ci,
+    my_strnxfrm_mb_nopad,
+    my_strnxfrmlen_simple,
+    my_like_range_mb,
+    my_wildcmp_mb,
+    my_strcasecmp_mb,
+    my_instr_mb,
+    my_hash_sort_simple_nopad,
+    my_propagate_simple
+};
+
+
+static MY_COLLATION_HANDLER my_collation_ujis_nopad_bin_handler =
+{
+    NULL,                    /* init */
+    my_strnncoll_ujis_bin,
+    my_strnncollsp_ujis_nopad_bin,
+    my_strnxfrm_mb_nopad,
+    my_strnxfrmlen_simple,
+    my_like_range_mb,
+    my_wildcmp_mb_bin,
+    my_strcasecmp_mb_bin,
+    my_instr_mb,
+    my_hash_sort_mb_nopad_bin,
+    my_propagate_simple
+};
+
+
 static MY_CHARSET_HANDLER my_charset_handler=
 {
     NULL,		/* init */
-    ismbchar_ujis,
-    mbcharlen_ujis,
     my_numchars_mb,
     my_charpos_mb,
-    my_well_formed_len_ujis,
     my_lengthsp_8bit,
     my_numcells_eucjp,
     my_mb_wc_euc_jp,	/* mb_wc       */
@@ -67361,6 +67395,72 @@ struct charset_info_st my_charset_ujis_bin=
     1,                  /* levels_for_order   */
     &my_charset_handler,
     &my_collation_ujis_bin_handler
+};
+
+
+struct charset_info_st my_charset_ujis_japanese_nopad_ci=
+{
+    MY_NOPAD_ID(12),0,0,/* number           */
+    MY_CS_COMPILED|MY_CS_NOPAD, /* state    */
+    "ujis",             /* cs name          */
+    "ujis_japanese_nopad_ci", /* name       */
+    "",                 /* comment          */
+    NULL,               /* tailoring        */
+    ctype_ujis,
+    to_lower_ujis,
+    to_upper_ujis,
+    sort_order_ujis,
+    NULL,               /* uca              */
+    NULL,               /* tab_to_uni       */
+    NULL,               /* tab_from_uni     */
+    &my_caseinfo_ujis,  /* caseinfo         */
+    NULL,               /* state_map        */
+    NULL,               /* ident_map        */
+    1,                  /* strxfrm_multiply */
+    1,                  /* caseup_multiply  */
+    2,                  /* casedn_multiply  */
+    1,                  /* mbminlen         */
+    3,                  /* mbmaxlen         */
+    0,                  /* min_sort_char    */
+    0xFEFE,             /* max_sort_char    */
+    ' ',                /* pad char         */
+    0,                  /* escape_with_backslash_is_dangerous */
+    1,                  /* levels_for_order */
+    &my_charset_handler,
+    &my_collation_ujis_japanese_nopad_ci_handler
+};
+
+
+struct charset_info_st my_charset_ujis_nopad_bin=
+{
+    MY_NOPAD_ID(91),0,0,/* number           */
+    MY_CS_COMPILED|MY_CS_BINSORT|MY_CS_NOPAD, /* state */
+    "ujis",             /* cs name          */
+    "ujis_nopad_bin",   /* name             */
+    "",                 /* comment          */
+    NULL,               /* tailoring        */
+    ctype_ujis,
+    to_lower_ujis,
+    to_upper_ujis,
+    NULL,               /* sort_order       */
+    NULL,               /* uca              */
+    NULL,               /* tab_to_uni       */
+    NULL,               /* tab_from_uni     */
+    &my_caseinfo_ujis,  /* caseinfo         */
+    NULL,               /* state_map        */
+    NULL,               /* ident_map        */
+    1,                  /* strxfrm_multiply */
+    1,                  /* caseup_multiply  */
+    2,                  /* casedn_multiply  */
+    1,                  /* mbminlen         */
+    3,                  /* mbmaxlen         */
+    0,                  /* min_sort_char    */
+    0xFEFE,             /* max_sort_char    */
+    ' ',                /* pad char         */
+    0,                  /* escape_with_backslash_is_dangerous */
+    1,                  /* levels_for_order */
+    &my_charset_handler,
+    &my_collation_ujis_nopad_bin_handler
 };
 
 

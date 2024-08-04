@@ -1,6 +1,7 @@
 /*****************************************************************************
 
-Copyright (c) 2012, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2012, 2016, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2017, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +13,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -27,7 +28,6 @@ Created 2012-02-08 by Sunny Bains
 #ifndef row0quiesce_h
 #define row0quiesce_h
 
-#include "univ.i"
 #include "dict0types.h"
 
 struct trx_t;
@@ -37,38 +37,31 @@ struct trx_t;
 
 /*********************************************************************//**
 Quiesce the tablespace that the table resides in. */
-UNIV_INTERN
 void
 row_quiesce_table_start(
 /*====================*/
 	dict_table_t*	table,		/*!< in: quiesce this table */
 	trx_t*		trx)		/*!< in/out: transaction/session */
-        __attribute__((nonnull));
+        MY_ATTRIBUTE((nonnull));
 
 /*********************************************************************//**
 Set a table's quiesce state.
 @return DB_SUCCESS or errro code. */
-UNIV_INTERN
 dberr_t
 row_quiesce_set_state(
 /*==================*/
 	dict_table_t*	table,		/*!< in: quiesce this table */
 	ib_quiesce_t	state,		/*!< in: quiesce state to set */
 	trx_t*		trx)		/*!< in/out: transaction */
-        __attribute__((nonnull, warn_unused_result));
+        MY_ATTRIBUTE((nonnull, warn_unused_result));
 
 /*********************************************************************//**
 Cleanup after table quiesce. */
-UNIV_INTERN
 void
 row_quiesce_table_complete(
 /*=======================*/
 	dict_table_t*	table,		/*!< in: quiesce this table */
 	trx_t*		trx)		/*!< in/out: transaction/session */
-        __attribute__((nonnull));
-
-#ifndef UNIV_NONINL
-#include "row0quiesce.ic"
-#endif
+        MY_ATTRIBUTE((nonnull));
 
 #endif /* row0quiesce_h */

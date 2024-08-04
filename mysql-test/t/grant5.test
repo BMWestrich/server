@@ -5,3 +5,94 @@
 #
 --error ER_NONEXISTING_GRANT
 SHOW GRANTS FOR root@invalid_host;
+
+#
+# MDEV-9580 SHOW GRANTS FOR <current_user> fails
+#
+create user test;
+create user foo;
+create role foo;
+grant foo to test;
+--connect (conn_1, localhost, test,,)
+set role foo;
+show grants for test; # user
+show grants for foo;  # role
+--error ER_DBACCESS_DENIED_ERROR
+show grants for foo@'%'; # user
+--connection default
+--disconnect conn_1
+drop user test, foo;
+drop role foo;
+
+#
+# MDEV-17975 Assertion `! is_set()' or `!is_set() || (m_status == DA_OK_BULK && is_bulk_op())' failed upon REVOKE under LOCK TABLE
+#
+CREATE TABLE t1 (a INT);
+LOCK TABLE t1 WRITE;
+--error ER_TABLE_NOT_LOCKED
+REVOKE EXECUTE ON PROCEDURE sp FROM u;
+--error ER_TABLE_NOT_LOCKED
+REVOKE PROCESS ON *.* FROM u;
+DROP TABLE t1;
+
+#
+# MDEV-23010 UPDATE privilege at Database and Table level fail to update with SELECT command denied to user
+#
+create database mysqltest1;
+use mysqltest1;
+create table t1(id int);
+insert t1 values(2);
+create user u1@localhost;
+grant select on mysqltest1.t1 to u1@localhost;
+grant update on mysqltest1.* to u1@localhost;
+connect u1, localhost, u1;
+update mysqltest1.t1 set id=1 where id=2;
+connection default;
+disconnect u1;
+drop user u1@localhost;
+drop database mysqltest1;
+
+#
+# MDEV-22313: Neither SHOW CREATE USER nor SHOW GRANTS prints a user's default role
+#
+CREATE ROLE test_role;
+CREATE USER test_user;
+GRANT test_role TO test_user;
+SET DEFAULT ROLE test_role FOR test_user;
+SHOW GRANTS FOR test_user;
+SET DEFAULT ROLE NONE for test_user;
+SHOW GRANTS FOR test_user;
+SET ROLE test_role;
+SET DEFAULT ROLE test_role;
+SHOW GRANTS;
+SET DEFAULT ROLE NONE;
+SHOW GRANTS;
+DROP USER test_user;
+DROP ROLE test_role;
+
+#
+# MDEV-26080 SHOW GRANTS does not quote role names properly for DEFAULT ROLE
+#
+
+CREATE ROLE 'test-role';
+CREATE USER 'test-user';
+GRANT 'test-role' TO 'test-user';
+SET DEFAULT ROLE 'test-role' FOR 'test-user';
+SHOW GRANTS FOR 'test-user';
+DROP ROLE 'test-role';
+SHOW GRANTS FOR 'test-user';
+SET DEFAULT ROLE NONE FOR 'test-user';
+SHOW GRANTS FOR 'test-user';
+CREATE ROLE `r``o'l"e`;
+select user from mysql.user where is_role='Y';
+GRANT `r``o'l"e` TO 'test-user';
+SET DEFAULT ROLE `r``o'l"e` FOR 'test-user';
+# it is expected that quotes won't be shown correctly
+SHOW GRANTS FOR 'test-user';
+DROP ROLE `r``o'l"e`;
+DROP USER 'test-user';
+
+
+#
+# End of 10.1 tests
+#

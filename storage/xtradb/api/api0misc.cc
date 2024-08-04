@@ -12,7 +12,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -183,10 +183,6 @@ handle_new_error:
 
                 trx_rollback_for_mysql(trx);
                 break;
-
-        case DB_MUST_GET_MORE_FILE_SPACE:
-
-                exit(1);
 
         case DB_CORRUPTION:
 	case DB_FOREIGN_EXCEED_MAX_CASCADE:

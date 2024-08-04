@@ -46,17 +46,23 @@ INSERT INTO t1 VALUES('aa','bb');
 
 SET SESSION sql_buffer_result = 1;
 
+--disable_ps_protocol
 SHOW STATUS LIKE 'Created_tmp_tables';
+--enable_ps_protocol
 --echo Expected value : 0.
 
 SELECT * FROM t1;
 
+--disable_ps_protocol
 SHOW STATUS LIKE 'Created_tmp_tables';
+--enable_ps_protocol
 --echo Expected value : 1.
 
 SELECT * FROM t1;
 
+--disable_ps_protocol
 SHOW STATUS LIKE 'Created_tmp_tables';
+--enable_ps_protocol
 --echo Expected value : 2.
 
 --echo '#--------------------FN_DYNVARS_156_02-------------------------#'
@@ -66,22 +72,24 @@ SHOW STATUS LIKE 'Created_tmp_tables';
 
 SET SESSION sql_buffer_result = 0;
 
+--disable_ps_protocol
 SHOW STATUS LIKE 'Created_tmp_tables';
+--enable_ps_protocol
 --echo Expected value : 2.
 
 SELECT * FROM t1;
 
+--disable_ps_protocol
 SHOW STATUS LIKE 'Created_tmp_tables';
+--enable_ps_protocol
 --echo Expected value : 2.
 
 --echo '#--------------------FN_DYNVARS_156_03-------------------------#'
 #
 # Session data integrity check
 #
---echo ** Connecting con_int1 using root **
 connect (con_int1,localhost,root,,);
 
---echo ** Connection con_int1 **
 connection con_int1;
 
 SELECT @@SESSION.sql_buffer_result;
@@ -89,10 +97,8 @@ SELECT @@SESSION.sql_buffer_result;
 
 SET SESSION sql_buffer_result = FALSE;
 
---echo ** Connecting con_int2 using root **
 connect (con_int2,localhost,root,,);
 
---echo ** Connection con_int2 **
 connection con_int2;
 
 SELECT @@SESSION.sql_buffer_result;
@@ -100,22 +106,18 @@ SELECT @@SESSION.sql_buffer_result;
 
 SET SESSION sql_buffer_result = TRUE;
 
---echo ** Connection con_int1 **
 connection con_int1;
 
 SELECT @@SESSION.sql_buffer_result;
 --echo 0 / FALSE Expected
 
---echo ** Connection con_int2 **
 connection con_int2;
 
 SELECT @@SESSION.sql_buffer_result;
 --echo 1 / TRUE Expected
 
---echo ** Connection default **
 connection default;
 
---echo Disconnecting Connections con_int1, con_int2
 disconnect con_int1;
 disconnect con_int2;
 

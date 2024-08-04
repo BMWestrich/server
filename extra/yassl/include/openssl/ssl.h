@@ -1,5 +1,6 @@
 /*
-   Copyright (c) 2005, 2014, Oracle and/or its affiliates.
+   Copyright (c) 2005, 2017, Oracle and/or its affiliates. All rights reserved.
+   Use is subject to license terms.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -13,7 +14,7 @@
    You should have received a copy of the GNU General Public License
    along with this program; see the file COPYING. If not, write to the
    Free Software Foundation, Inc., 51 Franklin St, Fifth Floor, Boston,
-   MA  02110-1301  USA.
+   MA  02110-1335  USA.
 */
 
 /*  ssl.h defines openssl compatibility layer 
@@ -34,7 +35,7 @@
 #include "rsa.h"
 
 
-#define YASSL_VERSION "2.3.9"
+#define YASSL_VERSION "2.4.4"
 
 
 #if defined(__cplusplus)
@@ -540,7 +541,7 @@ void MD5_Final(unsigned char*, MD5_CTX*);
 
 /* yaSSL extensions */
 int SSL_set_compression(SSL*);   /* turn on yaSSL zlib compression */
-char *yaSSL_ASN1_TIME_to_string(ASN1_TIME *time, char *buf, size_t len);
+char *yaSSL_ASN1_TIME_to_string(const ASN1_TIME *time, char *buf, size_t len);
 
 #include "transport_types.h"
 

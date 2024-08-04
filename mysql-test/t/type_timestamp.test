@@ -78,7 +78,7 @@ truncate table t1;
 insert into t1 values ("00000000000000"),("20030101010160"),("20030101016001"),("20030101240101"),("20030132010101"),("20031301010101"),("20031200000000"),("20030000000000");
 select ix+0 from t1;
 truncate table t1;
-insert into t1 values ("0000-00-00 00:00:00 some trailer"),("2003-01-01 00:00:00 some trailer");
+insert ignore into t1 values ("0000-00-00 00:00:00 some trailer"),("2003-01-01 00:00:00 some trailer");
 select ix+0 from t1;
 drop table t1;
 
@@ -443,6 +443,14 @@ SELECT MAX(ts) > '2010-01-01 00:00:00' FROM t1;
 SELECT MAX(dt) > '2010-01-01 00:00:00' FROM t1;
 SELECT MAX(ts) = '2011-01-06 12:34:30' FROM t1;
 SELECT MAX(dt) = '2011-01-06 12:34:30' FROM t1;
+DROP TABLE t1;
+
+--echo #
+--echo # MDEV-9413 "datetime >= coalesce(c1(NULL))" doesn't return expected NULL
+--echo #
+CREATE TABLE t1(c1 TIMESTAMP(6) NULL DEFAULT NULL);
+INSERT INTO t1 VALUES(NULL);
+SELECT c1, '2016-06-13 20:00:00.000003' >= COALESCE( c1 ) FROM t1;
 DROP TABLE t1;
 
 --echo End of 5.5 tests

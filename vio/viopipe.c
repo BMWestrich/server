@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #include "vio_priv.h"
 
@@ -78,7 +78,7 @@ size_t vio_read_pipe(Vio *vio, uchar *buf, size_t count)
   disable_iocp_notification(&vio->overlapped);
 
   /* Attempt to read from the pipe (overlapped I/O). */
-  if (ReadFile(vio->hPipe, buf, count, &transferred, &vio->overlapped))
+  if (ReadFile(vio->hPipe, buf, (DWORD)count, &transferred, &vio->overlapped))
   {
     /* The operation completed immediately. */
     ret= transferred;
@@ -101,7 +101,7 @@ size_t vio_write_pipe(Vio *vio, const uchar *buf, size_t count)
 
   disable_iocp_notification(&vio->overlapped);
   /* Attempt to write to the pipe (overlapped I/O). */
-  if (WriteFile(vio->hPipe, buf, count, &transferred, &vio->overlapped))
+  if (WriteFile(vio->hPipe, buf, (DWORD)count, &transferred, &vio->overlapped))
   {
     /* The operation completed immediately. */
     ret= transferred;

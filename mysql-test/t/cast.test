@@ -174,6 +174,7 @@ select
   hex(cast(_latin1'a'   AS char(2))) as c5;
 select cast(1000 as CHAR(3));
 
+SET STATEMENT sql_mode = 'NO_ENGINE_SUBSTITUTION' FOR
 create table t1 select
   cast(_latin1'ab'  AS char)    as c1,
   cast(_latin1'a '  AS char)    as c2,
@@ -194,6 +195,7 @@ select
   cast(_koi8r'Æ  ' AS nchar(2)) as c4,
   cast(_koi8r'Æ'   AS nchar(2)) as c5;
 
+SET STATEMENT sql_mode = 'NO_ENGINE_SUBSTITUTION' FOR
 create table t1 select
   cast(_koi8r'ÆÇ'  AS nchar)    as c1,
   cast(_koi8r'Æ '  AS nchar)    as c2,
@@ -391,6 +393,7 @@ DROP TABLE t1;
 --echo # Bug #11765023: 57934: DOS POSSIBLE SINCE BINARY CASTING 
 --echo #   DOESN'T ADHERE TO MAX_ALLOWED_PACKET
 
+set @save_max_allowed_packet=@@global.max_allowed_packet;
 SET @@GLOBAL.max_allowed_packet=2048;
 # reconnect to make the new max packet size take effect
 --connect (newconn, localhost, root,,)
@@ -401,7 +404,7 @@ SELECT length(CONVERT(repeat('a',2048), CHAR(2049)));
 
 connection default;
 disconnect newconn;
-SET @@GLOBAL.max_allowed_packet=default;
+SET @@GLOBAL.max_allowed_packet=@save_max_allowed_packet;
 
 --echo #
 --echo # Bug#13519724 63793: CRASH IN DTCOLLATION::SET(DTCOLLATION &SET)
@@ -421,6 +424,7 @@ DROP TABLE t1;
 --echo # Bug#14096619 UNABLE TO RESTORE DATABASE DUMP
 --echo #
 
+SET STATEMENT sql_mode = 'NO_ENGINE_SUBSTITUTION' FOR
 CREATE TABLE t1 AS SELECT CONCAT(CAST(REPEAT('9', 1000) AS SIGNED)),
                           CONCAT(CAST(REPEAT('9', 1000) AS UNSIGNED));
 SHOW CREATE TABLE t1;
@@ -472,3 +476,42 @@ select collation(cast("a" as char(10) ascii binary));
 select collation(cast("a" as char(10) binary charset utf8));
 select collation(cast("a" as char(10) binary ascii));
 
+--echo #
+--echo # MDEV-11030 Assertion `precision > 0' failed in decimal_bin_size
+--echo #
+
+SELECT * FROM (SELECT IFNULL(CONVERT(NULL, UNSIGNED), NULL)) sq;
+
+CREATE TABLE t1 AS SELECT IFNULL(CONVERT(NULL, UNSIGNED), NULL);
+SHOW CREATE TABLE t1;
+DROP TABLE t1;
+
+CREATE TABLE t1 AS SELECT COALESCE(CONVERT(NULL, UNSIGNED), NULL);
+SHOW CREATE TABLE t1;
+DROP TABLE t1;
+
+CREATE TABLE t1 AS SELECT CASE WHEN TRUE THEN CONVERT(NULL, UNSIGNED) ELSE NULL END;
+SHOW CREATE TABLE t1;
+DROP TABLE t1;
+
+CREATE TABLE t1 AS SELECT IFNULL(CONVERT(NULL,SIGNED),CONVERT(NULL,UNSIGNED)) AS a;
+SHOW CREATE TABLE t1;
+DROP TABLE t1;
+
+CREATE TABLE t1 AS SELECT
+  -1,
+  CONVERT(NULL,SIGNED),
+  CONCAT(CONVERT(NULL,SIGNED)),
+  1,
+  CONVERT(NULL,UNSIGNED),
+  CONCAT(CONVERT(NULL,UNSIGNED));
+SHOW CREATE TABLE t1;
+DROP TABLE t1;
+
+CREATE TABLE t1 AS SELECT
+  CONVERT('',SIGNED),
+  CONCAT(CONVERT('',SIGNED)),
+  CONVERT('',UNSIGNED),
+  CONCAT(CONVERT('',UNSIGNED));
+SHOW CREATE TABLE t1;
+DROP TABLE t1;

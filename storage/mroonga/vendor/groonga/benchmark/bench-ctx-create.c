@@ -1,6 +1,6 @@
 /* -*- c-basic-offset: 2; coding: utf-8 -*- */
 /*
-  Copyright (C) 2013-2014  Kouhei Sutou <kou@clear-code.com>
+  Copyright (C) 2013-2016  Kouhei Sutou <kou@clear-code.com>
 
   This library is free software; you can redistribute it and/or
   modify it under the terms of the GNU Lesser General Public
@@ -13,7 +13,7 @@
 
   You should have received a copy of the GNU Lesser General Public
   License along with this library; if not, write to the Free Software
-  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA
 */
 
 /*
@@ -153,12 +153,18 @@ teardown_database(grn_ctx *context, grn_obj *database)
 int
 main(int argc, gchar **argv)
 {
+  grn_rc rc;
   grn_ctx context;
   BenchmarkData data;
   BenchReporter *reporter;
   gint n = 1;
 
-  grn_init();
+  rc = grn_init();
+  if (rc != GRN_SUCCESS) {
+    g_print("failed to initialize Groonga: <%d>: %s\n",
+            rc, grn_get_global_error_message());
+    return EXIT_FAILURE;
+  }
   bench_init(&argc, &argv);
 
   grn_ctx_init(&context, 0);
@@ -188,5 +194,5 @@ main(int argc, gchar **argv)
 
   grn_fin();
 
-  return 0;
+  return EXIT_SUCCESS;
 }

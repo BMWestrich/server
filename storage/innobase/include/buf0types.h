@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 1995, 2013, Oracle and/or its affiliates. All Rights Reserved
+Copyright (c) 1995, 2015, Oracle and/or its affiliates. All rights reserved.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +12,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -26,12 +26,11 @@ Created 11/17/1995 Heikki Tuuri
 #ifndef buf0types_h
 #define buf0types_h
 
-#if defined(INNODB_PAGE_ATOMIC_REF_COUNT) && defined(HAVE_ATOMIC_BUILTINS)
-#define PAGE_ATOMIC_REF_COUNT
-#endif /* INNODB_PAGE_ATOMIC_REF_COUNT && HAVE_ATOMIC_BUILTINS */
+#include "os0event.h"
+#include "ut0ut.h"
 
 /** Buffer page (uncompressed or compressed) */
-struct buf_page_t;
+class buf_page_t;
 /** Buffer block for which an uncompressed page exists */
 struct buf_block_t;
 /** Buffer pool chunk comprising buf_block_t */
@@ -44,6 +43,8 @@ struct buf_pool_stat_t;
 struct buf_buddy_stat_t;
 /** Doublewrite memory struct */
 struct buf_dblwr_t;
+/** Flush observer for bulk create index */
+class FlushObserver;
 
 /** A buffer frame. @see page_t */
 typedef	byte	buf_frame_t;
@@ -56,17 +57,6 @@ enum buf_flush_t {
 	BUF_FLUSH_SINGLE_PAGE,		/*!< flush via the LRU list
 					but only a single page */
 	BUF_FLUSH_N_TYPES		/*!< index of last element + 1  */
-};
-
-/** Algorithm to remove the pages for a tablespace from the buffer pool.
-See buf_LRU_flush_or_remove_pages(). */
-enum buf_remove_t {
-	BUF_REMOVE_ALL_NO_WRITE,	/*!< Remove all pages from the buffer
-					pool, don't write or sync to disk */
-	BUF_REMOVE_FLUSH_NO_WRITE,	/*!< Remove only, from the flush list,
-					don't write or sync to disk */
-	BUF_REMOVE_FLUSH_WRITE		/*!< Flush dirty pages to disk only
-					don't remove from the buffer pool */
 };
 
 /** Flags for io_fix types */
@@ -96,6 +86,24 @@ enum srv_checksum_algorithm_t {
 						when reading */
 };
 
+inline
+bool
+is_checksum_strict(srv_checksum_algorithm_t algo)
+{
+	return(algo == SRV_CHECKSUM_ALGORITHM_STRICT_CRC32
+	       || algo == SRV_CHECKSUM_ALGORITHM_STRICT_INNODB
+	       || algo == SRV_CHECKSUM_ALGORITHM_STRICT_NONE);
+}
+
+inline
+bool
+is_checksum_strict(ulint algo)
+{
+	return(algo == SRV_CHECKSUM_ALGORITHM_STRICT_CRC32
+	       || algo == SRV_CHECKSUM_ALGORITHM_STRICT_INNODB
+	       || algo == SRV_CHECKSUM_ALGORITHM_STRICT_NONE);
+}
+
 /** Parameters of binary buddy system for compressed pages (buf0buddy.h) */
 /* @{ */
 /** Zip shift value for the smallest page size */
@@ -116,5 +124,94 @@ the underlying memory is aligned by this amount:
 this must be equal to UNIV_PAGE_SIZE */
 #define BUF_BUDDY_HIGH	(BUF_BUDDY_LOW << BUF_BUDDY_SIZES)
 /* @} */
+
+/** Page identifier. */
+class page_id_t {
+public:
+
+	/** Constructor from (space, page_no).
+	@param[in]	space	tablespace id
+	@param[in]	page_no	page number */
+	page_id_t(ulint space, ulint page_no)
+		: m_space(uint32_t(space)), m_page_no(uint32(page_no))
+	{
+		ut_ad(space <= 0xFFFFFFFFU);
+		ut_ad(page_no <= 0xFFFFFFFFU);
+	}
+
+	bool operator==(const page_id_t& rhs) const
+	{
+		return m_space == rhs.m_space && m_page_no == rhs.m_page_no;
+	}
+	bool operator!=(const page_id_t& rhs) const { return !(*this == rhs); }
+
+	bool operator<(const page_id_t& rhs) const
+	{
+		if (m_space == rhs.m_space) {
+			return m_page_no < rhs.m_page_no;
+		}
+
+		return m_space < rhs.m_space;
+	}
+
+	/** Retrieve the tablespace id.
+	@return tablespace id */
+	uint32_t space() const { return m_space; }
+
+	/** Retrieve the page number.
+	@return page number */
+	uint32_t page_no() const { return m_page_no; }
+
+	/** Retrieve the fold value.
+	@return fold value */
+	ulint fold() const { return (m_space << 20) + m_space + m_page_no; }
+
+	/** Reset the page number only.
+	@param[in]	page_no	page number */
+	void set_page_no(ulint page_no)
+	{
+		m_page_no = uint32_t(page_no);
+
+		ut_ad(page_no <= 0xFFFFFFFFU);
+	}
+
+	/** Set the FIL_NULL for the space and page_no */
+	void set_corrupt_id()
+	{
+		m_space = m_page_no = ULINT32_UNDEFINED;
+	}
+
+private:
+
+	/** Tablespace id. */
+	uint32_t	m_space;
+
+	/** Page number. */
+	uint32_t	m_page_no;
+
+	/** Declare the overloaded global operator<< as a friend of this
+	class. Refer to the global declaration for further details.  Print
+	the given page_id_t object.
+	@param[in,out]	out	the output stream
+	@param[in]	page_id	the page_id_t object to be printed
+	@return the output stream */
+        friend
+        std::ostream&
+        operator<<(
+                std::ostream&           out,
+                const page_id_t        page_id);
+};
+
+#ifndef UNIV_INNOCHECKSUM
+
+#include "ut0mutex.h"
+#include "sync0rw.h"
+
+typedef ib_bpmutex_t BPageMutex;
+typedef ib_mutex_t BufPoolMutex;
+typedef ib_mutex_t FlushListMutex;
+typedef BPageMutex BufPoolZipMutex;
+typedef rw_lock_t BPageLock;
+#endif /* !UNIV_INNOCHECKSUM */
 
 #endif /* buf0types.h */

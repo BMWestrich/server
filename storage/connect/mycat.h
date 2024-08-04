@@ -1,4 +1,4 @@
-/* Copyright (C) Olivier Bertrand 2004 - 2015
+/* Copyright (C) MariaDB Corporation Ab
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -11,11 +11,11 @@
 
   You should have received a copy of the GNU General Public License
   along with this program; if not, write to the Free Software
-  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
+  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 /**************** MYCAT H Declares Source Code File (.H) ***************/
-/*  Name: MYCAT.H  Version 2.3                                         */
-/*                                                                     */
+/*  Name: MYCAT.H  Version 2.4                                         */
+/*  Author: Olivier Bertrand                                           */
 /*  This file contains the CONNECT plugin MYCAT class definitions.     */
 /***********************************************************************/
 #ifndef __MYCAT__H
@@ -47,8 +47,11 @@ struct ha_table_option_struct {
   const char *catfunc;
   const char *srcdef;
   const char *colist;
+	const char *filter;
   const char *oplist;
   const char *data_charset;
+  const char *http;
+  const char *uri;
   ulonglong lrecl;
   ulonglong elements;
 //ulonglong estimate;
@@ -62,6 +65,7 @@ struct ha_table_option_struct {
   bool split;
   bool readonly;
   bool sepindex;
+	bool zipped;
   };
 
 // Possible value for catalog functions
@@ -74,7 +78,8 @@ struct ha_table_option_struct {
 
 typedef class ha_connect     *PHC;
 
-char *GetPluginDir(void);
+char   *GetPluginDir(void);
+char   *GetMessageDir(void);
 TABTYPE GetTypeID(const char *type);
 bool    IsFileType(TABTYPE type);
 bool    IsExactType(TABTYPE type);
@@ -97,20 +102,15 @@ class MYCAT : public CATALOG {
 
   // Methods
   void    Reset(void);
-//void    SetDataPath(PGLOBAL g, const char *path) 
-//            {SetPath(g, &DataPath, path);}
   bool    StoreIndex(PGLOBAL, PTABDEF) {return false;}  // Temporary
-//  PRELDEF GetTableDesc(PGLOBAL g, LPCSTR name,
-	PRELDEF GetTableDesc(PGLOBAL g, PTABLE tablep,
+	PTABDEF GetTableDesc(PGLOBAL g, PTABLE tablep,
 		                   LPCSTR type, PRELDEF *prp = NULL);
   PTDB    GetTable(PGLOBAL g, PTABLE tablep, 
                               MODE mode = MODE_READ, LPCSTR type = NULL);
   void    ClearDB(PGLOBAL g);
 
  protected:
-//  PRELDEF MakeTableDesc(PGLOBAL g, LPCSTR name, LPCSTR am);
-	PRELDEF MakeTableDesc(PGLOBAL g, PTABLE tablep, LPCSTR am);
-	//void    SetPath(PGLOBAL g, LPCSTR *datapath, const char *path);
+	PTABDEF MakeTableDesc(PGLOBAL g, PTABLE tablep, LPCSTR am);
 
   // Members
   ha_connect *Hc;                          // The Connect handler

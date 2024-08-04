@@ -1,6 +1,6 @@
 /*
    Copyright (c) 2000, 2015, Oracle and/or its affiliates.
-   Copyright (c) 2011, 2015, MariaDB
+   Copyright (c) 2011, 2017, MariaDB
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA
 */
 
 /*
@@ -30,6 +30,8 @@
 #define IMPORT_VERSION "3.7"
 
 #include "client_priv.h"
+#include <my_sys.h>
+
 #include "mysql_version.h"
 
 #include <welcome_copyright_notice.h>   /* ORACLE_WELCOME_COPYRIGHT_NOTICE */
@@ -37,6 +39,7 @@
 
 /* Global Thread counter */
 uint counter= 0;
+pthread_mutex_t init_mutex;
 pthread_mutex_t counter_mutex;
 pthread_cond_t count_threshhold;
 
@@ -47,8 +50,8 @@ static char *add_load_option(char *ptr,const char *object,
 			     const char *statement);
 
 static my_bool	verbose=0,lock_tables=0,ignore_errors=0,opt_delete=0,
-		replace=0,silent=0,ignore=0,opt_compress=0,
-                opt_low_priority= 0, tty_password= 0;
+                replace, silent, ignore, ignore_foreign_keys,
+                opt_compress, opt_low_priority, tty_password;
 static my_bool debug_info_flag= 0, debug_check_flag= 0;
 static uint opt_use_threads=0, opt_local_file=0, my_end_arg= 0;
 static char	*opt_password=0, *current_user=0,
@@ -122,6 +125,10 @@ static struct my_option my_long_options[] =
    &current_host, 0, GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
   {"ignore", 'i', "If duplicate unique key was found, keep old row.",
    &ignore, &ignore, 0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
+  {"ignore-foreign-keys", 'k',
+    "Disable foreign key checks while importing the data.",
+    &ignore_foreign_keys, &ignore_foreign_keys, 0, GET_BOOL, NO_ARG,
+    0, 0, 0, 0, 0, 0},
   {"ignore-lines", OPT_IGN_LINES, "Ignore first n lines of data infile.",
    &opt_ignore_lines, &opt_ignore_lines, 0, GET_LL,
    REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
@@ -248,8 +255,12 @@ get_one_option(int optid, const struct my_option *opt __attribute__((unused)),
     break;
 #endif
   case OPT_MYSQL_PROTOCOL:
-    opt_protocol= find_type_or_exit(argument, &sql_protocol_typelib,
-                                    opt->name);
+    if ((opt_protocol= find_type_with_warning(argument, &sql_protocol_typelib,
+                                              opt->name)) <= 0)
+    {
+      sf_leaking_memory= 1; /* no memory leak reports here */
+      exit(1);
+    }
     break;
   case '#':
     DBUG_PUSH(argument ? argument : "d:t:o");
@@ -419,10 +430,22 @@ static MYSQL *db_connect(char *host, char *database,
                          char *user, char *passwd)
 {
   MYSQL *mysql;
+  my_bool reconnect;
   if (verbose)
     fprintf(stdout, "Connecting to %s\n", host ? host : "localhost");
-  if (!(mysql= mysql_init(NULL)))
-    return 0;
+  if (opt_use_threads && !lock_tables)
+  {
+    pthread_mutex_lock(&init_mutex);
+    if (!(mysql= mysql_init(NULL)))
+    {
+      pthread_mutex_unlock(&init_mutex);
+      return 0;
+    }
+    pthread_mutex_unlock(&init_mutex);
+  }
+  else
+    if (!(mysql= mysql_init(NULL)))
+      return 0;
   if (opt_compress)
     mysql_options(mysql,MYSQL_OPT_COMPRESS,NullS);
   if (opt_local_file)
@@ -451,8 +474,9 @@ static MYSQL *db_connect(char *host, char *database,
 
   if (opt_default_auth && *opt_default_auth)
     mysql_options(mysql, MYSQL_DEFAULT_AUTH, opt_default_auth);
-
-  mysql_options(mysql, MYSQL_SET_CHARSET_NAME, default_charset);
+  if (!strcmp(default_charset,MYSQL_AUTODETECT_CHARSET_NAME))
+    default_charset= (char *)my_default_csname();
+  mysql_options(mysql, MYSQL_SET_CHARSET_NAME, my_default_csname());
   mysql_options(mysql, MYSQL_OPT_CONNECT_ATTR_RESET, 0);
   mysql_options4(mysql, MYSQL_OPT_CONNECT_ATTR_ADD,
                  "program_name", "mysqlimport");
@@ -463,7 +487,8 @@ static MYSQL *db_connect(char *host, char *database,
     ignore_errors=0;	  /* NO RETURN FROM db_error */
     db_error(mysql);
   }
-  mysql->reconnect= 0;
+  reconnect= 0;
+  mysql_options(mysql, MYSQL_OPT_RECONNECT, &reconnect);
   if (verbose)
     fprintf(stdout, "Selecting database %s\n", database);
   if (mysql_select_db(mysql, database))
@@ -471,6 +496,9 @@ static MYSQL *db_connect(char *host, char *database,
     ignore_errors=0;
     db_error(mysql);
   }
+  if (ignore_foreign_keys)
+    mysql_query(mysql, "set foreign_key_checks= 0;");
+
   return mysql;
 }
 
@@ -496,11 +524,11 @@ static void safe_exit(int error, MYSQL *mysql)
   if (mysql)
     mysql_close(mysql);
 
+  mysql_library_end();
 #ifdef HAVE_SMEM
   my_free(shared_memory_base_name);
 #endif
   free_defaults(argv_to_free);
-  mysql_library_end();
   my_free(opt_password);
   if (error)
     sf_leaking_memory= 1; /* dirty exit, some threads are still running */
@@ -566,7 +594,7 @@ static char *field_escape(char *to,const char *from,uint length)
     else 
     {
       if (*from == '\'' && !end_backslashes)
-	*to++= *from;      /* We want a dublicate of "'" for MySQL */
+	*to++= *from;      /* We want a duplicate of "'" for MySQL */
       end_backslashes=0;
     }
   }
@@ -614,7 +642,7 @@ error:
   pthread_cond_signal(&count_threshhold);
   pthread_mutex_unlock(&counter_mutex);
   mysql_thread_end();
-
+  pthread_exit(0);
   return 0;
 }
 
@@ -625,8 +653,7 @@ int main(int argc, char **argv)
   MY_INIT(argv[0]);
   sf_leaking_memory=1; /* don't report memory leaks on early exits */
 
-  if (load_defaults("my",load_default_groups,&argc,&argv))
-    return 1;
+  load_defaults_or_exit("my", load_default_groups, &argc, &argv);
   /* argv is changed in the program */
   argv_to_free= argv;
   if (get_options(&argc, &argv))
@@ -638,16 +665,32 @@ int main(int argc, char **argv)
 
   if (opt_use_threads && !lock_tables)
   {
-    pthread_t mainthread;            /* Thread descriptor */
-    pthread_attr_t attr;          /* Thread attributes */
+    char **save_argv;
+    uint worker_thread_count= 0, table_count= 0, i= 0;
+    pthread_t *worker_threads;       /* Thread descriptor */
+    pthread_attr_t attr;             /* Thread attributes */
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr,
-                                PTHREAD_CREATE_DETACHED);
+                                PTHREAD_CREATE_JOINABLE);
 
+    pthread_mutex_init(&init_mutex, NULL);
     pthread_mutex_init(&counter_mutex, NULL);
     pthread_cond_init(&count_threshhold, NULL);
 
-    for (counter= 0; *argv != NULL; argv++) /* Loop through tables */
+    /* Count the number of tables. This number denotes the total number
+       of threads spawn.
+    */
+    save_argv= argv;
+    for (table_count= 0; *argv != NULL; argv++)
+      table_count++;
+    argv= save_argv;
+
+    if (!(worker_threads= (pthread_t*) my_malloc(table_count *
+                                                 sizeof(*worker_threads),
+                                                 MYF(0))))
+      return -2;
+
+    for (; *argv != NULL; argv++) /* Loop through tables */
     {
       pthread_mutex_lock(&counter_mutex);
       while (counter == opt_use_threads)
@@ -661,15 +704,16 @@ int main(int argc, char **argv)
       counter++;
       pthread_mutex_unlock(&counter_mutex);
       /* now create the thread */
-      if (pthread_create(&mainthread, &attr, worker_thread, 
-                         (void *)*argv) != 0)
+      if (pthread_create(&worker_threads[worker_thread_count], &attr,
+                         worker_thread, (void *)*argv) != 0)
       {
         pthread_mutex_lock(&counter_mutex);
         counter--;
         pthread_mutex_unlock(&counter_mutex);
-        fprintf(stderr,"%s: Could not create thread\n",
-                my_progname);
+        fprintf(stderr,"%s: Could not create thread\n", my_progname);
+        continue;
       }
+      worker_thread_count++;
     }
 
     /*
@@ -684,9 +728,18 @@ int main(int argc, char **argv)
       pthread_cond_timedwait(&count_threshhold, &counter_mutex, &abstime);
     }
     pthread_mutex_unlock(&counter_mutex);
+    pthread_mutex_destroy(&init_mutex);
     pthread_mutex_destroy(&counter_mutex);
     pthread_cond_destroy(&count_threshhold);
     pthread_attr_destroy(&attr);
+
+    for(i= 0; i < worker_thread_count; i++)
+    {
+      if (pthread_join(worker_threads[i], NULL))
+        fprintf(stderr,"%s: Could not join worker thread.\n", my_progname);
+    }
+
+    my_free(worker_threads);
   }
   else
   {

@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA */
 
 /* Written by Sergei A. Golubchik, who has a shared copyright to this code */
 
@@ -35,7 +35,7 @@ static int FT_STOPWORD_cmp(void* cmp_arg __attribute__((unused)),
 {
   return ha_compare_text(ft_stopword_cs,
 			 (uchar *)w1->pos,w1->len,
-			 (uchar *)w2->pos,w2->len,0,0);
+			 (uchar *)w2->pos,w2->len,0);
 }
 
 static void FT_STOPWORD_free(FT_STOPWORD *w, TREE_FREE action,

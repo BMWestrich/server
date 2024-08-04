@@ -9,7 +9,7 @@ IF(ESSENTIALS)
  ENDIF()
 ELSE()
   SET(CPACK_COMPONENTS_USED 
-    "Server;Client;Development;SharedLibraries;Embedded;Documentation;IniFiles;Readme;Debuginfo;Common;connect-engine;ClientPlugins;gssapi-server;gssapi-client")
+    "Server;Client;Development;SharedLibraries;Documentation;Readme;Common;VCCRT;connect-engine;ClientPlugins;gssapi-server;gssapi-client;aws-key-management;rocksdb-engine;backup")
 ENDIF()
 
 SET( WIX_FEATURE_MySQLServer_EXTRA_FEATURES "DBInstance;SharedClientServerComponents")
@@ -35,6 +35,7 @@ SET(CPACK_COMPONENTS_ALL ${CPACK_ALL})
 SET(CPACK_COMPONENT_GROUP_ALWAYSINSTALL_HIDDEN 1)
 SET(CPACK_COMPONENT_README_GROUP "AlwaysInstall")
 SET(CPACK_COMPONENT_COMMON_GROUP "AlwaysInstall")
+SET(CPACK_COMPONENT_VCCRT_GROUP "AlwaysInstall")
 
 # Feature MySQL Server
 SET(CPACK_COMPONENT_GROUP_MYSQLSERVER_DISPLAY_NAME "MariaDB Server")
@@ -55,9 +56,14 @@ SET(CPACK_COMPONENT_GROUP_MYSQLSERVER_DESCRIPTION "Install server")
    "Debug/trace versions of executables and libraries" )
  #SET(CPACK_COMPONENT_DEBUGBINARIES_WIX_LEVEL 2)
  
+ # Subfeature "Backup"
+ SET(CPACK_COMPONENT_BACKUP_GROUP "MySQLServer")
+ SET(CPACK_COMPONENT_BACKUP_DISPLAY_NAME "Backup utilities")
+ SET(CPACK_COMPONENT_BACKUP_DESCRIPTION "Installs backup utilities(mariabackup and mbstream)")
+
  
  #Miscellaneous (hidden) components, part of server / or client programs
- FOREACH(comp connect-engine ClientPlugins gssapi-server gssapi-client)
+ FOREACH(comp connect-engine ClientPlugins gssapi-server gssapi-client aws-key-management rocksdb-engine)
    STRING(TOUPPER "${comp}" comp)
    SET(CPACK_COMPONENT_${comp}_GROUP "MySQLServer")
    SET(CPACK_COMPONENT_${comp}_HIDDEN 1)

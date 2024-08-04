@@ -1,6 +1,6 @@
 /* -*- c-basic-offset: 2 -*- */
 /*
-  Copyright(C) 2014-2015 Brazil
+  Copyright(C) 2014-2016 Brazil
 
   This library is free software; you can redistribute it and/or
   modify it under the terms of the GNU Lesser General Public
@@ -13,11 +13,10 @@
 
   You should have received a copy of the GNU Lesser General Public
   License along with this library; if not, write to the Free Software
-  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA
 */
 
-#ifndef GRN_MRB_BULK_H
-#define GRN_MRB_BULK_H
+#pragma once
 
 #include "../grn_ctx.h"
 #include "../grn_db.h"
@@ -40,5 +39,3 @@ grn_bool grn_mrb_bulk_cast(mrb_state *mrb,
 #ifdef __cplusplus
 }
 #endif
-
-#endif /* GRN_MRB_BULK_H */

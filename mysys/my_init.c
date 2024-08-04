@@ -13,7 +13,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #include "mysys_priv.h"
 #include "my_static.h"
@@ -99,7 +99,7 @@ my_bool my_init(void)
   if (my_progname)
     my_progname_short= my_progname + dirname_length(my_progname);
 
-  /* Initalize our mutex handling */
+  /* Initialize our mutex handling */
   my_mutex_init();
 
   if (my_thread_global_init())
@@ -200,7 +200,6 @@ Voluntary context switches %ld, Involuntary context switches %ld\n",
    _CrtSetReportMode( _CRT_ASSERT, _CRTDBG_MODE_FILE );
    _CrtSetReportFile( _CRT_ASSERT, _CRTDBG_FILE_STDERR );
    _CrtCheckMemory();
-   _CrtDumpMemoryLeaks();
 #endif
   }
 
@@ -227,7 +226,7 @@ Voluntary context switches %ld, Involuntary context switches %ld\n",
  
   /* At very last, delete mysys key, it is used everywhere including DBUG */
   pthread_key_delete(THR_KEY_mysys);
-  my_init_done=0;
+  my_init_done= my_thr_key_mysys_exists= 0;
 } /* my_end */
 
 #ifndef DBUG_OFF
@@ -254,8 +253,6 @@ void my_parameter_handler(const wchar_t * expression, const wchar_t * function,
                           const wchar_t * file, unsigned int line,
                           uintptr_t pReserved)
 {
-  DBUG_PRINT("my",("Expression: %s  function: %s  file: %s, line: %d",
-		   expression, function, file, line));
   __debugbreak();
 }
 
@@ -415,7 +412,7 @@ static my_bool win32_init_tcp_ip()
     WORD wVersionRequested = MAKEWORD( 2, 2 );
     WSADATA wsaData;
  	/* Be a good citizen: maybe another lib has already initialised
- 		sockets, so dont clobber them unless necessary */
+ 		sockets, so don't clobber them unless necessary */
     if (WSAStartup( wVersionRequested, &wsaData ))
     {
       /* Load failed, maybe because of previously loaded

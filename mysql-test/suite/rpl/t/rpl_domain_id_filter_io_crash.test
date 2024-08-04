@@ -2,7 +2,6 @@
 --source include/have_innodb.inc
 --source include/master-slave.inc
 
---echo # On master
 connection master;
 SET @@session.gtid_domain_id= 1;
 SELECT @@session.gtid_domain_id;
@@ -11,7 +10,6 @@ INSERT INTO t1 VALUES(1);
 SELECT * FROM t1;
 sync_slave_with_master;
 
---echo # On slave
 connection slave;
 
 call mtr.add_suppression("Slave I/O: Relay log write failure: could not queue event from master.*");
@@ -37,9 +35,9 @@ let $ignore_domain_ids_after= query_get_value(SHOW SLAVE STATUS, Replicate_Ignor
 --echo DO_DOMAIN_IDS (AFTER)     : $do_domain_ids_after
 --echo IGNORE_DOMAIN_IDS (AFTER) : $ignore_domain_ids_after
 
-SET @@global.debug_dbug="+d,kill_slave_io_before_commit";
+SET @saved_dbug = @@GLOBAL.debug_dbug;
+SET @@global.debug_dbug="d,kill_slave_io_before_commit";
 
---echo # On master
 connection master;
 
 START TRANSACTION;
@@ -49,12 +47,11 @@ COMMIT;
 save_master_pos;
 SELECT * FROM t1;
 
---echo # On slave
 connection slave;
 --let $slave_io_errno= 1595
 --source include/wait_for_slave_io_error.inc
 SELECT * FROM t1;
-SET @@global.debug_dbug="-d";
+SET @@global.debug_dbug=@saved_dbug;
 
 START SLAVE io_thread;
 --source include/wait_for_slave_io_to_start.inc
@@ -80,9 +77,8 @@ let $ignore_domain_ids_after= query_get_value(SHOW SLAVE STATUS, Replicate_Ignor
 --echo DO_DOMAIN_IDS (AFTER)     : $do_domain_ids_after
 --echo IGNORE_DOMAIN_IDS (AFTER) : $ignore_domain_ids_after
 
-SET @@global.debug_dbug="+d,kill_slave_io_before_commit";
+SET @@global.debug_dbug="d,kill_slave_io_before_commit";
 
---echo # On master
 connection master;
 
 START TRANSACTION;
@@ -93,12 +89,11 @@ COMMIT;
 save_master_pos;
 SELECT * FROM t1;
 
---echo # On slave
 connection slave;
 --let $slave_io_errno= 1595
 --source include/wait_for_slave_io_error.inc
 SELECT * FROM t1;
-SET @@global.debug_dbug="-d";
+SET @@global.debug_dbug=@saved_dbug;
 
 START SLAVE io_thread;
 --source include/wait_for_slave_io_to_start.inc
@@ -124,9 +119,8 @@ let $ignore_domain_ids_after= query_get_value(SHOW SLAVE STATUS, Replicate_Ignor
 --echo DO_DOMAIN_IDS (AFTER)     : $do_domain_ids_after
 --echo IGNORE_DOMAIN_IDS (AFTER) : $ignore_domain_ids_after
 
-SET @@global.debug_dbug="+d,kill_slave_io_before_commit";
+SET @@global.debug_dbug="d,kill_slave_io_before_commit";
 
---echo # On master
 connection master;
 
 START TRANSACTION;
@@ -149,13 +143,12 @@ COMMIT;
 save_master_pos;
 SELECT * FROM t1;
 
---echo # On slave
 connection slave;
 --let $slave_io_errno= 1595
 --source include/wait_for_slave_io_error.inc
 SELECT * FROM t1;
 
-SET @@global.debug_dbug="-d";
+SET @@global.debug_dbug=@saved_dbug;
 
 --source include/stop_slave.inc
 let $do_domain_ids_before= query_get_value(SHOW SLAVE STATUS, Replicate_Do_Domain_Ids, 1);
@@ -193,9 +186,8 @@ let $ignore_domain_ids_after= query_get_value(SHOW SLAVE STATUS, Replicate_Ignor
 --echo DO_DOMAIN_IDS (AFTER)     : $do_domain_ids_after
 --echo IGNORE_DOMAIN_IDS (AFTER) : $ignore_domain_ids_after
 
-SET @@global.debug_dbug="+d,kill_slave_io_before_commit";
+SET @@global.debug_dbug="d,kill_slave_io_before_commit";
 
---echo # On master
 connection master;
 
 SET @@session.gtid_domain_id= 1;
@@ -219,13 +211,12 @@ COMMIT;
 save_master_pos;
 SELECT * FROM t1;
 
---echo # On slave
 connection slave;
 --let $slave_io_errno= 1595
 --source include/wait_for_slave_io_error.inc
 SELECT * FROM t1;
 
-SET @@global.debug_dbug="-d";
+SET @@global.debug_dbug=@saved_dbug;
 
 --source include/stop_slave.inc
 let $do_domain_ids_before= query_get_value(SHOW SLAVE STATUS, Replicate_Do_Domain_Ids, 1);
@@ -263,9 +254,8 @@ let $ignore_domain_ids_after= query_get_value(SHOW SLAVE STATUS, Replicate_Ignor
 --echo DO_DOMAIN_IDS (AFTER)     : $do_domain_ids_after
 --echo IGNORE_DOMAIN_IDS (AFTER) : $ignore_domain_ids_after
 
-SET @@global.debug_dbug="+d,kill_slave_io_after_2_events";
+SET @@global.debug_dbug="d,kill_slave_io_after_2_events";
 
---echo # On master
 connection master;
 
 SET @@session.gtid_domain_id= 1;
@@ -289,13 +279,12 @@ COMMIT;
 save_master_pos;
 SELECT * FROM t1;
 
---echo # On slave
 connection slave;
 --let $slave_io_errno= 1595
 --source include/wait_for_slave_io_error.inc
 SELECT * FROM t1;
 
-SET @@global.debug_dbug="-d";
+SET @@global.debug_dbug=@saved_dbug;
 
 --source include/stop_slave.inc
 let $do_domain_ids_before= query_get_value(SHOW SLAVE STATUS, Replicate_Do_Domain_Ids, 1);
@@ -333,9 +322,8 @@ let $ignore_domain_ids_after= query_get_value(SHOW SLAVE STATUS, Replicate_Ignor
 --echo DO_DOMAIN_IDS (AFTER)     : $do_domain_ids_after
 --echo IGNORE_DOMAIN_IDS (AFTER) : $ignore_domain_ids_after
 
-SET @@global.debug_dbug="+d,kill_slave_io_after_2_events";
+SET @@global.debug_dbug="d,kill_slave_io_after_2_events";
 
---echo # On master
 connection master;
 
 SET @@session.gtid_domain_id= 1;
@@ -359,13 +347,12 @@ COMMIT;
 save_master_pos;
 SELECT * FROM t1;
 
---echo # On slave
 connection slave;
 --let $slave_io_errno= 1595
 --source include/wait_for_slave_io_error.inc
 SELECT * FROM t1;
 
-SET @@global.debug_dbug="-d";
+SET @@global.debug_dbug=@saved_dbug;
 
 --source include/stop_slave.inc
 let $do_domain_ids_before= query_get_value(SHOW SLAVE STATUS, Replicate_Do_Domain_Ids, 1);
@@ -385,15 +372,13 @@ let $ignore_domain_ids_after= query_get_value(SHOW SLAVE STATUS, Replicate_Ignor
 SELECT * FROM t1;
 
 # Cleanup
---echo # On master
 connection master;
 DROP TABLE t1;
 sync_slave_with_master;
 
---echo # On slave
 connection slave;
 --source include/stop_slave.inc
 CHANGE MASTER TO DO_DOMAIN_IDS=(), IGNORE_DOMAIN_IDS=();
 --source include/start_slave.inc
-
+SET @@GLOBAL.debug_dbug = @saved_dbug;
 --source include/rpl_end.inc

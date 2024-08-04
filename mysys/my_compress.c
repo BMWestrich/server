@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /* Written by Sinisa Milivojevic <sinisa@mysql.com> */
 
@@ -162,7 +162,7 @@ uchar *my_compress_alloc(const uchar *packet, size_t *len, size_t *complen)
 
    SYNOPSIS
      my_uncompress()
-     packet	Compressed data. This is is replaced with the orignal data.
+     packet	Compressed data. This is is replaced with the original data.
      len	Length of compressed data
      complen	Length of the packet buffer (must be enough for the original
 	        data)

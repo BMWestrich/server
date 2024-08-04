@@ -15,7 +15,7 @@
 # You should have received a copy of the GNU Library General Public
 # License along with this library; if not, write to the Free
 # Software Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
-# MA 02110-1301, USA
+# MA 02110-1335  USA
 
 ########################################################################
 
@@ -42,7 +42,7 @@ Usage: $0 [-h|-n] [configure-options]
                           Influences the debug flags. Old is default.
   --prefix=path           Build with prefix 'path'.
 
-Note: this script is intended for internal use by MySQL developers.
+Note: this script is intended for internal use by MariaDB developers.
 EOF
 }
 
@@ -120,9 +120,9 @@ path=`dirname $0`
 get_make_parallel_flag
 
 # SSL library to use.--with-ssl will select our bundled yaSSL
-# implementation of SSL. To use OpenSSL you will need to specify
-# the location of OpenSSL headers and libs on your system.
-# Ex --with-ssl=/usr
+# implementation of SSL. --with-ssl=yes will first try system library
+# then the boundled one  --with-ssl=system will use the system library.
+# We use bundled by default as this is guaranteed to work with Galera
 SSL_LIBRARY=--with-ssl
 
 if [ "x$warning_mode" = "xpedantic" ]; then
@@ -141,7 +141,7 @@ elif [ "x$warning_mode" = "xmaintainer" ]; then
   debug_extra_cflags="-g3"
 else
 # Both C and C++ warnings
-  warnings="-Wall -Wextra -Wunused -Wwrite-strings -Wno-uninitialized"
+  warnings="-Wall -Wextra -Wunused -Wwrite-strings -Wno-uninitialized -Wno-strict-aliasing"
 
 # For more warnings, uncomment the following line
 # warnings="$warnings -Wshadow"
@@ -160,7 +160,10 @@ fi
 # Override -DFORCE_INIT_OF_VARS from debug_cflags. It enables the macro
 # UNINIT_VAR(), which is only useful for silencing spurious warnings
 # of static analysis tools. We want UNINIT_VAR() to be a no-op in Valgrind.
-valgrind_flags="-DHAVE_valgrind -USAFEMALLOC"
+# TRASH_FREE_MEMORY is enabled so that we can find wrong memory accesses
+# even when running a test without valgrind
+#
+valgrind_flags="-DHAVE_valgrind -USAFEMALLOC -DTRASH_FREE_MEMORY"
 valgrind_flags="$valgrind_flags -UFORCE_INIT_OF_VARS -Wno-uninitialized"
 valgrind_flags="$valgrind_flags -DMYSQL_SERVER_SUFFIX=-valgrind-max"
 valgrind_configs="--with-valgrind"
@@ -170,7 +173,7 @@ debug_cflags="-DEXTRA_DEBUG -DSAFE_MUTEX -DSAFEMALLOC"
 error_inject="--with-error-inject "
 #
 # Base C++ flags for all builds
-base_cxxflags="-felide-constructors -fno-exceptions -fno-rtti"
+base_cxxflags="-felide-constructors -fexceptions"
 #
 # Flags for optimizing builds.
 # Be as fast as we can be without losing our ability to backtrace.
@@ -195,6 +198,8 @@ base_configs="$base_configs --with-extra-charsets=complex "
 base_configs="$base_configs --enable-thread-safe-client "
 base_configs="$base_configs --with-big-tables $maintainer_mode"
 base_configs="$base_configs --with-plugin-aria --with-aria-tmp-tables"
+# Following is to get tokudb to work
+base_configs="$base_configs --with-jemalloc=NO"
 
 if test -d "$path/../cmd-line-utils/readline"
 then
@@ -206,7 +211,7 @@ fi
 
 max_no_embedded_configs="$SSL_LIBRARY --with-plugins=max"
 max_no_qc_configs="$SSL_LIBRARY --with-plugins=max --without-query-cache"
-max_configs="$SSL_LIBRARY --with-plugins=max --with-embedded-server --with-libevent --without-plugin=plugin_file_key_management"
+max_configs="$SSL_LIBRARY --with-plugins=max --with-embedded-server --with-libevent --with-plugin-rocksdb=dynamic --with-plugin-test_sql_discovery=DYNAMIC --with-plugin-file_key_management=DYNAMIC"
 all_configs="$SSL_LIBRARY --with-plugins=max --with-embedded-server --with-innodb_plugin --with-libevent"
 
 #
@@ -250,6 +255,11 @@ if test `$CC -v 2>&1 | tail -1 | sed 's/ .*$//'` = 'gcc' ; then
   then
     debug_cflags="$debug_cflags -DFORCE_INIT_OF_VARS -Wuninitialized"
   fi
+  if (test '(' "$GCCV1" -gt '6' ')')
+  then
+    c_warnings="$c_warnings -Wimplicit-fallthrough=2"
+    cxx_warnings="$cxx_warnings -Wimplicit-fallthrough=2"
+  fi
 fi
 
 
@@ -290,10 +300,15 @@ gcov_compile_flags="-fprofile-arcs -ftest-coverage"
 gcov_compile_flags="$gcov_compile_flags -DDISABLE_TAO_ASM"
 gcov_compile_flags="$gcov_compile_flags -DMYSQL_SERVER_SUFFIX=-gcov -DHAVE_gcov"
 
+#
+# The following plugins doesn't work on 32 bit systems
+disable_64_bit_plugins="--without-plugin-tokudb --without-plugin-rocksdb"
+
+
 # GCC4 needs -fprofile-arcs -ftest-coverage on the linker command line (as well
 # as on the compiler command line), and this requires setting LDFLAGS for BDB.
 
-gcov_link_flags="-fprofile-arcs -ftest-coverage"
+gcov_link_flags="-fprofile-arcs -ftest-coverage -lgcov"
 
 gcov_configs="--with-gcov"
 
@@ -303,3 +318,6 @@ gprof_compile_flags="-O2 -pg -g"
 
 gprof_link_flags="--disable-shared $static_link"
 
+disable_gprof_plugins="--with-zlib-dir=bundled --without-plugin-oqgraph --without-plugin-mroonga"
+
+disable_asan_plugins="--without-plugin-rocksdb"

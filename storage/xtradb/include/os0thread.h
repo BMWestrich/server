@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 1995, 2011, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1995, 2016, Oracle and/or its affiliates. All Rights Reserved.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +12,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -131,15 +131,26 @@ os_thread_create_func(
 	os_thread_id_t*		thread_id);	/*!< out: id of the created
 						thread, or NULL */
 
+/** Waits until the specified thread completes and joins it.
+Its return value is ignored.
+@param[in,out]	thread	thread to join */
+UNIV_INTERN
+void
+os_thread_join(
+	os_thread_t	thread);
+
 /*****************************************************************//**
 Exits the current thread. */
 UNIV_INTERN
 void
 os_thread_exit(
 /*===========*/
-	void*	exit_value)	/*!< in: exit value; in Windows this void*
+	void*	exit_value,	/*!< in: exit value; in Windows this void*
 				is cast as a DWORD */
-	UNIV_COLD __attribute__((noreturn));
+	bool	detach = true)	/*!< in: if true, the thread will be detached
+				right before exiting. If false, another thread
+				is responsible for joining this thread. */
+	UNIV_COLD MY_ATTRIBUTE((noreturn));
 /*****************************************************************//**
 Returns the thread identifier of current thread.
 @return	current thread identifier */

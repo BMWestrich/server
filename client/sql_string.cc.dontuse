@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA
 */
 
 /* This file is originally from the mysql distribution. Coded by monty */
@@ -267,7 +267,7 @@ bool String::set_or_copy_aligned(const char *str,uint32 arg_length,
   return copy_aligned(str, arg_length, offset, cs);
 }
 
-	/* Copy with charset convertion */
+	/* Copy with charset conversion */
 
 bool String::copy(const char *str, uint32 arg_length,
 		  CHARSET_INFO *from_cs, CHARSET_INFO *to_cs, uint *errors)

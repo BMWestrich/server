@@ -11,7 +11,7 @@
    
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 
 /* Execute DO statement */
@@ -29,7 +29,7 @@ bool mysql_do(THD *thd, List<Item> &values)
   List_iterator<Item> li(values);
   Item *value;
   DBUG_ENTER("mysql_do");
-  if (setup_fields(thd, 0, values, MARK_COLUMNS_NONE, 0, 0))
+  if (setup_fields(thd, Ref_ptr_array(), values, MARK_COLUMNS_NONE, 0, NULL, 0))
     DBUG_RETURN(TRUE);
   while ((value = li++))
     (void) value->is_null();

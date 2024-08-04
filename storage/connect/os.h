@@ -1,3 +1,4 @@
+/* Copyright (C) MariaDB Corporation Ab */
 #ifndef _OS_H_INCLUDED
 #define _OS_H_INCLUDED
 
@@ -15,16 +16,19 @@ typedef off_t off64_t;
 #endif
 #endif
 
-#if defined(__WIN__)
+#if defined(_WIN32)
 typedef __int64 BIGINT;
-#else   // !__WIN__
+typedef _Null_terminated_ const char *PCSZ;
+#else   // !_WIN32
 typedef longlong  BIGINT;
 #define FILE_BEGIN    SEEK_SET  
 #define FILE_CURRENT  SEEK_CUR  
 #define FILE_END      SEEK_END  
-#endif  // !__WIN__
+typedef const char *PCSZ;
+#endif  // !_WIN32
 
-#if !defined(__WIN__)
+
+#if !defined(_WIN32)
 typedef const void *LPCVOID;
 typedef const char *LPCTSTR;
 typedef const char *LPCSTR;
@@ -42,7 +46,7 @@ typedef int INT;
   sqltypes.h (through sql.h or sqlext.h).
 */
 typedef unsigned long DWORD;
-#endif   /* !NODW */
+#endif   // !NODW
 #undef  HANDLE     
 typedef int   HANDLE;
 
@@ -61,6 +65,6 @@ typedef int   HANDLE;
 #define _MAX_EXT    FN_EXTLEN
 #define INVALID_HANDLE_VALUE  (-1)
 #define __stdcall
-#endif /* !__WIN__ */
+#endif /* !_WIN32 */
 
 #endif /* _OS_H_INCLUDED */

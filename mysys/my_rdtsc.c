@@ -11,7 +11,7 @@
 
   You should have received a copy of the GNU General Public License
   along with this program; if not, write to the Free Software
-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /*
   rdtsc3 -- multi-platform timer code
@@ -356,9 +356,29 @@ ulonglong my_timer_microseconds(void)
   milliseconds.
 */
 
+#if defined(HAVE_CLOCK_GETTIME)
+#if defined(CLOCK_MONOTONIC_FAST)
+/* FreeBSD */
+#define MY_CLOCK_ID CLOCK_MONOTONIC_FAST
+#elif defined(CLOCK_MONOTONIC_COARSE)
+/* Linux */
+#define MY_CLOCK_ID CLOCK_MONOTONIC_COARSE
+#elif defined(CLOCK_MONOTONIC)
+/* POSIX (includes OSX) */
+#define MY_CLOCK_ID CLOCK_MONOTONIC
+#elif defined(CLOCK_REALTIME)
+/* Solaris (which doesn't seem to have MONOTONIC) */
+#define MY_CLOCK_ID CLOCK_REALTIME
+#endif
+#endif
+
 ulonglong my_timer_milliseconds(void)
 {
-#if defined(HAVE_SYS_TIMEB_H) && defined(HAVE_FTIME)
+#if defined(MY_CLOCK_ID)
+  struct timespec tp;
+  clock_gettime(MY_CLOCK_ID, &tp);
+  return (ulonglong)tp.tv_sec * 1000 + (ulonglong)tp.tv_nsec / 1000000;
+#elif defined(HAVE_SYS_TIMEB_H) && defined(HAVE_FTIME)
   /* ftime() is obsolete but maybe the platform is old */
   struct timeb ft;
   ftime(&ft);
@@ -631,7 +651,9 @@ void my_timer_init(MY_TIMER_INFO *mti)
 
   /* milliseconds */
   mti->milliseconds.frequency= 1000; /* initial assumption */
-#if defined(HAVE_SYS_TIMEB_H) && defined(HAVE_FTIME)
+#ifdef MY_CLOCK_ID
+  mti->milliseconds.routine= MY_TIMER_ROUTINE_CLOCK_GETTIME;
+#elif defined(HAVE_SYS_TIMEB_H) && defined(HAVE_FTIME)
   mti->milliseconds.routine= MY_TIMER_ROUTINE_FTIME;
 #elif defined(_WIN32)
   mti->milliseconds.routine= MY_TIMER_ROUTINE_GETSYSTEMTIMEASFILETIME;
@@ -812,7 +834,11 @@ void my_timer_init(MY_TIMER_INFO *mti)
     time1= my_timer_cycles();
     time2= my_timer_ticks();
     time3= time2; /* Avoids a Microsoft/IBM compiler warning */
+#if defined(HAVE_SYS_TIMES_H) && defined(HAVE_TIMES)
+    for (i= 0; i < 1000; ++i)
+#else
     for (i= 0; i < MY_TIMER_ITERATIONS * 1000; ++i)
+#endif
     {
       time3= my_timer_ticks();
       if (time3 - time2 > 10) break;

@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #include <my_global.h>
 #include "sql_priv.h"
@@ -267,7 +267,7 @@ int Binlog_storage_delegate::after_flush(THD *thd,
     thd->semisync_info= log_info;
   }
 
-  strcpy(log_info->log_file, log_file+dirname_length(log_file));
+  strmake_buf(log_info->log_file, log_file+dirname_length(log_file));
   log_info->log_pos = log_pos;
   
   FOREACH_OBSERVER(ret, after_flush, false,

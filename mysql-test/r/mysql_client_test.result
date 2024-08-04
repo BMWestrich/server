@@ -1,3 +1,9 @@
+SET @save_character_set_client=    @@global.character_set_client;
+SET @save_collation_connection=    @@global.collation_connection;
+SET @@global.character_set_server= @@character_set_server;
+SET @@global.collation_server=     @@collation_server;
+SET @@global.character_set_client= @@character_set_server;
+SET @@global.collation_connection= @@collation_server;
 SET @old_general_log= @@global.general_log;
 SET @old_slow_query_log= @@global.slow_query_log;
 call mtr.add_suppression(" Error reading file './client_test_db/test_frm_bug.frm'");
@@ -120,6 +126,15 @@ Data:
 EOF
 mysql_stmt_next_result(): 0; field_count: 0
 # ------------------------------------
+# cat MYSQL_TMP_DIR/test_mdev26145.out.log
+# ------------------------------------
+Catalog	Database	Table	Table_alias	Column	Column_alias	Type	Length	Max length	Is_null	Flags	Decimals	Charsetnr
+def				MAX(a)	MAX(a)	3	11	0	Y	32768	0	63
+# ------------------------------------
 
 SET @@global.general_log= @old_general_log;
 SET @@global.slow_query_log= @old_slow_query_log;
+SET @@global.character_set_server= @save_character_set_server;
+SET @@global.collation_server= @save_collation_server;
+SET @@global.character_set_client= @save_character_set_client;
+SET @@global.collation_connection= @save_collation_connection;

@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335  USA */
 
 #ifndef SQL_SHOW_H
 #define SQL_SHOW_H
@@ -102,7 +102,7 @@ bool mysqld_show_authors(THD *thd);
 bool mysqld_show_contributors(THD *thd);
 bool mysqld_show_privileges(THD *thd);
 char *make_backup_log_name(char *buff, const char *name, const char* log_ext);
-void calc_sum_of_all_status(STATUS_VAR *to);
+uint calc_sum_of_all_status(STATUS_VAR *to);
 void append_definer(THD *thd, String *buffer, const LEX_STRING *definer_user,
                     const LEX_STRING *definer_host);
 int add_status_vars(SHOW_VAR *list);
@@ -130,6 +130,12 @@ bool get_schema_tables_result(JOIN *join,
                               enum enum_schema_table_state executed_place);
 enum enum_schema_tables get_schema_table_idx(ST_SCHEMA_TABLE *schema_table);
 TABLE *create_schema_table(THD *thd, TABLE_LIST *table_list);
+
+const char* get_one_variable(THD *thd, const SHOW_VAR *variable,
+                             enum_var_type value_type, SHOW_TYPE show_type,
+                             system_status_var *status_var,
+                             const CHARSET_INFO **charset, char *buff,
+                             size_t *length);
 
 /* These functions were under INNODB_COMPATIBILITY_HOOKS */
 int get_quote_char_for_identifier(THD *thd, const char *name, uint length);

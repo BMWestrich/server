@@ -1,4 +1,4 @@
-/* Copyright (C) Olivier Bertrand 2004 - 2015
+/* Copyright (C) MariaDB Corporation Ab
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -11,7 +11,7 @@
 
   You should have received a copy of the GNU General Public License
   along with this program; if not, write to the Free Software
-  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
+	Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 /**
   @file user_connect.cc
@@ -24,11 +24,11 @@
   that is a connection with its personnal memory allocation.
 
   @note
-
+	Author Olivier Bertrand
 */
 
 /****************************************************************************/
-/*  Author: Olivier Bertrand  --  bertrandop@gmail.com  --  2004-2015       */
+/*  Author: Olivier Bertrand  --  bertrandop@gmail.com  --  2004-2020       */
 /****************************************************************************/
 #ifdef USE_PRAGMA_IMPLEMENTATION
 #pragma implementation        // gcc: Class implementation
@@ -36,6 +36,7 @@
 
 #define DONT_DEFINE_VOID
 #define MYSQL_SERVER
+#include <my_global.h>
 #include "sql_class.h"
 #undef  OFFSET
 
@@ -47,6 +48,8 @@
 #include "user_connect.h"
 #include "mycat.h"
 
+extern pthread_mutex_t usrmut;
+
 /****************************************************************************/
 /*  Initialize the user_connect static member.                              */
 /****************************************************************************/
@@ -55,8 +58,8 @@ PCONNECT user_connect::to_users= NULL;
 /****************************************************************************/
 /*  Get the work_size SESSION variable value .                              */
 /****************************************************************************/
-uint GetWorkSize(void);
-void SetWorkSize(uint);
+size_t GetWorkSize(void);
+void  SetWorkSize(size_t);
 
 /* -------------------------- class user_connect -------------------------- */
 
@@ -94,24 +97,26 @@ user_connect::~user_connect()
 bool user_connect::user_init()
 {
   // Initialize Plug-like environment
-  uint      worksize= GetWorkSize();
+  size_t    worksize= GetWorkSize();
   PACTIVITY ap= NULL;
   PDBUSER   dup= NULL;
 
   // Areasize= 64M because of VEC tables. Should be parameterisable
 //g= PlugInit(NULL, 67108864);
 //g= PlugInit(NULL, 134217728);  // 128M was because of old embedded tests
-  g= PlugInit(NULL, worksize);
+  g= PlugInit(NULL, (size_t)worksize);
 
   // Check whether the initialization is complete
-  if (!g || !g->Sarea || PlugSubSet(g, g->Sarea, g->Sarea_Size)
+  if (!g || !g->Sarea || PlugSubSet(g->Sarea, g->Sarea_Size)
          || !(dup= PlgMakeUser(g))) {
     if (g)
       printf("%s\n", g->Message);
 
-    int rc= PlugExit(g);
-    g= NULL;
-    free(dup);
+    g= PlugExit(g);
+
+		if (dup)
+	    free(dup);
+
     return true;
     } // endif g->
 
@@ -122,14 +127,18 @@ bool user_connect::user_init()
   strcpy(ap->Ap_Name, "CONNECT");
   g->Activityp= ap;
   g->Activityp->Aptr= dup;
+
+	pthread_mutex_lock(&usrmut);
   next= to_users;
   to_users= this;
 
   if (next)
     next->previous= this;
 
-  last_query_id= thdp->query_id;
-  count= 1;
+	count = 1;
+	pthread_mutex_unlock(&usrmut);
+
+	last_query_id= thdp->query_id;
   return false;
 } // end of user_init
 
@@ -144,34 +153,35 @@ void user_connect::SetHandler(ha_connect *hc)
 /****************************************************************************/
 /*  Check whether we begin a new query and if so cleanup the previous one.  */
 /****************************************************************************/
-bool user_connect::CheckCleanup(void)
+bool user_connect::CheckCleanup(bool force)
 {
-  if (thdp->query_id > last_query_id) {
-    uint worksize= GetWorkSize();
+  if (thdp->query_id > last_query_id || force) {
+		size_t worksize = GetWorkSize();
 
     PlugCleanup(g, true);
 
-    if (g->Sarea_Size != worksize) {
-      if (g->Sarea)
-        free(g->Sarea);
+    if (worksize != g->Sarea_Size) {
+			FreeSarea(g);
+			g->Saved_Size = g->Sarea_Size;
 
-      // Check whether the work area size was changed
-      if (!(g->Sarea = PlugAllocMem(g, worksize))) {
-        g->Sarea = PlugAllocMem(g, g->Sarea_Size);
+      // Check whether the work area could be allocated
+      if (AllocSarea(g, worksize)) {
+				AllocSarea(g, g->Saved_Size);
         SetWorkSize(g->Sarea_Size);       // Was too big
-      } else
-        g->Sarea_Size = worksize;         // Ok
+      } // endif sarea
 
-      } // endif worksize
+    } // endif worksize
 
-    PlugSubSet(g, g->Sarea, g->Sarea_Size);
+    PlugSubSet(g->Sarea, g->Sarea_Size);
     g->Xchk = NULL;
-    g->Createas = 0;
+    g->Createas = false;
     g->Alchecked = 0;
     g->Mrr = 0;
-    last_query_id= thdp->query_id;
+		g->More = 0;
+		g->Saved_Size = 0;
+		last_query_id= thdp->query_id;
 
-    if (trace)
+    if (trace(65) && !force)
       printf("=====> Begin new query %llu\n", last_query_id);
 
     return true;

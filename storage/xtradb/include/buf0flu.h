@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 1995, 2013, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1995, 2016, Oracle and/or its affiliates. All Rights Reserved.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +12,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -34,7 +34,7 @@ Created 11/5/1995 Heikki Tuuri
 #include "buf0types.h"
 
 /** Flag indicating if the page_cleaner is in active state. */
-extern ibool buf_page_cleaner_is_active;
+extern bool buf_page_cleaner_is_active;
 
 /** Flag indicating if the lru_manager is in active state. */
 extern bool buf_lru_manager_is_active;
@@ -96,7 +96,7 @@ buf_flush_page_try(
 /*===============*/
 	buf_pool_t*	buf_pool,	/*!< in/out: buffer pool instance */
 	buf_block_t*	block)		/*!< in/out: buffer control block */
-	__attribute__((nonnull, warn_unused_result));
+	MY_ATTRIBUTE((nonnull, warn_unused_result));
 # endif /* UNIV_DEBUG || UNIV_IBUF_DEBUG */
 /*******************************************************************//**
 This utility flushes dirty blocks from the end of the flush list of
@@ -139,17 +139,6 @@ UNIV_INTERN
 void
 buf_flush_wait_batch_end(
 /*=====================*/
-	buf_pool_t*	buf_pool,	/*!< in: buffer pool instance */
-	buf_flush_t	type);		/*!< in: BUF_FLUSH_LRU
-					or BUF_FLUSH_LIST */
-/******************************************************************//**
-Waits until a flush batch of the given type ends. This is called by
-a thread that only wants to wait for a flush to end but doesn't do
-any flushing itself. */
-UNIV_INTERN
-void
-buf_flush_wait_batch_end_wait_only(
-/*===============================*/
 	buf_pool_t*	buf_pool,	/*!< in: buffer pool instance */
 	buf_flush_t	type);		/*!< in: BUF_FLUSH_LRU
 					or BUF_FLUSH_LIST */
@@ -277,7 +266,7 @@ buf_flush_ready_for_flush(
 	buf_page_t*	bpage,	/*!< in: buffer control block, must be
 				buf_page_in_file(bpage) */
 	buf_flush_t	flush_type)/*!< in: type of flush */
-	__attribute__((warn_unused_result));
+	MY_ATTRIBUTE((warn_unused_result));
 
 #ifdef UNIV_DEBUG
 /******************************************************************//**
@@ -310,7 +299,13 @@ UNIV_INLINE
 bool
 buf_flush_flush_list_in_progress(void)
 /*==================================*/
-	__attribute__((warn_unused_result));
+	MY_ATTRIBUTE((warn_unused_result));
+
+/** If LRU list of a buf_pool is less than this size then LRU eviction
+should not happen. This is because when we do LRU flushing we also put
+the blocks on free list. If LRU list is very small then we can end up
+in thrashing. */
+#define BUF_LRU_MIN_LEN		256
 
 /******************************************************************//**
 Start a buffer flush batch for LRU or flush list */

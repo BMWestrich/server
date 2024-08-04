@@ -11,7 +11,7 @@
 
 #include "block.h"
 #include "catalog.h"
-#include "my_sys.h"
+//#include "my_sys.h"
 #include "mycat.h"
 
 typedef class  INDEXDEF *PIXDEF;
@@ -42,13 +42,13 @@ class DllExport RELDEF : public BLOCK {      // Relation definition block
 
   // Methods
   PTOS    GetTopt(void);
-  bool    GetBoolCatInfo(PSZ what, bool bdef);
-  bool    SetIntCatInfo(PSZ what, int ival);
+  bool    GetBoolCatInfo(PCSZ what, bool bdef);
+  bool    SetIntCatInfo(PCSZ what, int ival);
   bool    Partitioned(void);
-  int     GetIntCatInfo(PSZ what, int idef);
-  int     GetSizeCatInfo(PSZ what, PSZ sdef);
-  int     GetCharCatInfo(PSZ what, PSZ sdef, char *buf, int size);
-  char   *GetStringCatInfo(PGLOBAL g, PSZ what, PSZ sdef);
+  int     GetIntCatInfo(PCSZ what, int idef);
+  int     GetSizeCatInfo(PCSZ what, PCSZ sdef);
+  int     GetCharCatInfo(PCSZ what, PCSZ sdef, char *buf, int size);
+  char   *GetStringCatInfo(PGLOBAL g, PCSZ what, PCSZ sdef);
   virtual int  Indexable(void) {return 0;}
   virtual bool Define(PGLOBAL g, PCATLG cat, 
 		                  LPCSTR name, LPCSTR schema, LPCSTR am) = 0;
@@ -64,15 +64,16 @@ class DllExport RELDEF : public BLOCK {      // Relation definition block
   }; // end of RELDEF
 
 /***********************************************************************/
-/*  These classes correspond to the data base description contained in */
-/*  a .XDB file the A.M. DOS, FIX, CSV, MAP, BIN, VCT, PLG, ODBC, DOM. */
+/*  This class corresponds to the data base description for tables     */
+/*  of type DOS, FIX, CSV, DBF, BIN, VCT, JSON, XML...                 */
 /***********************************************************************/
 class DllExport TABDEF : public RELDEF {   /* Logical table descriptor */
   friend class CATALOG;
   friend class PLUGCAT;
   friend class MYCAT;
-  friend class TDBASE;
- public:
+  friend class TDB;
+	friend class TDBEXT;
+public:
   // Constructor
   TABDEF(void);                  // Constructor
 
@@ -83,16 +84,19 @@ class DllExport TABDEF : public RELDEF {   /* Logical table descriptor */
   void    SetNext(PTABDEF tdfp) {Next = tdfp;}
   int     GetMultiple(void) {return Multiple;}
   int     GetPseudo(void) {return Pseudo;}
-  PSZ     GetPath(void);
+	RECFM   GetRecfm(void) {return Recfm;}
+	PCSZ    GetPath(void);
 //PSZ     GetPath(void)
 //          {return (Database) ? (PSZ)Database : Cat->GetDataPath();}
-  bool    SepIndex(void) {return GetBoolCatInfo("SepIndex", false);}
+	RECFM   GetTableFormat(const char* type);
+	bool    SepIndex(void) {return GetBoolCatInfo("SepIndex", false);}
   bool    IsReadOnly(void) {return Read_Only;}
   virtual AMT    GetDefType(void) {return TYPE_AM_TAB;}
   virtual PIXDEF GetIndx(void) {return NULL;}
   virtual void   SetIndx(PIXDEF) {}
   virtual bool   IsHuge(void) {return false;}
   const CHARSET_INFO *data_charset() {return m_data_charset;}
+	const   char  *GetCsName(void) {return csname;}
 
   // Methods
           int  GetColCatInfo(PGLOBAL g);
@@ -104,19 +108,20 @@ class DllExport TABDEF : public RELDEF {   /* Logical table descriptor */
 
  protected:
   // Members
-  PSZ     Schema;               /* Table schema (for ODBC)             */
-  PSZ     Desc;                 /* Table description                   */
-  uint    Catfunc;              /* Catalog function ID                 */
+  PCSZ    Schema;               /* Table schema (for ODBC)             */
+  PCSZ    Desc;                 /* Table description                   */
+	RECFM   Recfm;                /* File or table format                */
+	uint    Catfunc;              /* Catalog function ID                 */
   int     Card;                 /* (max) number of rows in table       */
   int     Elemt;                /* Number of rows in blocks or rowset  */
   int     Sort;                 /* Table already sorted ???            */
   int     Multiple;             /* 0: No 1: DIR 2: Section 3: filelist */
   int     Degree;               /* Number of columns in the table      */
-  int     Pseudo;               /* Bit: 1 ROWID Ok, 2 FILEID Ok        */
+  int     Pseudo;               /* Bit: 1 ROWID }Ok, 2 FILEID Ok       */
   bool    Read_Only;            /* true for read only tables           */
   const CHARSET_INFO *m_data_charset;
   const char *csname;           /* Table charset name                  */
-  }; // end of TABDEF
+}; // end of TABDEF
 
 /***********************************************************************/
 /*  Externally defined OEM tables.                                     */
@@ -141,11 +146,11 @@ class DllExport OEMDEF : public TABDEF {                  /* OEM table */
   PTABDEF GetXdef(PGLOBAL g);
 
   // Members
-#if defined(__WIN__)
+#if defined(_WIN32)
   HANDLE  Hdll;               /* Handle to the external DLL            */
-#else   // !__WIN__
+#else   // !_WIN32
   void   *Hdll;               /* Handle for the loaded shared library  */
-#endif  // !__WIN__
+#endif  // !_WIN32
   PTABDEF Pxdef;              /* Pointer to the external TABDEF class  */
   char   *Module;             /* Path/Name of the DLL implenting it    */
   char   *Subtype;            /* The name of the OEM table sub type    */
@@ -190,11 +195,12 @@ class DllExport COLCRT : public BLOCK { /* Column description block             
 /***********************************************************************/
 /*  Column definition block.                                           */
 /***********************************************************************/
-class DllExport COLDEF : public COLCRT { /* Column description block             */
+class DllExport COLDEF : public COLCRT { /* Column description block   */
   friend class TABDEF;
   friend class COLBLK;
   friend class DBFFAM;
-  friend class TDBASE;
+	friend class TDB;
+	friend class TDBASE;
 	friend class TDBDOS;
 public:
   COLDEF(void);                // Constructor

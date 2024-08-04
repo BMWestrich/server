@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #include <my_global.h>
 #include "sql_priv.h"
@@ -61,6 +61,7 @@ sp_rcontext *sp_rcontext::create(THD *thd,
                                  const sp_pcontext *root_parsing_ctx,
                                  Field *return_value_fld)
 {
+  SELECT_LEX *save_current_select;
   sp_rcontext *ctx= new (thd->mem_root) sp_rcontext(root_parsing_ctx,
                                                     return_value_fld,
                                                     thd->in_sub_stmt);
@@ -68,14 +69,19 @@ sp_rcontext *sp_rcontext::create(THD *thd,
   if (!ctx)
     return NULL;
 
+  /* Reset current_select as it's checked in Item_ident::Item_ident */
+  save_current_select= thd->lex->current_select;
+  thd->lex->current_select= 0;
+
   if (ctx->alloc_arrays(thd) ||
       ctx->init_var_table(thd) ||
       ctx->init_var_items(thd))
   {
     delete ctx;
-    return NULL;
+    ctx= 0;
   }
 
+  thd->lex->current_select= save_current_select;
   return ctx;
 }
 
@@ -331,8 +337,7 @@ bool sp_rcontext::handle_sql_condition(THD *thd,
 
   /* Reset error state. */
   thd->clear_error();
-  thd->killed= NOT_KILLED; // Some errors set thd->killed
-                           // (e.g. "bad data").
+  thd->reset_killed();      // Some errors set thd->killed, (e.g. "bad data").
 
   /* Add a frame to handler-call-stack. */
   Sql_condition_info *cond_info=
@@ -504,9 +509,15 @@ int sp_cursor::fetch(THD *thd, List<sp_variable> *vars)
 
   result.set_spvar_list(vars);
 
+  DBUG_ASSERT(!thd->is_error());
+
   /* Attempt to fetch one row */
   if (server_side_cursor->is_open())
+  {
     server_side_cursor->fetch(1);
+    if (thd->is_error())
+      return -1; // e.g. data type conversion failed
+  }
 
   /*
     If the cursor was pointing after the last row, the fetch will

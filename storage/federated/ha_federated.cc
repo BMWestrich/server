@@ -1,4 +1,5 @@
 /* Copyright (c) 2004, 2015, Oracle and/or its affiliates.
+   Copyright (c) 2017, MariaDB Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -11,7 +12,7 @@
 
   You should have received a copy of the GNU General Public License
   along with this program; if not, write to the Free Software
-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /*
 
@@ -407,7 +408,6 @@ static const int bulk_padding= 64;              // bytes "overhead" in packet
 
 /* Variables used when chopping off trailing characters */
 static const uint sizeof_trailing_comma= sizeof(", ") - 1;
-static const uint sizeof_trailing_closeparen= sizeof(") ") - 1;
 static const uint sizeof_trailing_and= sizeof(" AND ") - 1;
 static const uint sizeof_trailing_where= sizeof(" WHERE ") - 1;
 
@@ -561,8 +561,7 @@ static bool append_ident(String *string, const char *name, size_t length,
     for (name_end= name+length; name < name_end; name+= clen)
     {
       uchar c= *(uchar *) name;
-      if (!(clen= my_mbcharlen(system_charset_info, c)))
-        clen= 1;
+      clen= my_charlen_fix(system_charset_info, name, name_end);
       if (clen == 1 && c == (uchar) quote_char &&
           (result= string->append(&quote_char, 1, system_charset_info)))
         goto err;
@@ -615,8 +614,8 @@ int get_connection(MEM_ROOT *mem_root, FEDERATED_SHARE *share)
     error_num=1;
     goto error;
   }
-  DBUG_PRINT("info", ("get_server_by_name returned server at %lx",
-                      (long unsigned int) server));
+  DBUG_PRINT("info", ("get_server_by_name returned server at %p",
+                      server));
 
   /*
     Most of these should never be empty strings, error handling will
@@ -717,15 +716,15 @@ static int parse_url(MEM_ROOT *mem_root, FEDERATED_SHARE *share, TABLE *table,
 
   share->port= 0;
   share->socket= 0;
-  DBUG_PRINT("info", ("share at %lx", (long unsigned int) share));
+  DBUG_PRINT("info", ("share at %p", share));
   DBUG_PRINT("info", ("Length: %u", (uint) table->s->connect_string.length));
   DBUG_PRINT("info", ("String: '%.*s'", (int) table->s->connect_string.length,
                       table->s->connect_string.str));
   share->connection_string= strmake_root(mem_root, table->s->connect_string.str,
                                        table->s->connect_string.length);
 
-  DBUG_PRINT("info",("parse_url alloced share->connection_string %lx",
-                     (long unsigned int) share->connection_string));
+  DBUG_PRINT("info",("parse_url alloced share->connection_string %p",
+                     share->connection_string));
 
   DBUG_PRINT("info",("share->connection_string %s",share->connection_string));
   /*
@@ -738,9 +737,9 @@ static int parse_url(MEM_ROOT *mem_root, FEDERATED_SHARE *share, TABLE *table,
 
     DBUG_PRINT("info",
                ("share->connection_string %s internal format \
-                share->connection_string %lx",
+                share->connection_string %p",
                 share->connection_string,
-                (long unsigned int) share->connection_string));
+                share->connection_string));
 
     /* ok, so we do a little parsing, but not completely! */
     share->parsed= FALSE;
@@ -794,8 +793,8 @@ static int parse_url(MEM_ROOT *mem_root, FEDERATED_SHARE *share, TABLE *table,
     // Add a null for later termination of table name
     share->connection_string[table->s->connect_string.length]= 0;
     share->scheme= share->connection_string;
-    DBUG_PRINT("info",("parse_url alloced share->scheme %lx",
-                       (long unsigned int) share->scheme));
+    DBUG_PRINT("info",("parse_url alloced share->scheme %p",
+                       share->scheme));
 
     /*
       remove addition of null terminator and store length
@@ -937,7 +936,7 @@ uint ha_federated::convert_row_to_internal_format(uchar *record,
 {
   ulong *lengths;
   Field **field;
-  my_bitmap_map *old_map= dbug_tmp_use_all_columns(table, table->write_set);
+  MY_BITMAP *old_map= dbug_tmp_use_all_columns(table, &table->write_set);
   DBUG_ENTER("ha_federated::convert_row_to_internal_format");
 
   lengths= mysql_fetch_lengths(result);
@@ -966,7 +965,7 @@ uint ha_federated::convert_row_to_internal_format(uchar *record,
     }
     (*field)->move_field_offset(-old_ptr);
   }
-  dbug_tmp_restore_column_map(table->write_set, old_map);
+  dbug_tmp_restore_column_map(&table->write_set, old_map);
   DBUG_RETURN(0);
 }
 
@@ -1294,14 +1293,13 @@ bool ha_federated::create_where_from_key(String *to,
   char tmpbuff[FEDERATED_QUERY_BUFFER_SIZE];
   String tmp(tmpbuff, sizeof(tmpbuff), system_charset_info);
   const key_range *ranges[2]= { start_key, end_key };
-  my_bitmap_map *old_map;
   DBUG_ENTER("ha_federated::create_where_from_key");
 
   tmp.length(0); 
   if (start_key == NULL && end_key == NULL)
     DBUG_RETURN(1);
 
-  old_map= dbug_tmp_use_all_columns(table, table->write_set);
+  MY_BITMAP *old_map= dbug_tmp_use_all_columns(table, &table->write_set);
   for (uint i= 0; i <= 1; i++)
   {
     bool needs_quotes;
@@ -1422,6 +1420,7 @@ bool ha_federated::create_where_from_key(String *to,
           }
           break;
         }
+        /* fall through */
       case HA_READ_KEY_OR_NEXT:
         DBUG_PRINT("info", ("federated HA_READ_KEY_OR_NEXT %d", i));
         if (emit_key_part_name(&tmp, key_part) ||
@@ -1441,6 +1440,7 @@ bool ha_federated::create_where_from_key(String *to,
             goto err;
           break;
         }
+        /* fall through */
       case HA_READ_KEY_OR_PREV:
         DBUG_PRINT("info", ("federated HA_READ_KEY_OR_PREV %d", i));
         if (emit_key_part_name(&tmp, key_part) ||
@@ -1476,7 +1476,7 @@ prepare_for_next_key_part:
                   tmp.c_ptr_quick()));
     }
   }
-  dbug_tmp_restore_column_map(table->write_set, old_map);
+  dbug_tmp_restore_column_map(&table->write_set, old_map);
 
   if (both_not_null)
     if (tmp.append(STRING_WITH_LEN(") ")))
@@ -1491,7 +1491,7 @@ prepare_for_next_key_part:
   DBUG_RETURN(0);
 
 err:
-  dbug_tmp_restore_column_map(table->write_set, old_map);
+  dbug_tmp_restore_column_map(&table->write_set, old_map);
   DBUG_RETURN(1);
 }
 
@@ -1655,7 +1655,7 @@ public:
 
 public:
   bool handle_condition(THD *thd, uint sql_errno, const char* sqlstate,
-                        Sql_condition::enum_warning_level level,
+                        Sql_condition::enum_warning_level *level,
                         const char* msg, Sql_condition ** cond_hdl)
   {
     return sql_errno >= ER_ABORTING_CONNECTION &&
@@ -1840,7 +1840,7 @@ int ha_federated::write_row(uchar *buf)
   String insert_field_value_string(insert_field_value_buffer,
                                    sizeof(insert_field_value_buffer),
                                    &my_charset_bin);
-  my_bitmap_map *old_map= dbug_tmp_use_all_columns(table, table->read_set);
+  MY_BITMAP *old_map= dbug_tmp_use_all_columns(table, &table->read_set);
   DBUG_ENTER("ha_federated::write_row");
 
   values_string.length(0);
@@ -1894,7 +1894,7 @@ int ha_federated::write_row(uchar *buf)
       values_string.append(STRING_WITH_LEN(", "));
     }
   }
-  dbug_tmp_restore_column_map(table->read_set, old_map);
+  dbug_tmp_restore_column_map(&table->read_set, old_map);
 
   /*
     if there were no fields, we don't want to add a closing paren
@@ -2016,7 +2016,7 @@ void ha_federated::start_bulk_insert(ha_rows rows, uint flags)
   
   @return Operation status
   @retval       0       No error
-  @retval       != 0    Error occured at remote server. Also sets my_errno.
+  @retval       != 0    Error occurred at remote server. Also sets my_errno.
 */
 
 int ha_federated::end_bulk_insert()
@@ -2202,7 +2202,7 @@ int ha_federated::update_row(const uchar *old_data, uchar *new_data)
       else
       {
         /* otherwise = */
-        my_bitmap_map *old_map= tmp_use_all_columns(table, table->read_set);
+        MY_BITMAP *old_map= tmp_use_all_columns(table, &table->read_set);
         bool needs_quote= (*field)->str_needs_quotes();
 	(*field)->val_str(&field_value);
         if (needs_quote)
@@ -2211,7 +2211,7 @@ int ha_federated::update_row(const uchar *old_data, uchar *new_data)
         if (needs_quote)
           update_string.append(value_quote_char);
         field_value.length(0);
-        tmp_restore_column_map(table->read_set, old_map);
+        tmp_restore_column_map(&table->read_set, old_map);
       }
       update_string.append(STRING_WITH_LEN(", "));
     }
@@ -2945,6 +2945,7 @@ int ha_federated::extra(ha_extra_function operation)
     break;
   case HA_EXTRA_PREPARE_FOR_DROP:
     table_will_be_deleted = TRUE;
+    break;
   default:
     /* do nothing */
     DBUG_PRINT("info",("unhandled operation: %d", (uint) operation));
@@ -2977,6 +2978,9 @@ int ha_federated::reset(void)
     mysql_free_result(result);
   }
   reset_dynamic(&results);
+
+  if (mysql)
+    mysql->net.thd= NULL;
 
   return 0;
 }
@@ -3198,11 +3202,13 @@ int ha_federated::real_query(const char *query, size_t length)
   int rc= 0;
   DBUG_ENTER("ha_federated::real_query");
 
+  if (!query || !length)
+    goto end;
+
   if (!mysql && (rc= real_connect()))
     goto end;
 
-  if (!query || !length)
-    goto end;
+  mysql->net.thd= table->in_use;
 
   rc= mysql_real_query(mysql, query, (uint) length);
   
@@ -3287,66 +3293,6 @@ int ha_federated::external_lock(THD *thd, int lock_type)
   int error= 0;
   DBUG_ENTER("ha_federated::external_lock");
 
-  /*
-    Support for transactions disabled until WL#2952 fixes it.
-  */
-#ifdef XXX_SUPERCEDED_BY_WL2952
-  if (lock_type != F_UNLCK)
-  {
-    ha_federated *trx= (ha_federated *)thd_get_ha_data(thd, ht);
-
-    DBUG_PRINT("info",("federated not lock F_UNLCK"));
-    if (!(thd->options & (OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN))) 
-    {
-      DBUG_PRINT("info",("federated autocommit"));
-      /* 
-        This means we are doing an autocommit
-      */
-      error= connection_autocommit(TRUE);
-      if (error)
-      {
-        DBUG_PRINT("info", ("error setting autocommit TRUE: %d", error));
-        DBUG_RETURN(error);
-      }
-      trans_register_ha(thd, FALSE, ht);
-    }
-    else 
-    { 
-      DBUG_PRINT("info",("not autocommit"));
-      if (!trx)
-      {
-        /* 
-          This is where a transaction gets its start
-        */
-        error= connection_autocommit(FALSE);
-        if (error)
-        { 
-          DBUG_PRINT("info", ("error setting autocommit FALSE: %d", error));
-          DBUG_RETURN(error);
-        }
-        thd_set_ha_data(thd, ht, this);
-        trans_register_ha(thd, TRUE, ht);
-        /*
-          Send a lock table to the remote end.
-          We do not support this at the moment
-        */
-        if (thd->options & (OPTION_TABLE_LOCK))
-        {
-          DBUG_PRINT("info", ("We do not support lock table yet"));
-        }
-      }
-      else
-      {
-        ha_federated *ptr;
-        for (ptr= trx; ptr; ptr= ptr->trx_next)
-          if (ptr == this)
-            break;
-          else if (!ptr->trx_next)
-            ptr->trx_next= this;
-      }
-    }
-  }
-#endif /* XXX_SUPERCEDED_BY_WL2952 */
   table_will_be_deleted = FALSE;
   DBUG_RETURN(error);
 }
@@ -3463,7 +3409,7 @@ maria_declare_plugin(federated)
   &federated_storage_engine,
   "FEDERATED",
   "Patrick Galbraith and Brian Aker, MySQL AB",
-  "Federated MySQL storage engine",
+  "Allows to access tables on other MariaDB servers",
   PLUGIN_LICENSE_GPL,
   federated_db_init, /* Plugin Init */
   federated_done, /* Plugin Deinit */

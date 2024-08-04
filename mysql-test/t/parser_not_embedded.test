@@ -21,7 +21,7 @@ select 7 as expected, /*!01000 1 + /*!01000 8 + /*!01000 error */ 16 + */ 2 + */
 select 4 as expected, /* 1 + /*!01000 8 + */ 2 + */ 4;
 EOF
 
---exec $MYSQL --comment --force --table test <$MYSQLTEST_VARDIR/tmp/bug39559.sql
+--exec $MYSQL --comments --force --table test <$MYSQLTEST_VARDIR/tmp/bug39559.sql
 --remove_file $MYSQLTEST_VARDIR/tmp/bug39559.sql
 
 --echo # Bug#46527 "COMMIT AND CHAIN RELEASE does not make sense"
@@ -98,4 +98,19 @@ ROLLBACK AND NO CHAIN NO RELEASE;
 
 --echo #
 --echo # End of 5.5 tests
+--echo #
+
+--echo #
+--echo # MDEV-6899 extra semicolon in show create event syntax
+--echo #
+set timestamp=unix_timestamp('2020-10-10 5:5:5');
+delimiter $;
+create event a on schedule every 1 day do set @a:=1;select 2$
+delimiter ;$
+query_vertical show create event a;
+drop event a;
+set timestamp=default;
+
+--echo #
+--echo # End of 10.2 tests
 --echo #

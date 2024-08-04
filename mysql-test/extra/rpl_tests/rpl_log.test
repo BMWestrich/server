@@ -43,7 +43,7 @@ source include/show_binlog_events.inc;
 let $binlog_limit= 3;
 source include/show_binlog_events.inc;
 
-let $binlog_limit= 2,4;
+let $binlog_limit= 2,5;
 source include/show_binlog_events.inc;
 let $binlog_limit=;
 flush logs;
@@ -64,6 +64,8 @@ flush logs;
 # it not predictable and causing random test failures.
 # To make it predictable, we do a useless update now, but which has the
 # interest of making the slave catch both rotate events.
+
+let $skip_checkpoint_events=1;
 
 eval create table t3 (a int)ENGINE=$engine_type;
 

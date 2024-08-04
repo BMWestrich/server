@@ -11,12 +11,14 @@
 
   You should have received a copy of the GNU General Public License
   along with this program; if not, write to the Free Software
-  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
+  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 #define SPIDER_DETAIL_VERSION "3.2.37"
 #define SPIDER_HEX_VERSION 0x0302
 
 #if MYSQL_VERSION_ID < 50500
+#define pthread_mutex_assert_owner(A)
+#define pthread_mutex_assert_not_owner(A)
 #else
 #define my_free(A,B) my_free(A)
 #ifdef pthread_mutex_t
@@ -39,6 +41,8 @@
 #undef pthread_mutex_destroy
 #endif
 #define pthread_mutex_destroy mysql_mutex_destroy
+#define pthread_mutex_assert_owner(A) mysql_mutex_assert_owner(A)
+#define pthread_mutex_assert_not_owner(A) mysql_mutex_assert_not_owner(A)
 #ifdef pthread_cond_t
 #undef pthread_cond_t
 #endif
@@ -449,6 +453,9 @@ typedef struct st_spider_conn
   st_spider_conn     *bulk_access_next;
 #endif
 
+  bool               disable_connect_retry;  /* TRUE if it is unnecessary to
+                                                retry to connect after a
+                                                connection error */
   bool               connect_error_with_message;
   char               connect_error_msg[MYSQL_ERRMSG_SIZE];
   int                connect_error;

@@ -1,4 +1,5 @@
 /* Copyright (c) 2000, 2013, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2008, 2020, MariaDB Corporation.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -11,10 +12,10 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA.
 */
 
-/* TODO: check for overun of memory for names. */
+/* TODO: check for overrun of memory for names. */
 
 #include	"mysys_priv.h"
 #include	<m_string.h>
@@ -109,7 +110,7 @@ static char *directory_file_name (char * dst, const char *src)
 
 MY_DIR	*my_dir(const char *path, myf MyFlags)
 {
-  MY_DIR_HANDLE *dirh= 0;
+  MY_DIR_HANDLE *dirh;
   FILEINFO      finfo;
   DIR		*dirp;
   struct dirent *dp;
@@ -119,17 +120,16 @@ MY_DIR	*my_dir(const char *path, myf MyFlags)
   DBUG_ENTER("my_dir");
   DBUG_PRINT("my",("path: '%s' MyFlags: %lu",path,MyFlags));
 
-#if !defined(HAVE_READDIR_R)
-  mysql_mutex_lock(&THR_LOCK_open);
-#endif
-
   tmp_file= directory_file_name(tmp_path, path);
 
   if (!(dirp= opendir(tmp_path)))
-    goto error;
+  {
+    my_errno= errno;
+    goto err_open;
+  }
 
   if (!(dirh= my_malloc(sizeof(*dirh), MyFlags | MY_ZEROFILL)))
-    goto error;
+    goto err_alloc;
   
   if (my_init_dynamic_array(&dirh->array, sizeof(FILEINFO),
                             ENTRIES_START_SIZE, ENTRIES_INCREMENT,
@@ -174,9 +174,6 @@ MY_DIR	*my_dir(const char *path, myf MyFlags)
   }
 
   (void) closedir(dirp);
-#if !defined(HAVE_READDIR_R)
-  mysql_mutex_unlock(&THR_LOCK_open);
-#endif
   
   if (MyFlags & MY_WANT_SORT)
     sort_dynamic(&dirh->array, (qsort_cmp) comp_names);
@@ -186,14 +183,11 @@ MY_DIR	*my_dir(const char *path, myf MyFlags)
   
   DBUG_RETURN(&dirh->dir);
 
- error:
-#if !defined(HAVE_READDIR_R)
-  mysql_mutex_unlock(&THR_LOCK_open);
-#endif
-  my_errno=errno;
-  if (dirp)
-    (void) closedir(dirp);
+error:
   my_dirend(&dirh->dir);
+err_alloc:
+  (void) closedir(dirp);
+err_open:
   if (MyFlags & (MY_FAE | MY_WME))
     my_error(EE_DIR, MYF(ME_BELL | ME_WAITTANG), path, my_errno);
   DBUG_RETURN(NULL);
@@ -221,7 +215,7 @@ MY_DIR	*my_dir(const char *path, myf MyFlags)
   long		handle;
 #endif
   DBUG_ENTER("my_dir");
-  DBUG_PRINT("my",("path: '%s' stat: %d  MyFlags: %d",path,MyFlags));
+  DBUG_PRINT("my",("path: '%s' MyFlags: %d",path,MyFlags));
 
   /* Put LIB-CHAR as last path-character if not there */
   tmp_file=tmp_path;
@@ -347,8 +341,8 @@ MY_STAT *my_stat(const char *path, MY_STAT *stat_area, myf my_flags)
 {
   int m_used;
   DBUG_ENTER("my_stat");
-  DBUG_PRINT("my", ("path: '%s'  stat_area: 0x%lx  MyFlags: %lu", path,
-                    (long) stat_area, my_flags));
+  DBUG_PRINT("my", ("path: '%s'  stat_area: %p  MyFlags: %lu", path,
+                    stat_area, my_flags));
 
   if ((m_used= (stat_area == NULL)))
     if (!(stat_area= (MY_STAT *) my_malloc(sizeof(MY_STAT), my_flags)))

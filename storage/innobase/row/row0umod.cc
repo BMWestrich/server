@@ -1,6 +1,7 @@
 /*****************************************************************************
 
-Copyright (c) 1997, 2014, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1997, 2017, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2017, 2020, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +13,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -24,17 +25,14 @@ Created 2/27/1997 Heikki Tuuri
 *******************************************************/
 
 #include "row0umod.h"
-
-#ifdef UNIV_NONINL
-#include "row0umod.ic"
-#endif
-
 #include "dict0dict.h"
+#include "dict0stats.h"
 #include "dict0boot.h"
 #include "trx0undo.h"
 #include "trx0roll.h"
 #include "btr0btr.h"
 #include "mach0data.h"
+#include "ibuf0ibuf.h"
 #include "row0undo.h"
 #include "row0vers.h"
 #include "row0log.h"
@@ -71,13 +69,13 @@ introduced where a call to log_free_check() is bypassed. */
 
 /***********************************************************//**
 Undoes a modify in a clustered index record.
-@return	DB_SUCCESS, DB_FAIL, or error code: we may run out of file space */
-static __attribute__((nonnull, warn_unused_result))
+@return DB_SUCCESS, DB_FAIL, or error code: we may run out of file space */
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 row_undo_mod_clust_low(
 /*===================*/
 	undo_node_t*	node,	/*!< in: row undo node */
-	ulint**		offsets,/*!< out: rec_get_offsets() on the record */
+	rec_offs**	offsets,/*!< out: rec_get_offsets() on the record */
 	mem_heap_t**	offsets_heap,
 				/*!< in/out: memory heap that can be emptied */
 	mem_heap_t*	heap,	/*!< in/out: memory heap */
@@ -111,7 +109,8 @@ row_undo_mod_clust_low(
 	ut_ad(success);
 	ut_ad(rec_get_trx_id(btr_cur_get_rec(btr_cur),
 			     btr_cur_get_index(btr_cur))
-	      == thr_get_trx(thr)->id);
+	      == thr_get_trx(thr)->id
+	      || btr_cur_get_index(btr_cur)->table->is_temporary());
 
 	if (mode != BTR_MODIFY_LEAF
 	    && dict_index_is_online_ddl(btr_cur_get_index(btr_cur))) {
@@ -154,12 +153,11 @@ This is attempted when the record was inserted by updating a
 delete-marked record and there no longer exist transactions
 that would see the delete-marked record.
 @return	DB_SUCCESS, DB_FAIL, or error code: we may run out of file space */
-static __attribute__((nonnull, warn_unused_result))
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 row_undo_mod_remove_clust_low(
 /*==========================*/
 	undo_node_t*	node,	/*!< in: row undo node */
-	que_thr_t*	thr,	/*!< in: query thread */
 	mtr_t*		mtr,	/*!< in/out: mini-transaction */
 	ulint		mode)	/*!< in: BTR_MODIFY_LEAF or BTR_MODIFY_TREE */
 {
@@ -172,10 +170,15 @@ row_undo_mod_remove_clust_low(
 	/* Find out if the record has been purged already
 	or if we can remove it. */
 
-	if (!btr_pcur_restore_position(mode, &node->pcur, mtr)
-	    || row_vers_must_preserve_del_marked(node->new_trx_id, mtr)) {
+	if (!btr_pcur_restore_position(mode, &node->pcur, mtr)) {
+		return DB_SUCCESS;
+	}
 
-		return(DB_SUCCESS);
+	DEBUG_SYNC_C("rollback_purge_clust");
+
+	if (row_vers_must_preserve_del_marked(node->new_trx_id,
+					      node->table->name, mtr)) {
+		return DB_SUCCESS;
 	}
 
 	btr_cur = btr_pcur_get_btr_cur(&node->pcur);
@@ -185,7 +188,7 @@ row_undo_mod_remove_clust_low(
 	if (!trx_id_offset) {
 		mem_heap_t*	heap	= NULL;
 		ulint		trx_id_col;
-		const ulint*	offsets;
+		const rec_offs*	offsets;
 		ulint		len;
 
 		trx_id_col = dict_index_get_sys_col_pos(
@@ -195,37 +198,7 @@ row_undo_mod_remove_clust_low(
 
 		offsets = rec_get_offsets(
 			btr_cur_get_rec(btr_cur), btr_cur_get_index(btr_cur),
-			NULL, trx_id_col + 1, &heap);
-
-		trx_id_offset = rec_get_nth_field_offs(
-			offsets, trx_id_col, &len);
-		ut_ad(len == DATA_TRX_ID_LEN);
-		mem_heap_free(heap);
-	}
-
-	if (trx_read_trx_id(btr_cur_get_rec(btr_cur) + trx_id_offset)
-	    != node->new_trx_id) {
-		/* The record must have been purged and then replaced
-		with a different one. */
-		return(DB_SUCCESS);
-	}
-
-	trx_id_offset = btr_cur_get_index(btr_cur)->trx_id_offset;
-
-	if (!trx_id_offset) {
-		mem_heap_t*	heap	= NULL;
-		ulint		trx_id_col;
-		const ulint*	offsets;
-		ulint		len;
-
-		trx_id_col = dict_index_get_sys_col_pos(
-			btr_cur_get_index(btr_cur), DATA_TRX_ID);
-		ut_ad(trx_id_col > 0);
-		ut_ad(trx_id_col != ULINT_UNDEFINED);
-
-		offsets = rec_get_offsets(
-			btr_cur_get_rec(btr_cur), btr_cur_get_index(btr_cur),
-			NULL, trx_id_col + 1, &heap);
+			NULL, true, trx_id_col + 1, &heap);
 
 		trx_id_offset = rec_get_nth_field_offs(
 			offsets, trx_id_col, &len);
@@ -245,21 +218,26 @@ row_undo_mod_remove_clust_low(
 	than the rolling-back one. */
 	ut_ad(rec_get_deleted_flag(btr_cur_get_rec(btr_cur),
 				   dict_table_is_comp(node->table)));
+	/* In delete-marked records, DB_TRX_ID must
+	always refer to an existing update_undo log record. */
+	ut_ad(rec_get_trx_id(btr_cur_get_rec(btr_cur), btr_cur->index));
 
 	if (mode == BTR_MODIFY_LEAF) {
 		err = btr_cur_optimistic_delete(btr_cur, 0, mtr)
 			? DB_SUCCESS
 			: DB_FAIL;
 	} else {
-		ut_ad(mode == BTR_MODIFY_TREE);
+		ut_ad(mode == (BTR_MODIFY_TREE | BTR_LATCH_FOR_DELETE));
 
 		/* This operation is analogous to purge, we can free also
-		inherited externally stored fields */
+		inherited externally stored fields.
+		We can also assume that the record was complete
+		(including BLOBs), because it had been delete-marked
+		after it had been completely inserted. Therefore, we
+		are passing rollback=false, just like purge does. */
 
 		btr_cur_pessimistic_delete(&err, FALSE, btr_cur, 0,
-					   thr_is_recv(thr)
-					   ? RB_RECOVERY_PURGE_REC
-					   : RB_NONE, mtr);
+					   false, mtr);
 
 		/* The delete operation may fail if we have little
 		file space left: TODO: easiest to crash the database
@@ -272,8 +250,8 @@ row_undo_mod_remove_clust_low(
 /***********************************************************//**
 Undoes a modify in a clustered index record. Sets also the node state for the
 next round of undo.
-@return	DB_SUCCESS or error code: we may run out of file space */
-static __attribute__((nonnull, warn_unused_result))
+@return DB_SUCCESS or error code: we may run out of file space */
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 row_undo_mod_clust(
 /*===============*/
@@ -288,16 +266,20 @@ row_undo_mod_clust(
 
 	ut_ad(thr_get_trx(thr) == node->trx);
 	ut_ad(node->trx->dict_operation_lock_mode);
-#ifdef UNIV_SYNC_DEBUG
-	ut_ad(rw_lock_own(&dict_operation_lock, RW_LOCK_SHARED)
-	      || rw_lock_own(&dict_operation_lock, RW_LOCK_EX));
-#endif /* UNIV_SYNC_DEBUG */
+	ut_ad(node->trx->in_rollback);
+	ut_ad(rw_lock_own_flagged(&dict_operation_lock,
+				  RW_LOCK_FLAG_X | RW_LOCK_FLAG_S));
 
 	log_free_check();
 	pcur = &node->pcur;
 	index = btr_cur_get_index(btr_pcur_get_btr_cur(pcur));
 
-	mtr_start_trx(&mtr, thr_get_trx(thr));
+	mtr.start();
+	if (index->table->is_temporary()) {
+		mtr.set_log_mode(MTR_LOG_NO_REDO);
+	} else {
+		mtr.set_named_space(index->space);
+	}
 
 	online = dict_index_is_online_ddl(index);
 	if (online) {
@@ -307,7 +289,7 @@ row_undo_mod_clust(
 
 	mem_heap_t*	heap		= mem_heap_create(1024);
 	mem_heap_t*	offsets_heap	= NULL;
-	ulint*		offsets		= NULL;
+	rec_offs*	offsets		= NULL;
 	const dtuple_t*	rebuilt_old_pk;
 	byte		sys[DATA_TRX_ID_LEN + DATA_ROLL_PTR_LEN];
 
@@ -326,7 +308,12 @@ row_undo_mod_clust(
 		/* We may have to modify tree structure: do a pessimistic
 		descent down the index tree */
 
-		mtr_start_trx(&mtr, thr_get_trx(thr));
+		mtr.start();
+		if (index->table->is_temporary()) {
+			mtr.set_log_mode(MTR_LOG_NO_REDO);
+		} else {
+			mtr.set_named_space(index->space);
+		}
 
 		err = row_undo_mod_clust_low(
 			node, &offsets, &offsets_heap,
@@ -340,10 +327,12 @@ row_undo_mod_clust(
 	ut_ad(online || !dict_index_is_online_ddl(index));
 
 	if (err == DB_SUCCESS && online) {
-#ifdef UNIV_SYNC_DEBUG
-		ut_ad(rw_lock_own(&index->lock, RW_LOCK_SHARED)
-		      || rw_lock_own(&index->lock, RW_LOCK_EX));
-#endif /* UNIV_SYNC_DEBUG */
+
+		ut_ad(rw_lock_own_flagged(
+				&index->lock,
+				RW_LOCK_FLAG_S | RW_LOCK_FLAG_X
+				| RW_LOCK_FLAG_SX));
+
 		switch (node->rec_type) {
 		case TRX_UNDO_DEL_MARK_REC:
 			row_log_table_insert(
@@ -371,30 +360,43 @@ row_undo_mod_clust(
 	*   it can be reallocated at any time after this mtr-commits
 	*   which is just below
 	*/
-	ut_ad(srv_immediate_scrub_data_uncompressed ||
-	      rec_get_trx_id(btr_pcur_get_rec(pcur), index) == node->new_trx_id);
+	ut_ad(srv_immediate_scrub_data_uncompressed
+	      || row_get_rec_trx_id(btr_pcur_get_rec(pcur), index, offsets)
+	      == node->new_trx_id);
 
 	btr_pcur_commit_specify_mtr(pcur, &mtr);
+	DEBUG_SYNC_C("rollback_undo_pk");
 
 	if (err == DB_SUCCESS && node->rec_type == TRX_UNDO_UPD_DEL_REC) {
 
-		mtr_start_trx(&mtr, thr_get_trx(thr));
+		mtr.start();
+		if (index->table->is_temporary()) {
+			mtr.set_log_mode(MTR_LOG_NO_REDO);
+		} else {
+			mtr.set_named_space(index->space);
+		}
 
 		/* It is not necessary to call row_log_table,
 		because the record is delete-marked and would thus
 		be omitted from the rebuilt copy of the table. */
 		err = row_undo_mod_remove_clust_low(
-			node, thr, &mtr, BTR_MODIFY_LEAF);
+			node, &mtr, BTR_MODIFY_LEAF);
 		if (err != DB_SUCCESS) {
 			btr_pcur_commit_specify_mtr(pcur, &mtr);
 
 			/* We may have to modify tree structure: do a
 			pessimistic descent down the index tree */
 
-			mtr_start_trx(&mtr, thr_get_trx(thr));
+			mtr.start();
+			if (index->table->is_temporary()) {
+				mtr.set_log_mode(MTR_LOG_NO_REDO);
+			} else {
+				mtr.set_named_space(index->space);
+			}
 
-			err = row_undo_mod_remove_clust_low(node, thr, &mtr,
-							    BTR_MODIFY_TREE);
+			err = row_undo_mod_remove_clust_low(
+				node, &mtr,
+				BTR_MODIFY_TREE | BTR_LATCH_FOR_DELETE);
 
 			ut_ad(err == DB_SUCCESS
 			      || err == DB_OUT_OF_FILE_SPACE);
@@ -405,8 +407,6 @@ row_undo_mod_clust(
 
 	node->state = UNDO_NODE_FETCH_NEXT;
 
-	trx_undo_rec_release(node->trx, node->undo_no);
-
 	if (offsets_heap) {
 		mem_heap_free(offsets_heap);
 	}
@@ -416,8 +416,8 @@ row_undo_mod_clust(
 
 /***********************************************************//**
 Delete marks or removes a secondary index entry if found.
-@return	DB_SUCCESS, DB_FAIL, or DB_OUT_OF_FILE_SPACE */
-static __attribute__((nonnull, warn_unused_result))
+@return DB_SUCCESS, DB_FAIL, or DB_OUT_OF_FILE_SPACE */
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 row_undo_mod_del_mark_or_remove_sec_low(
 /*====================================*/
@@ -431,26 +431,24 @@ row_undo_mod_del_mark_or_remove_sec_low(
 	btr_pcur_t		pcur;
 	btr_cur_t*		btr_cur;
 	ibool			success;
-	ibool			old_has;
 	dberr_t			err	= DB_SUCCESS;
 	mtr_t			mtr;
 	mtr_t			mtr_vers;
-	enum row_search_result	search_result;
+	row_search_result	search_result;
+	const bool		modify_leaf = mode == BTR_MODIFY_LEAF;
 
-	log_free_check();
-	mtr_start_trx(&mtr, thr_get_trx(thr));
+	row_mtr_start(&mtr, index, !modify_leaf);
 
-	if (*index->name == TEMP_INDEX_PREFIX) {
-		/* The index->online_status may change if the
-		index->name starts with TEMP_INDEX_PREFIX (meaning
-		that the index is or was being created online). It is
-		protected by index->lock. */
-		if (mode == BTR_MODIFY_LEAF) {
+	if (!index->is_committed()) {
+		/* The index->online_status may change if the index is
+		or was being created online, but not committed yet. It
+		is protected by index->lock. */
+		if (modify_leaf) {
 			mode = BTR_MODIFY_LEAF | BTR_ALREADY_S_LATCHED;
 			mtr_s_lock(dict_index_get_lock(index), &mtr);
 		} else {
-			ut_ad(mode == BTR_MODIFY_TREE);
-			mtr_x_lock(dict_index_get_lock(index), &mtr);
+			ut_ad(mode == (BTR_MODIFY_TREE | BTR_LATCH_FOR_DELETE));
+			mtr_sx_lock(dict_index_get_lock(index), &mtr);
 		}
 
 		if (row_log_online_op_try(index, entry, 0)) {
@@ -458,12 +456,20 @@ row_undo_mod_del_mark_or_remove_sec_low(
 		}
 	} else {
 		/* For secondary indexes,
-		index->online_status==ONLINE_INDEX_CREATION unless
-		index->name starts with TEMP_INDEX_PREFIX. */
+		index->online_status==ONLINE_INDEX_COMPLETE if
+		index->is_committed(). */
 		ut_ad(!dict_index_is_online_ddl(index));
 	}
 
 	btr_cur = btr_pcur_get_btr_cur(&pcur);
+
+	if (dict_index_is_spatial(index)) {
+		if (modify_leaf) {
+			btr_cur->thr = thr;
+			mode |= BTR_RTREE_DELETE_MARK;
+		}
+		mode |= BTR_RTREE_UNDO_INS;
+	}
 
 	search_result = row_search_index_entry(index, entry, mode,
 					       &pcur, &mtr);
@@ -494,23 +500,37 @@ row_undo_mod_del_mark_or_remove_sec_low(
 	which cannot be purged yet, requires its existence. If some requires,
 	we should delete mark the record. */
 
-	mtr_start_trx(&mtr_vers, thr_get_trx(thr));
+	mtr_vers.start();
 
 	success = btr_pcur_restore_position(BTR_SEARCH_LEAF, &(node->pcur),
 					    &mtr_vers);
 	ut_a(success);
 
-	old_has = row_vers_old_has_index_entry(FALSE,
-					       btr_pcur_get_rec(&(node->pcur)),
-					       &mtr_vers, index, entry);
-	if (old_has) {
+	/* For temporary table, we can skip to check older version of
+	clustered index entry. Because the purge won't process
+	any no-redo rollback segment undo logs. */
+	if (dict_table_is_temporary(node->table)
+	    || row_vers_old_has_index_entry(
+			false, btr_pcur_get_rec(&(node->pcur)),
+			&mtr_vers, index, entry, 0, 0)) {
 		err = btr_cur_del_mark_set_sec_rec(BTR_NO_LOCKING_FLAG,
 						   btr_cur, TRUE, thr, &mtr);
 		ut_ad(err == DB_SUCCESS);
 	} else {
 		/* Remove the index record */
 
-		if (mode != BTR_MODIFY_TREE) {
+		if (dict_index_is_spatial(index)) {
+			rec_t*	rec = btr_pcur_get_rec(&pcur);
+			if (rec_get_deleted_flag(rec,
+						 dict_table_is_comp(index->table))) {
+				ib::error() << "Record found in index "
+					<< index->name << " is deleted marked"
+					" on rollback update.";
+				ut_ad(0);
+			}
+		}
+
+		if (modify_leaf) {
 			success = btr_cur_optimistic_delete(btr_cur, 0, &mtr);
 			if (success) {
 				err = DB_SUCCESS;
@@ -518,15 +538,13 @@ row_undo_mod_del_mark_or_remove_sec_low(
 				err = DB_FAIL;
 			}
 		} else {
-			/* No need to distinguish RB_RECOVERY_PURGE here,
+			/* Passing rollback=false,
 			because we are deleting a secondary index record:
-			the distinction between RB_NORMAL and
-			RB_RECOVERY_PURGE only matters when deleting a
-			record that contains externally stored
-			columns. */
+			the distinction only matters when deleting a
+			record that contains externally stored columns. */
 			ut_ad(!dict_index_is_clust(index));
 			btr_cur_pessimistic_delete(&err, FALSE, btr_cur, 0,
-						   RB_NORMAL, &mtr);
+						   false, &mtr);
 
 			/* The delete operation may fail if we have little
 			file space left: TODO: easiest to crash the database
@@ -552,8 +570,8 @@ return to the original values because we do not know them. But this should
 not cause problems because in row0sel.cc, in queries we always retrieve the
 clustered index record or an earlier version of it, if the secondary index
 record through which we do the search is delete-marked.
-@return	DB_SUCCESS or DB_OUT_OF_FILE_SPACE */
-static __attribute__((nonnull, warn_unused_result))
+@return DB_SUCCESS or DB_OUT_OF_FILE_SPACE */
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 row_undo_mod_del_mark_or_remove_sec(
 /*================================*/
@@ -572,7 +590,7 @@ row_undo_mod_del_mark_or_remove_sec(
 	}
 
 	err = row_undo_mod_del_mark_or_remove_sec_low(node, thr, index,
-						      entry, BTR_MODIFY_TREE);
+		entry, BTR_MODIFY_TREE | BTR_LATCH_FOR_DELETE);
 	return(err);
 }
 
@@ -581,12 +599,12 @@ Delete unmarks a secondary index entry which must be found. It might not be
 delete-marked at the moment, but it does not harm to unmark it anyway. We also
 need to update the fields of the secondary index record if we updated its
 fields but alphabetically they stayed the same, e.g., 'abc' -> 'aBc'.
-@retval	DB_SUCCESS on success
-@retval	DB_FAIL if BTR_MODIFY_TREE should be tried
-@retval	DB_OUT_OF_FILE_SPACE when running out of tablespace
-@retval	DB_DUPLICATE_KEY if the value was missing
+@retval DB_SUCCESS on success
+@retval DB_FAIL if BTR_MODIFY_TREE should be tried
+@retval DB_OUT_OF_FILE_SPACE when running out of tablespace
+@retval DB_DUPLICATE_KEY if the value was missing
 	and an insert would lead to a duplicate exists */
-static __attribute__((nonnull, warn_unused_result))
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 row_undo_mod_del_unmark_sec_and_undo_update(
 /*========================================*/
@@ -605,24 +623,33 @@ row_undo_mod_del_unmark_sec_and_undo_update(
 	trx_t*			trx		= thr_get_trx(thr);
 	const ulint		flags
 		= BTR_KEEP_SYS_FLAG | BTR_NO_LOCKING_FLAG;
-	enum row_search_result	search_result;
+	row_search_result	search_result;
+	ulint			orig_mode = mode;
 
-	ut_ad(trx->id);
+	ut_ad(trx->id != 0);
 
-	log_free_check();
-	mtr_start_trx(&mtr, thr_get_trx(thr));
+	if (dict_index_is_spatial(index)) {
+		/* FIXME: Currently we do a 2-pass search for the undo
+		due to avoid undel-mark a wrong rec in rolling back in
+		partial update.  Later, we could log some info in
+		secondary index updates to avoid this. */
+		ut_ad(mode & BTR_MODIFY_LEAF);
+		mode |= BTR_RTREE_DELETE_MARK;
+	}
 
-	if (*index->name == TEMP_INDEX_PREFIX) {
-		/* The index->online_status may change if the
-		index->name starts with TEMP_INDEX_PREFIX (meaning
-		that the index is or was being created online). It is
-		protected by index->lock. */
+try_again:
+	row_mtr_start(&mtr, index, !(mode & BTR_MODIFY_LEAF));
+
+	if (!index->is_committed()) {
+		/* The index->online_status may change if the index is
+		or was being created online, but not committed yet. It
+		is protected by index->lock. */
 		if (mode == BTR_MODIFY_LEAF) {
 			mode = BTR_MODIFY_LEAF | BTR_ALREADY_S_LATCHED;
 			mtr_s_lock(dict_index_get_lock(index), &mtr);
 		} else {
 			ut_ad(mode == BTR_MODIFY_TREE);
-			mtr_x_lock(dict_index_get_lock(index), &mtr);
+			mtr_sx_lock(dict_index_get_lock(index), &mtr);
 		}
 
 		if (row_log_online_op_try(index, entry, trx->id)) {
@@ -630,10 +657,12 @@ row_undo_mod_del_unmark_sec_and_undo_update(
 		}
 	} else {
 		/* For secondary indexes,
-		index->online_status==ONLINE_INDEX_CREATION unless
-		index->name starts with TEMP_INDEX_PREFIX. */
+		index->online_status==ONLINE_INDEX_COMPLETE if
+		index->is_committed(). */
 		ut_ad(!dict_index_is_online_ddl(index));
 	}
+
+	btr_cur->thr = thr;
 
 	search_result = row_search_index_entry(index, entry, mode,
 					       &pcur, &mtr);
@@ -641,7 +670,7 @@ row_undo_mod_del_unmark_sec_and_undo_update(
 	switch (search_result) {
 		mem_heap_t*	heap;
 		mem_heap_t*	offsets_heap;
-		ulint*		offsets;
+		rec_offs*	offsets;
 	case ROW_BUFFERED:
 	case ROW_NOT_DELETED_REF:
 		/* These are invalid outcomes, because the mode passed
@@ -649,7 +678,18 @@ row_undo_mod_del_unmark_sec_and_undo_update(
 		flags BTR_INSERT, BTR_DELETE, or BTR_DELETE_MARK. */
 		ut_error;
 	case ROW_NOT_FOUND:
-		if (*index->name != TEMP_INDEX_PREFIX) {
+		/* For spatial index, if first search didn't find an
+		undel-marked rec, try to find a del-marked rec. */
+		if (dict_index_is_spatial(index) && btr_cur->rtr_info->fd_del) {
+			if (mode != orig_mode) {
+				mode = orig_mode;
+				btr_pcur_close(&pcur);
+				mtr_commit(&mtr);
+				goto try_again;
+			}
+		}
+
+		if (index->is_committed()) {
 			/* During online secondary index creation, it
 			is possible that MySQL is waiting for a
 			meta-data lock upgrade before invoking
@@ -658,34 +698,20 @@ row_undo_mod_del_unmark_sec_and_undo_update(
 			finished building the index, but it does not
 			yet exist in MySQL. In this case, we suppress
 			the printout to the error log. */
-			fputs("InnoDB: error in sec index entry del undo in\n"
-			      "InnoDB: ", stderr);
-			dict_index_name_print(stderr, trx, index);
-			fputs("\n"
-			      "InnoDB: tuple ", stderr);
-			dtuple_print(stderr, entry);
-			fputs("\n"
-			      "InnoDB: record ", stderr);
-			rec_print(stderr, btr_pcur_get_rec(&pcur), index);
-			putc('\n', stderr);
-			trx_print(stderr, trx, 0);
-			fputs("\n"
-			      "InnoDB: Submit a detailed bug report"
-			      " to http://bugs.mysql.com\n", stderr);
-
-			ib_logf(IB_LOG_LEVEL_WARN,
-				"record in index %s was not found"
-				" on rollback, trying to insert",
-				index->name);
+			ib::warn() << "Record in index " << index->name
+				<< " of table " << index->table->name
+				<< " was not found on rollback, trying to"
+				" insert: " << *entry
+				<< " at: " << rec_index_print(
+					btr_cur_get_rec(btr_cur), index);
 		}
 
 		if (btr_cur->up_match >= dict_index_get_n_unique(index)
 		    || btr_cur->low_match >= dict_index_get_n_unique(index)) {
-			if (*index->name != TEMP_INDEX_PREFIX) {
-				ib_logf(IB_LOG_LEVEL_WARN,
-					"record in index %s was not found on"
-					" rollback, and a duplicate exists",
-					index->name);
+			if (index->is_committed()) {
+				ib::warn() << "Record in index " << index->name
+					<< " was not found on rollback, and"
+					" a duplicate exists";
 			}
 			err = DB_DUPLICATE_KEY;
 			break;
@@ -731,6 +757,7 @@ row_undo_mod_del_unmark_sec_and_undo_update(
 		err = btr_cur_del_mark_set_sec_rec(
 			BTR_NO_LOCKING_FLAG,
 			btr_cur, FALSE, thr, &mtr);
+
 		ut_a(err == DB_SUCCESS);
 		heap = mem_heap_create(
 			sizeof(upd_t)
@@ -738,7 +765,7 @@ row_undo_mod_del_unmark_sec_and_undo_update(
 		offsets_heap = NULL;
 		offsets = rec_get_offsets(
 			btr_cur_get_rec(btr_cur),
-			index, NULL, ULINT_UNDEFINED, &offsets_heap);
+			index, NULL, true, ULINT_UNDEFINED, &offsets_heap);
 		update = row_upd_build_sec_rec_difference_binary(
 			btr_cur_get_rec(btr_cur), index, offsets, entry, heap);
 		if (upd_get_n_fields(update) == 0) {
@@ -782,7 +809,7 @@ func_exit_no_pcur:
 
 /***********************************************************//**
 Flags a secondary index corrupted. */
-static __attribute__((nonnull))
+static MY_ATTRIBUTE((nonnull))
 void
 row_undo_mod_sec_flag_corrupted(
 /*============================*/
@@ -798,7 +825,7 @@ row_undo_mod_sec_flag_corrupted(
 		we can only mark the index corrupted in the
 		data dictionary cache. TODO: fix this somehow.*/
 		mutex_enter(&dict_sys->mutex);
-		dict_set_corrupted_index_cache_only(index, index->table);
+		dict_set_corrupted_index_cache_only(index);
 		mutex_exit(&dict_sys->mutex);
 		break;
 	default:
@@ -813,8 +840,8 @@ row_undo_mod_sec_flag_corrupted(
 
 /***********************************************************//**
 Undoes a modify in secondary indexes when undo record type is UPD_DEL.
-@return	DB_SUCCESS or DB_OUT_OF_FILE_SPACE */
-static __attribute__((nonnull, warn_unused_result))
+@return DB_SUCCESS or DB_OUT_OF_FILE_SPACE */
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 row_undo_mod_upd_del_sec(
 /*=====================*/
@@ -858,7 +885,7 @@ row_undo_mod_upd_del_sec(
 			does not exist.  However, this situation may
 			only occur during the rollback of incomplete
 			transactions. */
-			ut_a(thr_is_recv(thr));
+			ut_a(thr_get_trx(thr) == trx_roll_crash_recv_trx);
 		} else {
 			err = row_undo_mod_del_mark_or_remove_sec(
 				node, thr, index, entry);
@@ -880,8 +907,8 @@ row_undo_mod_upd_del_sec(
 
 /***********************************************************//**
 Undoes a modify in secondary indexes when undo record type is DEL_MARK.
-@return	DB_SUCCESS or DB_OUT_OF_FILE_SPACE */
-static __attribute__((nonnull, warn_unused_result))
+@return DB_SUCCESS or DB_OUT_OF_FILE_SPACE */
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 row_undo_mod_del_mark_sec(
 /*======================*/
@@ -948,8 +975,8 @@ row_undo_mod_del_mark_sec(
 
 /***********************************************************//**
 Undoes a modify in secondary indexes when undo record type is UPD_EXIST.
-@return	DB_SUCCESS or DB_OUT_OF_FILE_SPACE */
-static __attribute__((nonnull, warn_unused_result))
+@return DB_SUCCESS or DB_OUT_OF_FILE_SPACE */
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 row_undo_mod_upd_exist_sec(
 /*=======================*/
@@ -968,15 +995,31 @@ row_undo_mod_upd_exist_sec(
 
 	heap = mem_heap_create(1024);
 
+
 	while (node->index != NULL) {
 		dict_index_t*	index	= node->index;
 		dtuple_t*	entry;
 
-		if (index->type == DICT_FTS
-		    || !row_upd_changes_ord_field_binary(
-			index, node->update, thr, node->row, node->ext)) {
-			dict_table_next_uncorrupted_index(node->index);
-			continue;
+		if (dict_index_is_spatial(index)) {
+			if (!row_upd_changes_ord_field_binary_func(
+				index, node->update,
+#ifdef UNIV_DEBUG
+				thr,
+#endif /* UNIV_DEBUG */
+                                node->row,
+				node->ext, ROW_BUILD_FOR_UNDO)) {
+				dict_table_next_uncorrupted_index(node->index);
+				continue;
+			}
+		} else {
+			if (index->type == DICT_FTS
+			    || !row_upd_changes_ord_field_binary(index,
+								 node->update,
+								 thr, node->row,
+								 node->ext)) {
+				dict_table_next_uncorrupted_index(node->index);
+				continue;
+			}
 		}
 
 		/* Build the newest version of the index entry */
@@ -1034,9 +1077,17 @@ row_undo_mod_upd_exist_sec(
 		the secondary index record if we updated its fields
 		but alphabetically they stayed the same, e.g.,
 		'abc' -> 'aBc'. */
-		entry = row_build_index_entry(node->undo_row,
-					      node->undo_ext,
-					      index, heap);
+		if (dict_index_is_spatial(index)) {
+			entry = row_build_index_entry_low(node->undo_row,
+							  node->undo_ext,
+							  index, heap,
+							  ROW_BUILD_FOR_UNDO);
+		} else {
+			entry = row_build_index_entry(node->undo_row,
+						      node->undo_ext,
+						      index, heap);
+		}
+
 		ut_a(entry);
 
 		err = row_undo_mod_del_unmark_sec_and_undo_update(
@@ -1065,7 +1116,7 @@ row_undo_mod_upd_exist_sec(
 
 /***********************************************************//**
 Parses the row reference and other info in a modify undo log record. */
-static __attribute__((nonnull))
+static MY_ATTRIBUTE((nonnull))
 void
 row_undo_mod_parse_undo_rec(
 /*========================*/
@@ -1098,12 +1149,21 @@ row_undo_mod_parse_undo_rec(
 		return;
 	}
 
-	if (node->table->ibd_file_missing) {
+	ut_ad(!node->table->skip_alter_undo);
+
+	if (UNIV_UNLIKELY(!fil_table_accessible(node->table))) {
+close_table:
+		/* Normally, tables should not disappear or become
+		unaccessible during ROLLBACK, because they should be
+		protected by InnoDB table locks. Corruption could be
+		a valid exception.
+
+		FIXME: When running out of temporary tablespace, it
+		would probably be better to just drop all temporary
+		tables (and temporary undo log records) of the current
+		connection, instead of doing this rollback. */
 		dict_table_close(node->table, dict_locked, FALSE);
-
-		/* We skip undo operations to missing .ibd files */
 		node->table = NULL;
-
 		return;
 	}
 
@@ -1115,24 +1175,52 @@ row_undo_mod_parse_undo_rec(
 	ptr = trx_undo_rec_get_row_ref(ptr, clust_index, &(node->ref),
 				       node->heap);
 
-	trx_undo_update_rec_get_update(ptr, clust_index, type, trx_id,
-				       roll_ptr, info_bits, node->trx,
+	ptr = trx_undo_update_rec_get_update(ptr, clust_index, type, trx_id,
+				       roll_ptr, info_bits,
 				       node->heap, &(node->update));
 	node->new_trx_id = trx_id;
 	node->cmpl_info = cmpl_info;
 
 	if (!row_undo_search_clust_to_pcur(node)) {
+		/* As long as this rolling-back transaction exists,
+		the PRIMARY KEY value pointed to by the undo log
+		record should exist.
 
-		dict_table_close(node->table, dict_locked, FALSE);
+		However, if InnoDB is killed during a rollback, or
+		shut down during the rollback of recovered
+		transactions, then after restart we may try to roll
+		back some of the same undo log records again, because
+		trx_roll_try_truncate() is not being invoked after
+		every undo log record.
 
-		node->table = NULL;
+		It is also possible that the record
+		was not modified yet (the DB_ROLL_PTR does not match
+		node->roll_ptr) and thus there is nothing to roll back.
+
+		btr_cur_upd_lock_and_undo() only writes the undo log
+		record after successfully acquiring an exclusive lock
+		on the the clustered index record. That lock will not
+		be released before the transaction is committed or
+		fully rolled back. (Exception: if the server was
+		killed, restarted, and shut down again before the
+		rollback of the recovered transaction was completed,
+		it is possible that the transaction was partially
+		rolled back and locks released.) */
+		goto close_table;
+	}
+
+	/* Extract indexed virtual columns from undo log */
+	if (node->table->n_v_cols) {
+		row_upd_replace_vcol(node->row, node->table,
+				     node->update, false, node->undo_row,
+				     (node->cmpl_info & UPD_NODE_NO_ORD_CHANGE)
+					? NULL : ptr);
 	}
 }
 
 /***********************************************************//**
 Undoes a modify operation on a row of a table.
-@return	DB_SUCCESS or error code */
-UNIV_INTERN
+@return DB_SUCCESS or error code */
 dberr_t
 row_undo_mod(
 /*=========*/
@@ -1142,8 +1230,11 @@ row_undo_mod(
 	dberr_t	err;
 	ibool	dict_locked;
 
-	ut_ad(node && thr);
+	ut_ad(node != NULL);
+	ut_ad(thr != NULL);
 	ut_ad(node->state == UNDO_NODE_MODIFY);
+	ut_ad(node->trx->in_rollback);
+	ut_ad(!trx_undo_roll_ptr_is_insert(node->roll_ptr));
 
 	dict_locked = thr_get_trx(thr)->dict_operation_lock_mode == RW_X_LATCH;
 
@@ -1155,7 +1246,6 @@ row_undo_mod(
 		/* It is already undone, or will be undone by another query
 		thread, or table was dropped */
 
-		trx_undo_rec_release(node->trx, node->undo_no);
 		node->state = UNDO_NODE_FETCH_NEXT;
 
 		return(DB_SUCCESS);
@@ -1185,8 +1275,39 @@ row_undo_mod(
 	}
 
 	if (err == DB_SUCCESS) {
-
 		err = row_undo_mod_clust(node, thr);
+
+		bool update_statistics
+			= !(node->cmpl_info & UPD_NODE_NO_ORD_CHANGE);
+
+		if (err == DB_SUCCESS && node->table->stat_initialized) {
+			switch (node->rec_type) {
+			case TRX_UNDO_UPD_EXIST_REC:
+				break;
+			case TRX_UNDO_DEL_MARK_REC:
+				dict_table_n_rows_inc(node->table);
+				update_statistics = update_statistics
+					|| !srv_stats_include_delete_marked;
+				break;
+			case TRX_UNDO_UPD_DEL_REC:
+				dict_table_n_rows_dec(node->table);
+				update_statistics = update_statistics
+					|| !srv_stats_include_delete_marked;
+				break;
+			}
+
+			/* Do not attempt to update statistics when
+			executing ROLLBACK in the InnoDB SQL
+			interpreter, because in that case we would
+			already be holding dict_sys->mutex, which
+			would be acquired when updating statistics. */
+			if (update_statistics && !dict_locked) {
+				dict_stats_update_if_needed(node->table,
+							    *node->trx);
+			} else {
+				node->table->stat_modified_counter++;
+			}
+		}
 	}
 
 	dict_table_close(node->table, dict_locked, FALSE);

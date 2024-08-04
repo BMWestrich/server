@@ -14,7 +14,7 @@
 #include "plgdbsem.h"
 #include "maputil.h"
 
-#ifdef __WIN__
+#ifdef _WIN32
 /***********************************************************************/
 /*  In Insert mode, just open the file for append. Otherwise           */
 /*  create the mapping file object. The map handle can be released     */
@@ -190,8 +190,8 @@ bool CloseMemMap(void *memory, size_t dwSize)
   {
   if (memory) {
     // All this must be redesigned
-    int rc = msync(memory, dwSize, MS_SYNC);
-    return (munmap(memory, dwSize) < 0) ? true : false;
+    int rc = msync((char*)memory, dwSize, MS_SYNC);
+    return (munmap((char*)memory, dwSize) < 0) ? true : false;
   } else
     return false;
 

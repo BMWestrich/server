@@ -1,6 +1,7 @@
 /*****************************************************************************
 
-Copyright (c) 1996, 2015, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1996, 2016, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2017, 2020, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +13,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -37,6 +38,7 @@ Created 4/20/1996 Heikki Tuuri
 #include "btr0btr.h"
 #include "btr0cur.h"
 #include "mach0data.h"
+#include "ibuf0ibuf.h"
 #include "que0que.h"
 #include "row0upd.h"
 #include "row0sel.h"
@@ -52,6 +54,12 @@ Created 4/20/1996 Heikki Tuuri
 #include "fts0fts.h"
 #include "fts0types.h"
 #include "m_string.h"
+
+#ifdef WITH_WSREP
+#include <mysql/service_wsrep.h>
+#include "../../../wsrep/wsrep_api.h"
+#include "wsrep_mysqld_c.h"
+#endif /* WITH_WSREP */
 
 /*************************************************************************
 IMPORTANT NOTE: Any operation that generates redo MUST check that there
@@ -224,7 +232,7 @@ Does an insert operation by updating a delete-marked existing record
 in the index. This situation can occur if the delete-marked record is
 kept in the index for consistent reads.
 @return	DB_SUCCESS or error code */
-static __attribute__((nonnull, warn_unused_result))
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 row_ins_sec_index_entry_by_modify(
 /*==============================*/
@@ -325,7 +333,7 @@ Does an insert operation by delete unmarking and updating a delete marked
 existing record in the index. This situation can occur if the delete marked
 record is kept in the index for consistent reads.
 @return	DB_SUCCESS, DB_FAIL, or error code */
-static __attribute__((nonnull, warn_unused_result))
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 row_ins_clust_index_entry_by_modify(
 /*================================*/
@@ -433,7 +441,7 @@ row_ins_cascade_ancestor_updates_table(
 Returns the number of ancestor UPDATE or DELETE nodes of a
 cascaded update/delete node.
 @return	number of ancestors */
-static __attribute__((nonnull, warn_unused_result))
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 ulint
 row_ins_cascade_n_ancestors(
 /*========================*/
@@ -459,7 +467,7 @@ a cascaded update.
 can also be 0 if no foreign key fields changed; the returned value is
 ULINT_UNDEFINED if the column type in the child table is too short to
 fit the new value in the parent table: that means the update fails */
-static __attribute__((nonnull, warn_unused_result))
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 ulint
 row_ins_cascade_calc_update_vec(
 /*============================*/
@@ -487,8 +495,6 @@ row_ins_cascade_calc_update_vec(
 	ulint		doc_id_pos = 0;
 	doc_id_t	new_doc_id = FTS_NULL_DOC_ID;
 
-	ut_a(node);
-	ut_a(foreign);
 	ut_a(cascade);
 	ut_a(table);
 	ut_a(index);
@@ -510,7 +516,7 @@ row_ins_cascade_calc_update_vec(
 
 	n_fields_updated = 0;
 
-	*fts_col_affected = FALSE;
+	*fts_col_affected = foreign->affects_fulltext();
 
 	if (table->fts) {
 		doc_id_pos = dict_table_get_nth_col_pos(
@@ -569,7 +575,8 @@ row_ins_cascade_calc_update_vec(
 
 				if (!dfield_is_null(&ufield->new_val)
 				    && dtype_get_at_most_n_mbchars(
-					col->prtype, col->mbminmaxlen,
+					col->prtype,
+					col->mbminlen, col->mbmaxlen,
 					col->len,
 					ufield_len,
 					static_cast<char*>(
@@ -628,16 +635,6 @@ row_ins_cascade_calc_update_vec(
 							  pad, pad_len);
 					dfield_set_data(&ufield->new_val,
 							padded_data, min_size);
-				}
-
-				/* Check whether the current column has
-				FTS index on it */
-				if (table->fts
-				    && dict_table_is_fts_column(
-					table->fts->indexes,
-					dict_col_get_no(col))
-					!= ULINT_UNDEFINED) {
-					*fts_col_affected = TRUE;
 				}
 
 				/* If Doc ID is updated, check whether the
@@ -935,12 +932,12 @@ row_ins_invalidate_query_cache(
 	mem_free(buf);
 }
 #ifdef WITH_WSREP
-dberr_t wsrep_append_foreign_key(trx_t *trx,  
-			       dict_foreign_t*	foreign,
-			       const rec_t*	clust_rec,
-			       dict_index_t*	clust_index,
-			       ibool		referenced,
-			       ibool            shared);
+dberr_t wsrep_append_foreign_key(trx_t *trx,
+				dict_foreign_t*	foreign,
+				const rec_t*	clust_rec,
+				dict_index_t*	clust_index,
+				ibool		referenced,
+				enum wsrep_key_type key_type);
 #endif /* WITH_WSREP */
 
 /*********************************************************************//**
@@ -948,7 +945,7 @@ Perform referential actions or checks when a parent row is deleted or updated
 and the constraint had an ON DELETE or ON UPDATE condition which was not
 RESTRICT.
 @return	DB_SUCCESS, DB_LOCK_WAIT, or error code */
-static __attribute__((nonnull, warn_unused_result))
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 row_ins_foreign_check_on_constraint(
 /*================================*/
@@ -976,16 +973,10 @@ row_ins_foreign_check_on_constraint(
 	upd_t*		update;
 	ulint		n_to_update;
 	dberr_t		err;
-	ulint		i;
 	trx_t*		trx;
 	mem_heap_t*	tmp_heap	= NULL;
 	doc_id_t	doc_id = FTS_NULL_DOC_ID;
 	ibool		fts_col_affacted = FALSE;
-
-	ut_a(thr);
-	ut_a(foreign);
-	ut_a(pcur);
-	ut_a(mtr);
 
 	trx = thr_get_trx(thr);
 
@@ -1141,7 +1132,7 @@ row_ins_foreign_check_on_constraint(
 			rec_print(stderr, clust_rec, clust_index);
 			fputs("\n"
 			      "InnoDB: Submit a detailed bug report to"
-			      " http://bugs.mysql.com\n", stderr);
+			      " https://jira.mariadb.org/\n", stderr);
 			ut_ad(0);
 			err = DB_SUCCESS;
 
@@ -1195,7 +1186,7 @@ row_ins_foreign_check_on_constraint(
 		UNIV_MEM_INVALID(update->fields,
 				 update->n_fields * sizeof *update->fields);
 
-		for (i = 0; i < foreign->n_fields; i++) {
+		for (ulint i = 0; i < foreign->n_fields; i++) {
 			upd_field_t*	ufield = &update->fields[i];
 
 			ufield->field_no = dict_table_get_nth_col_pos(
@@ -1204,32 +1195,14 @@ row_ins_foreign_check_on_constraint(
 			ufield->orig_len = 0;
 			ufield->exp = NULL;
 			dfield_set_null(&ufield->new_val);
-
-			if (table->fts && dict_table_is_fts_column(
-				table->fts->indexes,
-				dict_index_get_nth_col_no(index, i))
-				!= ULINT_UNDEFINED) {
-				fts_col_affacted = TRUE;
-			}
 		}
 
-		if (fts_col_affacted) {
+		if (foreign->affects_fulltext()) {
 			fts_trx_add_op(trx, table, doc_id, FTS_DELETE, NULL);
 		}
-	} else if (table->fts && cascade->is_delete) {
-		/* DICT_FOREIGN_ON_DELETE_CASCADE case */
-		for (i = 0; i < foreign->n_fields; i++) {
-			if (table->fts && dict_table_is_fts_column(
-				table->fts->indexes,
-				dict_index_get_nth_col_no(index, i))
-				!= ULINT_UNDEFINED) {
-				fts_col_affacted = TRUE;
-			}
-		}
-
-		if (fts_col_affacted) {
-			fts_trx_add_op(trx, table, doc_id, FTS_DELETE, NULL);
-		}
+	} else if (table->fts && cascade->is_delete
+		   && foreign->affects_fulltext()) {
+		fts_trx_add_op(trx, table, doc_id, FTS_DELETE, NULL);
 	}
 
 	if (!node->is_delete
@@ -1297,9 +1270,9 @@ row_ins_foreign_check_on_constraint(
 	err = wsrep_append_foreign_key(
 				       thr_get_trx(thr),
 				       foreign,
-				       clust_rec,
+				       cascade->pcur->old_rec,
 				       clust_index,
-				       FALSE, FALSE);
+				       FALSE, WSREP_KEY_EXCLUSIVE);
 	if (err != DB_SUCCESS) {
 		fprintf(stderr,
 			"WSREP: foreign key append failed: %d\n", err);
@@ -1328,7 +1301,7 @@ row_ins_foreign_check_on_constraint(
 
 	row_mysql_freeze_data_dictionary(thr_get_trx(thr));
 
-	mtr_start_trx(mtr, trx);
+	mtr_start(mtr);
 
 	/* Restore pcur position */
 
@@ -1356,7 +1329,7 @@ nonstandard_exit_func:
 	btr_pcur_store_position(pcur, mtr);
 
 	mtr_commit(mtr);
-	mtr_start_trx(mtr, trx);
+	mtr_start(mtr);
 
 	btr_pcur_restore_position(BTR_SEARCH_LEAF, pcur, mtr);
 
@@ -1460,6 +1433,9 @@ row_ins_check_foreign_constraint(
 	ulint*		offsets		= offsets_;
 	rec_offs_init(offsets_);
 
+#ifdef WITH_WSREP
+	upd_node= NULL;
+#endif /* WITH_WSREP */
 run_again:
 #ifdef UNIV_SYNC_DEBUG
 	ut_ad(rw_lock_own(&dict_operation_lock, RW_LOCK_SHARED));
@@ -1518,7 +1494,7 @@ run_again:
 	}
 
 	if (check_table == NULL
-	    || check_table->ibd_file_missing
+	    || check_table->file_unreadable
 	    || check_index == NULL) {
 
 		if (!srv_read_only_mode && check_ref) {
@@ -1566,7 +1542,7 @@ run_again:
 		}
 	}
 
-	mtr_start_trx(&mtr, trx);
+	mtr_start(&mtr);
 
 	/* Store old value on n_fields_cmp */
 
@@ -1646,12 +1622,36 @@ run_again:
 				if (check_ref) {
 					err = DB_SUCCESS;
 #ifdef WITH_WSREP
+					if (!trx->is_wsrep()) {
+						goto end_scan;
+					}
+					enum wsrep_key_type key_type;
+					if (upd_node != NULL) {
+						key_type = WSREP_KEY_SHARED;
+					} else {
+						switch (wsrep_certification_rules) {
+						default:
+						case WSREP_CERTIFICATION_RULES_STRICT:
+							key_type = WSREP_KEY_EXCLUSIVE;
+							break;
+						case WSREP_CERTIFICATION_RULES_OPTIMIZED:
+							key_type = WSREP_KEY_SEMI;
+							break;
+						}
+					}
+
 					err = wsrep_append_foreign_key(
-						thr_get_trx(thr),
+						trx,
 						foreign,
-						rec, 
-						check_index, 
-						check_ref, TRUE);
+						rec,
+						check_index,
+						check_ref,
+						key_type);
+
+					if (err != DB_SUCCESS) {
+						fprintf(stderr,
+							"WSREP: foreign key append failed: %d\n", err);
+					}
 #endif /* WITH_WSREP */
 					goto end_scan;
 				} else if (foreign->type != 0) {
@@ -1802,7 +1802,7 @@ Otherwise does searches to the indexes of referenced tables and
 sets shared locks which lock either the success or the failure of
 a constraint.
 @return	DB_SUCCESS or error code */
-static __attribute__((nonnull, warn_unused_result))
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 row_ins_check_foreign_constraints(
 /*==============================*/
@@ -1943,7 +1943,7 @@ Scans a unique non-clustered index at a given index entry to determine
 whether a uniqueness violation has occurred for the key value of the entry.
 Set shared locks on possible duplicate records.
 @return	DB_SUCCESS, DB_DUPLICATE_KEY, or DB_LOCK_WAIT */
-static __attribute__((nonnull, warn_unused_result))
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 row_ins_scan_sec_index_for_duplicate(
 /*=================================*/
@@ -2085,7 +2085,7 @@ end_scan:
 @retval DB_SUCCESS_LOCKED_REC	when rec is an exact match of entry or
 a newer version of entry (the entry should not be inserted)
 @retval DB_DUPLICATE_KEY	when entry is a duplicate of rec */
-static __attribute__((nonnull, warn_unused_result))
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 row_ins_duplicate_online(
 /*=====================*/
@@ -2126,7 +2126,7 @@ row_ins_duplicate_online(
 @retval DB_SUCCESS_LOCKED_REC	when rec is an exact match of entry or
 a newer version of entry (the entry should not be inserted)
 @retval DB_DUPLICATE_KEY	when entry is a duplicate of rec */
-static __attribute__((nonnull, warn_unused_result))
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 row_ins_duplicate_error_in_clust_online(
 /*====================================*/
@@ -2166,14 +2166,10 @@ for a clustered index!
 @retval DB_SUCCESS if no error
 @retval DB_DUPLICATE_KEY if error,
 @retval DB_LOCK_WAIT if we have to wait for a lock on a possible duplicate
-record
-@retval DB_SUCCESS_LOCKED_REC if an exact match of the record was found
-in online table rebuild (flags & (BTR_KEEP_SYS_FLAG | BTR_NO_LOCKING_FLAG)) */
-static __attribute__((nonnull, warn_unused_result))
+record */
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 row_ins_duplicate_error_in_clust(
-/*=============================*/
-	ulint		flags,	/*!< in: undo logging and locking flags */
 	btr_cur_t*	cursor,	/*!< in: B-tree cursor */
 	const dtuple_t*	entry,	/*!< in: entry to insert */
 	que_thr_t*	thr,	/*!< in: query thread */
@@ -2388,7 +2384,7 @@ row_ins_clust_index_entry_low(
 		search_mode = mode;
 	}
 
-	mtr_start_trx(&mtr, thr_get_trx(thr));
+	mtr_start(&mtr);
 
 	if (mode == BTR_MODIFY_LEAF && dict_index_is_online_ddl(index)) {
 
@@ -2410,8 +2406,7 @@ row_ins_clust_index_entry_low(
 				    &cursor, 0, __FILE__, __LINE__, &mtr);
 
 	if (err != DB_SUCCESS) {
-		index->table->is_encrypted = true;
-		index->table->ibd_file_missing = true;
+		index->table->file_unreadable = true;
 		mtr_commit(&mtr);
 		goto func_exit;
 	}
@@ -2455,7 +2450,7 @@ row_ins_clust_index_entry_low(
 			DB_LOCK_WAIT */
 
 			err = row_ins_duplicate_error_in_clust(
-				flags, &cursor, entry, thr, &mtr);
+				&cursor, entry, thr, &mtr);
 		}
 
 		if (err != DB_SUCCESS) {
@@ -2625,12 +2620,11 @@ func_exit:
 /***************************************************************//**
 Starts a mini-transaction and checks if the index will be dropped.
 @return true if the index is to be dropped */
-static __attribute__((nonnull, warn_unused_result))
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 bool
-row_ins_sec_mtr_start_trx_and_check_if_aborted(
+row_ins_sec_mtr_start_and_check_if_aborted(
 /*=======================================*/
 	mtr_t*		mtr,	/*!< out: mini-transaction */
-	trx_t*		trx,	/*!< in: transaction handle */
 	dict_index_t*	index,	/*!< in/out: secondary index */
 	bool		check,	/*!< in: whether to check */
 	ulint		search_mode)
@@ -2638,7 +2632,7 @@ row_ins_sec_mtr_start_trx_and_check_if_aborted(
 {
 	ut_ad(!dict_index_is_clust(index));
 
-	mtr_start_trx(mtr, trx);
+	mtr_start(mtr);
 
 	if (!check) {
 		return(false);
@@ -2696,14 +2690,13 @@ row_ins_sec_index_entry_low(
 	ulint		n_unique;
 	mtr_t		mtr;
 	ulint*		offsets	= NULL;
-	trx_t*		trx = thr_get_trx(thr);
 
 	ut_ad(!dict_index_is_clust(index));
 	ut_ad(mode == BTR_MODIFY_LEAF || mode == BTR_MODIFY_TREE);
 
 	cursor.thr = thr;
 	ut_ad(thr_get_trx(thr)->id);
-	mtr_start_trx(&mtr, trx);
+	mtr_start(&mtr);
 
 	/* If running with fake_changes mode on then avoid using insert buffer
 	and also switch from modify to search so that code takes only s-latch
@@ -2765,13 +2758,13 @@ row_ins_sec_index_entry_low(
 
 	if (err != DB_SUCCESS) {
 		if (err == DB_DECRYPTION_FAILED) {
-			ib_push_warning(trx->mysql_thd,
+			ib_push_warning(thr_get_trx(thr)->mysql_thd,
 				DB_DECRYPTION_FAILED,
 				"Table %s is encrypted but encryption service or"
 				" used key_id is not available. "
 				" Can't continue reading table.",
 				index->table->name);
-			index->table->is_encrypted = true;
+			index->table->file_unreadable = true;
 		}
 		goto func_exit;
 	}
@@ -2801,8 +2794,8 @@ row_ins_sec_index_entry_low(
 
 		DEBUG_SYNC_C("row_ins_sec_index_unique");
 
-		if (row_ins_sec_mtr_start_trx_and_check_if_aborted(
-			    &mtr, trx, index, check, search_mode)) {
+		if (row_ins_sec_mtr_start_and_check_if_aborted(
+			    &mtr, index, check, search_mode)) {
 			goto func_exit;
 		}
 
@@ -2836,8 +2829,8 @@ row_ins_sec_index_entry_low(
 			return(err);
 		}
 
-		if (row_ins_sec_mtr_start_trx_and_check_if_aborted(
-			    &mtr, trx, index, check, search_mode)) {
+		if (row_ins_sec_mtr_start_and_check_if_aborted(
+			    &mtr, index, check, search_mode)) {
 			goto func_exit;
 		}
 
@@ -3040,6 +3033,10 @@ row_ins_sec_index_entry(
 	mem_heap_t*	offsets_heap;
 	mem_heap_t*	heap;
 
+	DBUG_EXECUTE_IF("row_ins_sec_index_entry_timeout", {
+ 			DBUG_SET("-d,row_ins_sec_index_entry_timeout");
+ 			return(DB_LOCK_WAIT);});
+
 	if (!index->table->foreign_set.empty()) {
 		err = row_ins_check_foreign_constraints(index->table, index,
 							entry, thr);
@@ -3062,6 +3059,11 @@ row_ins_sec_index_entry(
 		0, BTR_MODIFY_LEAF, index, offsets_heap, heap, entry, 0, thr);
 	if (err == DB_FAIL) {
 		mem_heap_empty(heap);
+
+		if (index->space == IBUF_SPACE_ID
+		    && !dict_index_is_unique(index)) {
+			ibuf_free_excess_pages();
+		}
 
 		/* Try then pessimistic descent to the B-tree */
 
@@ -3105,7 +3107,7 @@ row_ins_index_entry(
 /***********************************************************//**
 Sets the values of the dtuple fields in entry from the values of appropriate
 columns in row. */
-static __attribute__((nonnull))
+static MY_ATTRIBUTE((nonnull))
 void
 row_ins_index_entry_set_vals(
 /*=========================*/
@@ -3137,7 +3139,7 @@ row_ins_index_entry_set_vals(
 				= dict_field_get_col(ind_field);
 
 			len = dtype_get_at_most_n_mbchars(
-				col->prtype, col->mbminmaxlen,
+				col->prtype, col->mbminlen, col->mbmaxlen,
 				ind_field->prefix_len,
 				len,
 				static_cast<const char*>(
@@ -3158,7 +3160,7 @@ row_ins_index_entry_set_vals(
 Inserts a single index entry to the table.
 @return DB_SUCCESS if operation successfully completed, else error
 code or DB_LOCK_WAIT */
-static __attribute__((nonnull, warn_unused_result))
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 row_ins_index_entry_step(
 /*=====================*/
@@ -3281,7 +3283,7 @@ row_ins_get_row_from_select(
 Inserts a row to a table.
 @return DB_SUCCESS if operation successfully completed, else error
 code or DB_LOCK_WAIT */
-static __attribute__((nonnull, warn_unused_result))
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 row_ins(
 /*====*/

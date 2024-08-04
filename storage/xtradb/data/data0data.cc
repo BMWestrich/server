@@ -1,6 +1,7 @@
 /*****************************************************************************
 
-Copyright (c) 1994, 2012, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1994, 2016, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2019, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +13,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -67,7 +68,8 @@ dtuple_coll_cmp(
 	ulint	n_fields;
 	ulint	i;
 
-	ut_ad(tuple1 && tuple2);
+	ut_ad(tuple1 != NULL);
+	ut_ad(tuple2 != NULL);
 	ut_ad(tuple1->magic_n == DATA_TUPLE_MAGIC_N);
 	ut_ad(tuple2->magic_n == DATA_TUPLE_MAGIC_N);
 	ut_ad(dtuple_check_typed(tuple1));
@@ -105,8 +107,6 @@ dtuple_set_n_fields(
 	dtuple_t*	tuple,		/*!< in: tuple */
 	ulint		n_fields)	/*!< in: number of fields */
 {
-	ut_ad(tuple);
-
 	tuple->n_fields = n_fields;
 	tuple->n_fields_cmp = n_fields;
 }
@@ -715,7 +715,7 @@ UNIV_INTERN
 void
 dtuple_convert_back_big_rec(
 /*========================*/
-	dict_index_t*	index __attribute__((unused)),	/*!< in: index */
+	dict_index_t*	index MY_ATTRIBUTE((unused)),	/*!< in: index */
 	dtuple_t*	entry,	/*!< in: entry whose data was put to vector */
 	big_rec_t*	vector)	/*!< in, own: big rec vector; it is
 				freed in this function */

@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 #include "feedback.h"
 
@@ -92,16 +92,18 @@ static COND * const OOM= (COND*)1;
 static COND* make_cond(THD *thd, TABLE_LIST *tables, LEX_STRING *filter)
 {
   Item_cond_or *res= NULL;
-  Name_resolution_context nrc;
+  /* A reference to this context will be stored in Item_field */
+  Name_resolution_context *nrc= new (thd->mem_root) Name_resolution_context;
   const char *db= tables->db, *table= tables->alias,
              *field= tables->table->field[0]->field_name;
   CHARSET_INFO *cs= &my_charset_latin1;
 
-  if (!filter->str)
+  if (!filter->str || !nrc)
     return 0;
 
-  nrc.init();
-  nrc.resolve_in_table_list_only(tables);
+  nrc->init();
+  nrc->resolve_in_table_list_only(tables);
+  nrc->select_lex= tables->select_lex;
 
   res= new (thd->mem_root) Item_cond_or(thd);
   if (!res)
@@ -109,10 +111,10 @@ static COND* make_cond(THD *thd, TABLE_LIST *tables, LEX_STRING *filter)
 
   for (; filter->str; filter++)
   {
-    Item_field  *fld= new (thd->mem_root) Item_field(thd, &nrc, db, table,
+    Item_field  *fld= new (thd->mem_root) Item_field(thd, nrc, db, table,
                                                      field);
     Item_string *pattern= new (thd->mem_root) Item_string(thd, filter->str,
-                                                          filter->length, cs);
+                                                          (uint) filter->length, cs);
     Item_string *escape= new (thd->mem_root) Item_string(thd, "\\", 1, cs);
 
     if (!fld || !pattern || !escape)

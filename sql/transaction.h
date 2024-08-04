@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #ifndef TRANSACTION_H
 #define TRANSACTION_H
@@ -43,5 +43,7 @@ bool trans_xa_end(THD *thd);
 bool trans_xa_prepare(THD *thd);
 bool trans_xa_commit(THD *thd);
 bool trans_xa_rollback(THD *thd);
+
+void trans_reset_one_shot_chistics(THD *thd);
 
 #endif /* TRANSACTION_H */

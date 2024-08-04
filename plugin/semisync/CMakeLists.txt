@@ -11,16 +11,18 @@
 # 
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335 USA
 
 SET(SEMISYNC_MASTER_SOURCES  
  semisync.cc semisync_master.cc semisync_master_plugin.cc
  semisync.h semisync_master.h)
 
-MYSQL_ADD_PLUGIN(semisync_master ${SEMISYNC_MASTER_SOURCES})
+MYSQL_ADD_PLUGIN(semisync_master ${SEMISYNC_MASTER_SOURCES}
+  RECOMPILE_FOR_EMBEDDED)
 
 SET(SEMISYNC_SLAVE_SOURCES  semisync.cc semisync_slave.cc 
   semisync_slave_plugin.cc semisync.h semisync_slave.h )
 
-MYSQL_ADD_PLUGIN(semisync_slave ${SEMISYNC_SLAVE_SOURCES})
+MYSQL_ADD_PLUGIN(semisync_slave ${SEMISYNC_SLAVE_SOURCES}
+  RECOMPILE_FOR_EMBEDDED)
 

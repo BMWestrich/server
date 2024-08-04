@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 
 #ifndef MY_APC_STANDALONE
@@ -119,7 +119,7 @@ void init_show_explain_psi_keys(void)
 
   @retval FALSE - Ok, the call has been made
   @retval TRUE  - Call wasnt made (either the target is in disabled state or
-                    timeout occured)
+                    timeout occurred)
 */
 
 bool Apc_target::make_apc_call(THD *caller_thd, Apc_call *call, 

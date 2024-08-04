@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA */
 
 /*
   Originally written by Magnus Svensson
@@ -68,7 +68,7 @@ static void die(const char *fmt, ...)
 
 char *fgets_fn(char *buffer, size_t size, fgets_input_t input, int *error)
 {
-  char *line= fgets(buffer, size, (FILE*) input);
+  char *line= fgets(buffer, (int)size, (FILE*) input);
   if (error)
     *error= (line == NULL) ? ferror((FILE*)input) : 0;
   return line;

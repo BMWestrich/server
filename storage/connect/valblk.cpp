@@ -1,7 +1,7 @@
 /************ Valblk C++ Functions Source Code File (.CPP) *************/
-/*  Name: VALBLK.CPP  Version 2.1                                      */
+/*  Name: VALBLK.CPP  Version 2.3                                      */
 /*                                                                     */
-/*  (C) Copyright to the author Olivier BERTRAND          2005-2015    */
+/*  (C) Copyright to the author Olivier BERTRAND          2005-2017    */
 /*                                                                     */
 /*  This file contains the VALBLK and derived classes functions.       */
 /*  Second family is VALBLK, representing simple suballocated arrays   */
@@ -23,7 +23,7 @@
 /*  Include relevant MariaDB header file.                              */
 /***********************************************************************/
 #include "my_global.h"
-#if defined(__WIN__)
+#if defined(_WIN32)
 //#include <windows.h>
 #else
 #include "osutil.h"
@@ -53,17 +53,18 @@ PVBLK AllocValBlock(PGLOBAL g, void *mp, int type, int nval, int len,
   {
   PVBLK blkp;
 
-  if (trace)
+  if (trace(1))
     htrc("AVB: mp=%p type=%d nval=%d len=%d check=%u blank=%u\n",
          mp, type, nval, len, check, blank);
 
   switch (type) {
     case TYPE_STRING:
+		case TYPE_BIN:
     case TYPE_DECIM:
       if (len)
-        blkp = new(g) CHRBLK(mp, nval, len, prec, blank);
+        blkp = new(g) CHRBLK(mp, nval, type, len, prec, blank);
       else
-        blkp = new(g) STRBLK(g, mp, nval);
+        blkp = new(g) STRBLK(g, mp, nval, type);
 
       break;
     case TYPE_SHORT:
@@ -138,14 +139,14 @@ PSZ VALBLK::GetCharValue(int)
 
   assert(g);
   sprintf(g->Message, MSG(NO_CHAR_FROM), Type);
-  longjmp(g->jumper[g->jump_level], Type);
-  return NULL;
+	throw Type;
+	return NULL;
   } // end of GetCharValue
 
 /***********************************************************************/
 /*  Set format so formatted dates can be converted on input.           */
 /***********************************************************************/
-bool VALBLK::SetFormat(PGLOBAL g, PSZ, int, int)
+bool VALBLK::SetFormat(PGLOBAL g, PCSZ, int, int)
   {
   sprintf(g->Message, MSG(NO_DATE_FMT), Type);
   return true;
@@ -205,9 +206,10 @@ void VALBLK::ChkIndx(int n)
   {
   if (n < 0 || n >= Nval) {
     PGLOBAL& g = Global;
+		xtrc(1, "ChkIndx: n=%d Nval=%d\n", n, Nval);
     strcpy(g->Message, MSG(BAD_VALBLK_INDX));
-    longjmp(g->jumper[g->jump_level], Type);
-    } // endif n
+		throw Type;
+	} // endif n
 
   } // end of ChkIndx
 
@@ -215,9 +217,10 @@ void VALBLK::ChkTyp(PVAL v)
   {
   if (Check && (Type != v->GetType() || Unsigned != v->IsUnsigned())) {
     PGLOBAL& g = Global;
-    strcpy(g->Message, MSG(VALTYPE_NOMATCH));
-    longjmp(g->jumper[g->jump_level], Type);
-    } // endif Type
+		xtrc(1, "ChkTyp: Type=%d valType=%d\n", Type, v->GetType());
+		strcpy(g->Message, MSG(VALTYPE_NOMATCH));
+		throw Type;
+	} // endif Type
 
   } // end of ChkTyp
 
@@ -226,8 +229,8 @@ void VALBLK::ChkTyp(PVBLK vb)
   if (Check && (Type != vb->GetType() || Unsigned != vb->IsUnsigned())) {
     PGLOBAL& g = Global;
     strcpy(g->Message, MSG(VALTYPE_NOMATCH));
-    longjmp(g->jumper[g->jump_level], Type);
-    } // endif Type
+		throw Type;
+	} // endif Type
 
   } // end of ChkTyp
 
@@ -335,15 +338,15 @@ uchar TYPBLK<uchar>::GetTypedValue(PVAL valp)
 /*  Set one value in a block from a zero terminated string.            */
 /***********************************************************************/
 template <class TYPE>
-void TYPBLK<TYPE>::SetValue(PSZ p, int n)
+void TYPBLK<TYPE>::SetValue(PCSZ p, int n)
   {
   ChkIndx(n);
 
   if (Check) {
     PGLOBAL& g = Global;
     strcpy(g->Message, MSG(BAD_SET_STRING));
-    longjmp(g->jumper[g->jump_level], Type);
-    } // endif Check
+		throw Type;
+	} // endif Check
 
   bool      minus;
   ulonglong maxval = MaxVal();
@@ -385,15 +388,15 @@ template <>
 ulonglong TYPBLK<ulonglong>::MaxVal(void) {return ULONGLONG_MAX;}
 
 template <>
-void TYPBLK<double>::SetValue(PSZ p, int n)
+void TYPBLK<double>::SetValue(PCSZ p, int n)
   {
   ChkIndx(n);
 
   if (Check) {
     PGLOBAL& g = Global;
     strcpy(g->Message, MSG(BAD_SET_STRING));
-    longjmp(g->jumper[g->jump_level], Type);
-    } // endif Check
+		throw Type;
+	} // endif Check
 
   Typp[n] = atof(p);
   SetNull(n, false);
@@ -403,7 +406,7 @@ void TYPBLK<double>::SetValue(PSZ p, int n)
 /*  Set one value in a block from an array of characters.              */
 /***********************************************************************/
 template <class TYPE>
-void TYPBLK<TYPE>::SetValue(char *sp, uint len, int n)
+void TYPBLK<TYPE>::SetValue(PCSZ sp, uint len, int n)
   {
   PGLOBAL& g = Global;
   PSZ spz = (PSZ)PlugSubAlloc(g, NULL, 0);    // Temporary
@@ -510,7 +513,7 @@ void TYPBLK<TYPE>::SetValues(PVBLK pv, int k, int n)
   CheckType(pv)
   TYPE *lp = ((TYPBLK*)pv)->Typp;
 
-  for (register int i = k; i < n; i++)          // TODO
+  for (int i = k; i < n; i++)          // TODO
     Typp[i] = lp[i];
 
   } // end of SetValues
@@ -615,8 +618,8 @@ int TYPBLK<TYPE>::GetMaxLength(void)
 /***********************************************************************/
 /*  Constructor.                                                       */
 /***********************************************************************/
-CHRBLK::CHRBLK(void *mp, int nval, int len, int prec, bool blank)
-      : VALBLK(mp, TYPE_STRING, nval), Chrp((char*&)Blkp)
+CHRBLK::CHRBLK(void *mp, int nval, int type, int len, int prec, bool blank)
+      : VALBLK(mp, type, nval), Chrp((char*&)Blkp)
   {
   Valp = NULL;
   Blanks = blank;
@@ -778,7 +781,7 @@ void CHRBLK::SetValue(PVAL valp, int n)
 /***********************************************************************/
 /*  Set one value in a block from a zero terminated string.            */
 /***********************************************************************/
-void CHRBLK::SetValue(PSZ sp, int n)
+void CHRBLK::SetValue(PCSZ sp, int n)
   {
   uint len = (sp) ? strlen(sp) : 0;
   SetValue(sp, len, n);
@@ -787,7 +790,7 @@ void CHRBLK::SetValue(PSZ sp, int n)
 /***********************************************************************/
 /*  Set one value in a block from an array of characters.              */
 /***********************************************************************/
-void CHRBLK::SetValue(char *sp, uint len, int n)
+void CHRBLK::SetValue(const char *sp, uint len, int n)
   {
   char  *p = Chrp + n * Long;
 
@@ -795,8 +798,8 @@ void CHRBLK::SetValue(char *sp, uint len, int n)
   if (Check && (signed)len > Long) {
     PGLOBAL& g = Global;
     strcpy(g->Message, MSG(SET_STR_TRUNC));
-    longjmp(g->jumper[g->jump_level], Type);
-    } // endif Check
+		throw Type;
+	} // endif Check
 #endif   // _DEBUG
 
   if (sp)
@@ -804,7 +807,7 @@ void CHRBLK::SetValue(char *sp, uint len, int n)
 
   if (Blanks) {
     // Suppress eventual ending zero and right fill with blanks
-    for (register int i = len; i < Long; i++)
+    for (int i = len; i < Long; i++)
       p[i] = ' ';
 
   } else if ((signed)len < Long)
@@ -823,8 +826,8 @@ void CHRBLK::SetValue(PVBLK pv, int n1, int n2)
   if (Type != pv->GetType() || Long != ((CHRBLK*)pv)->Long) {
     PGLOBAL& g = Global;
     strcpy(g->Message, MSG(BLKTYPLEN_MISM));
-    longjmp(g->jumper[g->jump_level], Type);
-    } // endif Type
+		throw Type;
+	} // endif Type
 
   if (!(b = pv->IsNull(n2)))
     memcpy(Chrp + n1 * Long, ((CHRBLK*)pv)->Chrp + n2 * Long, Long);
@@ -874,8 +877,8 @@ void CHRBLK::SetValues(PVBLK pv, int k, int n)
   if (Type != pv->GetType() || Long != ((CHRBLK*)pv)->Long) {
     PGLOBAL& g = Global;
     strcpy(g->Message, MSG(BLKTYPLEN_MISM));
-    longjmp(g->jumper[g->jump_level], Type);
-    } // endif Type
+		throw Type;
+	} // endif Type
 #endif   // _DEBUG
   char *p = ((CHRBLK*)pv)->Chrp;
 
@@ -1008,8 +1011,8 @@ int CHRBLK::GetMaxLength(void)
 /***********************************************************************/
 /*  Constructor.                                                       */
 /***********************************************************************/
-STRBLK::STRBLK(PGLOBAL g, void *mp, int nval)
-      : VALBLK(mp, TYPE_STRING, nval), Strp((PSZ*&)Blkp)
+STRBLK::STRBLK(PGLOBAL g, void *mp, int nval, int type)
+      : VALBLK(mp, type, nval), Strp((PSZ*&)Blkp)
   {
   Global = g;
   Nullable = true;
@@ -1152,7 +1155,7 @@ void STRBLK::SetValue(PVAL valp, int n)
 /***********************************************************************/
 /*  Set one value in a block from a zero terminated string.            */
 /***********************************************************************/
-void STRBLK::SetValue(PSZ p, int n)
+void STRBLK::SetValue(PCSZ p, int n)
   {
   if (p) {
     if (!Sorted || !n || !Strp[n-1] || strcmp(p, Strp[n-1]))
@@ -1168,7 +1171,7 @@ void STRBLK::SetValue(PSZ p, int n)
 /***********************************************************************/
 /*  Set one value in a block from an array of characters.              */
 /***********************************************************************/
-void STRBLK::SetValue(char *sp, uint len, int n)
+void STRBLK::SetValue(const char *sp, uint len, int n)
   {
   PSZ p;
 
@@ -1316,7 +1319,7 @@ DATBLK::DATBLK(void *mp, int nval) : TYPBLK<int>(mp, nval, TYPE_INT)
 /***********************************************************************/
 /*  Set format so formatted dates can be converted on input.           */
 /***********************************************************************/
-bool DATBLK::SetFormat(PGLOBAL g, PSZ fmt, int len, int year)
+bool DATBLK::SetFormat(PGLOBAL g, PCSZ fmt, int len, int year)
   {
   if (!(Dvalp = AllocateValue(g, TYPE_DATE, len, year, false, fmt)))
     return true;
@@ -1343,7 +1346,7 @@ char *DATBLK::GetCharString(char *p, int n)
 /***********************************************************************/
 /*  Set one value in a block from a char string.                       */
 /***********************************************************************/
-void DATBLK::SetValue(PSZ p, int n)
+void DATBLK::SetValue(PCSZ p, int n)
   {
   if (Dvalp) {
     // Decode the string according to format

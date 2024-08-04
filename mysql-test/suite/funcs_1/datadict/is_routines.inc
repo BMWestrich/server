@@ -18,6 +18,8 @@
 # 2008-06-11 mleich Move t/is_routines.test to this file and
 #                   create variants for embedded/non embedded server.
 #
+
+--source include/default_charset.inc
 set sql_mode="";
 
 let $engine_type       = MEMORY;
@@ -180,26 +182,22 @@ TO 'testuser2'@'localhost';
 GRANT EXECUTE ON db_datadict_2.* TO 'testuser2'@'localhost';
 FLUSH PRIVILEGES;
 
---echo # Establish connection testuser1 (user=testuser1)
 --replace_result $MASTER_MYPORT MYSQL_PORT $MASTER_MYSOCK MYSQL_SOCK
 connect (testuser1, localhost, testuser1, , db_datadict);
 --replace_column 24 "YYYY-MM-DD hh:mm:ss" 25 "YYYY-MM-DD hh:mm:ss"
 SELECT * FROM information_schema.routines;
 
---echo # Establish connection testuser2 (user=testuser2)
 --replace_result $MASTER_MYPORT MYSQL_PORT $MASTER_MYSOCK MYSQL_SOCK
 connect (testuser2, localhost, testuser2, , db_datadict);
 --replace_column 24 "YYYY-MM-DD hh:mm:ss" 25 "YYYY-MM-DD hh:mm:ss"
 SELECT * FROM information_schema.routines;
 
---echo # Establish connection testuser3 (user=testuser3)
 --replace_result $MASTER_MYPORT MYSQL_PORT $MASTER_MYSOCK MYSQL_SOCK
 connect (testuser3, localhost, testuser3, , test);
 --replace_column 24 "YYYY-MM-DD hh:mm:ss" 25 "YYYY-MM-DD hh:mm:ss"
 SELECT * FROM information_schema.routines;
 
 # Cleanup
---echo # Switch to connection default and close connections testuser1,testuser2,testuser3
 connection default;
 disconnect testuser1;
 disconnect testuser2;

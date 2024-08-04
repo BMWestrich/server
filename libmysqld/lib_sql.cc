@@ -44,12 +44,13 @@ extern unsigned int mysql_server_last_errno;
 extern char mysql_server_last_error[MYSQL_ERRMSG_SIZE];
 static my_bool emb_read_query_result(MYSQL *mysql);
 static void emb_free_embedded_thd(MYSQL *mysql);
-
+static bool embedded_print_errors= 0;
 
 extern "C" void unireg_clear(int exit_code)
 {
   DBUG_ENTER("unireg_clear");
-  clean_up(!opt_help && (exit_code || !opt_bootstrap)); /* purecov: inspected */
+  embedded_print_errors= 0;
+  clean_up(!opt_help && !exit_code); /* purecov: inspected */
   clean_up_mutexes();
   my_end(opt_endinfo ? MY_CHECK_ERROR | MY_GIVE_INFO : 0);
   DBUG_VOID_RETURN;
@@ -140,8 +141,7 @@ emb_advanced_command(MYSQL *mysql, enum enum_server_command command,
   }
 
   /* Clear result variables */
-  thd->clear_error();
-  thd->get_stmt_da()->reset_diagnostics_area();
+  thd->clear_error(1);
   mysql->affected_rows= ~(my_ulonglong) 0;
   mysql->field_count= 0;
   net_clear_error(net);
@@ -165,7 +165,8 @@ emb_advanced_command(MYSQL *mysql, enum enum_server_command command,
     arg_length= header_length;
   }
 
-  result= dispatch_command(command, thd, (char *) arg, arg_length);
+  result= dispatch_command(command, thd, (char *) arg, arg_length, FALSE,
+                           FALSE);
   thd->cur_data= 0;
   thd->mysys_var= NULL;
 
@@ -329,12 +330,19 @@ static my_bool emb_read_query_result(MYSQL *mysql)
 static int emb_stmt_execute(MYSQL_STMT *stmt)
 {
   DBUG_ENTER("emb_stmt_execute");
-  uchar header[5];
+  uchar header[9];
   THD *thd;
   my_bool res;
 
+  if (stmt->param_count && !stmt->bind_param_done)
+  {
+    set_stmt_error(stmt, CR_PARAMS_NOT_BOUND, unknown_sqlstate, NULL);
+    DBUG_RETURN(1);
+  }
+
   int4store(header, stmt->stmt_id);
   header[4]= (uchar) stmt->flags;
+  header[5]= header[6]= header[7]= header[8]= 0; // safety
   thd= (THD*)stmt->mysql->thd;
   thd->client_param_count= stmt->param_count;
   thd->client_params= stmt->params;
@@ -425,7 +433,6 @@ static void emb_free_embedded_thd(MYSQL *mysql)
   THD *thd= (THD*)mysql->thd;
   mysql_mutex_lock(&LOCK_thread_count);
   thd->clear_data_list();
-  thread_count--;
   thd->store_globals();
   thd->unlink();
   mysql_mutex_unlock(&LOCK_thread_count);
@@ -513,7 +520,11 @@ int init_embedded_server(int argc, char **argv, char **groups)
   const char *fake_groups[] = { "server", "embedded", 0 };
   my_bool acl_error;
 
+  embedded_print_errors= 1;
   if (my_thread_init())
+    return 1;
+
+  if (init_early_variables())
     return 1;
 
   if (argc)
@@ -612,7 +623,8 @@ int init_embedded_server(int argc, char **argv, char **groups)
 
   (void) thr_setconcurrency(concurrency);	// 10 by default
 
-  start_handle_manager();
+  if (flush_time && flush_time != ~(ulong) 0L)
+    start_handle_manager();
 
   // FIXME initialize binlog_filter and rpl_filter if not already done
   //       corresponding delete is in clean_up()
@@ -663,8 +675,7 @@ void init_embedded_mysql(MYSQL *mysql, int client_flag)
 */
 void *create_embedded_thd(int client_flag)
 {
-  THD * thd= new THD;
-  thd->thread_id= thd->variables.pseudo_thread_id= next_thread_id();
+  THD * thd= new THD(next_thread_id());
 
   thd->thread_stack= (char*) &thd;
   if (thd->store_globals())
@@ -697,7 +708,6 @@ void *create_embedded_thd(int client_flag)
   bzero((char*) &thd->net, sizeof(thd->net));
 
   mysql_mutex_lock(&LOCK_thread_count);
-  thread_count++;
   threads.append(thd);
   mysql_mutex_unlock(&LOCK_thread_count);
   thd->mysys_var= 0;
@@ -821,7 +831,7 @@ int check_embedded_connection(MYSQL *mysql, const char *db)
   /* acl_authenticate() takes the data from thd->net->read_pos */
   thd->net.read_pos= (uchar*)buf;
 
-  if (acl_authenticate(thd, 0, end - buf))
+  if (acl_authenticate(thd, (uint) (end - buf)))
   {
     my_free(thd->security_ctx->user);
     goto err;
@@ -1066,6 +1076,10 @@ bool Protocol::send_result_set_metadata(List<Item> *list, uint flags)
     client_field->type=   server_field.type;
     client_field->flags= (uint16) server_field.flags;
     client_field->decimals= server_field.decimals;
+    if (server_field.type == MYSQL_TYPE_FLOAT ||
+        server_field.type == MYSQL_TYPE_DOUBLE)
+      set_if_smaller(client_field->decimals, FLOATING_POINT_DECIMALS);
+
     client_field->db_length=		strlen(client_field->db);
     client_field->table_length=		strlen(client_field->table);
     client_field->name_length=		strlen(client_field->name);
@@ -1166,7 +1180,8 @@ bool Protocol_binary::write()
 bool
 net_send_ok(THD *thd,
             uint server_status, uint statement_warn_count,
-            ulonglong affected_rows, ulonglong id, const char *message)
+            ulonglong affected_rows, ulonglong id, const char *message,
+            bool, bool)
 {
   DBUG_ENTER("emb_net_send_ok");
   MYSQL_DATA *data;
@@ -1325,8 +1340,17 @@ int vprint_msg_to_log(enum loglevel level __attribute__((unused)),
                        const char *format, va_list argsi)
 {
   vsnprintf(mysql_server_last_error, sizeof(mysql_server_last_error),
-           format, argsi);
+            format, argsi);
   mysql_server_last_errno= CR_UNKNOWN_ERROR;
+  if (embedded_print_errors && level == ERROR_LEVEL)
+  {
+    /* The following is for testing when someone removes the above test */
+    const char *tag= (level == ERROR_LEVEL ? "ERROR" :
+                      level == WARNING_LEVEL ? "Warning" :
+                      "Note");
+    fprintf(stderr,"Got %s: \"%s\" errno: %d\n",
+            tag, mysql_server_last_error, mysql_server_last_errno);
+  }
   return 0;
 }
 

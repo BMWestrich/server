@@ -1,7 +1,7 @@
 /*****************************************************************************
 
-Copyright (c) 1995, 2014, Oracle and/or its affiliates. All Rights Reserved.
-Copyright (c) 2013, 2015, MariaDB Corporation. All Rights Reserved.
+Copyright (c) 1995, 2017, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2013, 2020, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -13,7 +13,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -37,6 +37,7 @@ Created 2011/12/19
 #include "page0zip.h"
 #include "trx0sys.h"
 #include "fil0crypt.h"
+#include "fil0pagecompress.h"
 
 #ifndef UNIV_HOTBACKUP
 
@@ -174,13 +175,14 @@ buf_dblwr_init(
 		mem_zalloc(buf_size * sizeof(void*)));
 }
 
-/****************************************************************//**
-Creates the doublewrite buffer to a new InnoDB installation. The header of the
-doublewrite buffer is placed on the trx system header page. */
+/** Create the doublewrite buffer if the doublewrite buffer header
+is not present in the TRX_SYS page.
+@return	whether the operation succeeded
+@retval	true	if the doublewrite buffer exists or was created
+@retval	false	if the creation failed (too small first data file) */
 UNIV_INTERN
-void
-buf_dblwr_create(void)
-/*==================*/
+bool
+buf_dblwr_create()
 {
 	buf_block_t*	block2;
 	buf_block_t*	new_block;
@@ -193,8 +195,7 @@ buf_dblwr_create(void)
 
 	if (buf_dblwr) {
 		/* Already inited */
-
-		return;
+		return(true);
 	}
 
 start_again:
@@ -212,11 +213,8 @@ start_again:
 
 		mtr_commit(&mtr);
 		buf_dblwr_being_created = FALSE;
-		return;
+		return(true);
 	}
-
-	ib_logf(IB_LOG_LEVEL_INFO,
-		"Doublewrite buffer not found: creating new");
 
 	if (buf_pool_get_curr_size()
 	    < ((TRX_SYS_DOUBLEWRITE_BLOCKS * TRX_SYS_DOUBLEWRITE_BLOCK_SIZE
@@ -224,33 +222,49 @@ start_again:
 	       * UNIV_PAGE_SIZE)) {
 
 		ib_logf(IB_LOG_LEVEL_ERROR,
-			"Cannot create doublewrite buffer: you must "
-			"increase your buffer pool size. Cannot continue "
-			"operation.");
+			"Cannot create doublewrite buffer: "
+			"innodb_buffer_pool_size is too small.");
+		mtr_commit(&mtr);
+		return(false);
+	} else {
+		fil_space_t* space = fil_space_acquire(TRX_SYS_SPACE);
+		const bool fail = UT_LIST_GET_FIRST(space->chain)->size
+			< 3 * FSP_EXTENT_SIZE;
+		fil_space_release(space);
 
-		exit(EXIT_FAILURE);
+		if (fail) {
+			goto too_small;
+		}
 	}
 
 	block2 = fseg_create(TRX_SYS_SPACE, TRX_SYS_PAGE_NO,
 			     TRX_SYS_DOUBLEWRITE
 			     + TRX_SYS_DOUBLEWRITE_FSEG, &mtr);
 
+	if (block2 == NULL) {
+too_small:
+		ib_logf(IB_LOG_LEVEL_ERROR,
+			"Cannot create doublewrite buffer: "
+			"the first file in innodb_data_file_path"
+			" must be at least %luM.",
+			3 * (FSP_EXTENT_SIZE * UNIV_PAGE_SIZE) >> 20);
+		mtr_commit(&mtr);
+		return(false);
+	}
+
+	ib_logf(IB_LOG_LEVEL_INFO,
+		"Doublewrite buffer not found: creating new");
+
+	/* FIXME: After this point, the doublewrite buffer creation
+	is not atomic. The doublewrite buffer should not exist in
+	the InnoDB system tablespace file in the first place.
+	It could be located in separate optional file(s) in a
+	user-specified location. */
+
 	/* fseg_create acquires a second latch on the page,
 	therefore we must declare it: */
 
 	buf_block_dbg_add_level(block2, SYNC_NO_ORDER_CHECK);
-
-	if (block2 == NULL) {
-		ib_logf(IB_LOG_LEVEL_ERROR,
-			"Cannot create doublewrite buffer: you must "
-			"increase your tablespace size. "
-			"Cannot continue operation.");
-
-		/* We exit without committing the mtr to prevent
-		its modifications to the database getting to disk */
-
-		exit(EXIT_FAILURE);
-	}
 
 	fseg_header = doublewrite + TRX_SYS_DOUBLEWRITE_FSEG;
 	prev_page_no = 0;
@@ -260,12 +274,10 @@ start_again:
 		new_block = fseg_alloc_free_page(
 			fseg_header, prev_page_no + 1, FSP_UP, &mtr);
 		if (new_block == NULL) {
-			ib_logf(IB_LOG_LEVEL_ERROR,
+			ib_logf(IB_LOG_LEVEL_FATAL,
 				"Cannot create doublewrite buffer: you must "
 				"increase your tablespace size. "
 				"Cannot continue operation.");
-
-			exit(EXIT_FAILURE);
 		}
 
 		/* We read the allocated pages to the buffer pool;
@@ -279,6 +291,13 @@ start_again:
 
 		ut_ad(rw_lock_get_x_lock_count(&new_block->lock) == 1);
 		page_no = buf_block_get_page_no(new_block);
+		/* We only do this in the debug build, to ensure that
+		both the check in buf_flush_init_for_writing() and
+		recv_parse_or_apply_log_rec_body() will see a valid
+		page type. The flushes of new_block are actually
+		unnecessary here.  */
+		ut_d(mlog_write_ulint(FIL_PAGE_TYPE + new_block->frame,
+				      FIL_PAGE_TYPE_SYS, MLOG_2BYTES, &mtr));
 
 		if (i == FSP_EXTENT_SIZE / 2) {
 			ut_a(page_no == FSP_EXTENT_SIZE);
@@ -341,6 +360,7 @@ start_again:
 
 	/* Flush the modified pages to disk and make a checkpoint */
 	log_make_checkpoint_at(LSN_MAX, TRUE);
+	buf_dblwr_being_created = FALSE;
 
 	/* Remove doublewrite pages from LRU */
 	buf_pool_invalidate();
@@ -348,6 +368,22 @@ start_again:
 	ib_logf(IB_LOG_LEVEL_INFO, "Doublewrite buffer created");
 
 	goto start_again;
+}
+
+/** Check if a page is all zeroes.
+@param[in]	read_buf	database page
+@param[in]	zip_size	ROW_FORMAT=COMPRESSED page size, or 0
+@return	whether the page is all zeroes */
+static bool buf_page_is_zeroes(const byte* read_buf, ulint zip_size)
+{
+	const ulint page_size = zip_size ? zip_size : UNIV_PAGE_SIZE;
+
+	for (ulint i = 0; i < page_size; i++) {
+		if (read_buf[i] != 0) {
+			return false;
+		}
+	}
+	return true;
 }
 
 /****************************************************************//**
@@ -359,7 +395,7 @@ recovery, this function loads the pages from double write buffer into memory. */
 void
 buf_dblwr_init_or_load_pages(
 /*=========================*/
-	os_file_t	file,
+	pfs_os_file_t	file,
 	char*		path,
 	bool		load_corrupt_pages)
 {
@@ -390,13 +426,7 @@ buf_dblwr_init_or_load_pages(
 
 	doublewrite = read_buf + TRX_SYS_DOUBLEWRITE;
 
-	if (mach_read_from_4(read_buf + FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION) != 0) {
-		byte* tmp = fil_space_decrypt((ulint)TRX_SYS_SPACE,
-						read_buf + UNIV_PAGE_SIZE,
-						UNIV_PAGE_SIZE, /* page size */
-						read_buf);
-		doublewrite = tmp + TRX_SYS_DOUBLEWRITE;
-	}
+	/* TRX_SYS_PAGE_NO is not encrypted see fil_crypt_rotate_page() */
 
 	if (mach_read_from_4(doublewrite + TRX_SYS_DOUBLEWRITE_MAGIC)
 	    == TRX_SYS_DOUBLEWRITE_MAGIC_N) {
@@ -463,8 +493,11 @@ buf_dblwr_init_or_load_pages(
 			os_file_write(path, file, page,
 				      source_page_no * UNIV_PAGE_SIZE,
 				      UNIV_PAGE_SIZE);
-		} else if (load_corrupt_pages) {
-
+		} else if (load_corrupt_pages
+			   && !buf_page_is_zeroes(page, FIL_PAGE_DATA)) {
+			/* Each valid page header must contain some
+			nonzero bytes, such as FIL_PAGE_OFFSET
+			or FIL_PAGE_LSN. */
 			recv_dblwr.add(page);
 		}
 
@@ -493,135 +526,150 @@ buf_dblwr_process()
 	byte*	unaligned_read_buf;
 	recv_dblwr_t& recv_dblwr = recv_sys->dblwr;
 
-	unaligned_read_buf = static_cast<byte*>(ut_malloc(2 * UNIV_PAGE_SIZE));
+	if (!buf_dblwr) {
+		return;
+	}
+
+	ib_logf(IB_LOG_LEVEL_INFO,
+		"Restoring possible half-written data pages "
+		"from the doublewrite buffer...");
+
+	unaligned_read_buf = static_cast<byte*>(ut_malloc(3 * UNIV_PAGE_SIZE));
 
 	read_buf = static_cast<byte*>(
 		ut_align(unaligned_read_buf, UNIV_PAGE_SIZE));
+	byte* const buf = read_buf + UNIV_PAGE_SIZE;
 
 	for (std::list<byte*>::iterator i = recv_dblwr.pages.begin();
 	     i != recv_dblwr.pages.end(); ++i, ++page_no_dblwr ) {
-
 		page = *i;
 		page_no  = mach_read_from_4(page + FIL_PAGE_OFFSET);
 		space_id = mach_read_from_4(page + FIL_PAGE_SPACE_ID);
 
-		if (!fil_tablespace_exists_in_mem(space_id)) {
+		FilSpace space(space_id, true);
+
+		if (!space()) {
 			/* Maybe we have dropped the single-table tablespace
 			and this page once belonged to it: do nothing */
-
-		} else if (!fil_check_adress_in_tablespace(space_id,
-							   page_no)) {
-			ib_logf(IB_LOG_LEVEL_WARN,
-				"A page in the doublewrite buffer is not "
-				"within space bounds; space id %lu "
-				"page number %lu, page %lu in "
-				"doublewrite buf.",
-				(ulong) space_id, (ulong) page_no,
-				page_no_dblwr);
-		} else {
-			ulint	zip_size = fil_space_get_zip_size(space_id);
-
-			/* Read in the actual page from the file */
-			fil_io(OS_FILE_READ,
-				true,
-				space_id,
-				zip_size,
-				page_no,
-				0,
-				zip_size ? zip_size : UNIV_PAGE_SIZE,
-				read_buf,
-				NULL,
-				0);
-
-			if (fil_space_verify_crypt_checksum(read_buf, zip_size)) {
-				/* page is encrypted and checksum is OK */
-			} else if (buf_page_is_corrupted(true, read_buf, zip_size)) {
-
-				fprintf(stderr,
-					"InnoDB: Warning: database page"
-					" corruption or a failed\n"
-					"InnoDB: file read of"
-					" space %lu page %lu.\n"
-					"InnoDB: Trying to recover it from"
-					" the doublewrite buffer.\n",
-					(ulong) space_id, (ulong) page_no);
-
-				if (fil_space_verify_crypt_checksum(page, zip_size)) {
-					/* the doublewrite buffer page is encrypted and OK */
-				} else if (buf_page_is_corrupted(true,
-								 page,
-								 zip_size)) {
-					fprintf(stderr,
-						"InnoDB: Dump of the page:\n");
-					buf_page_print(
-						read_buf, zip_size,
-						BUF_PAGE_PRINT_NO_CRASH);
-					fprintf(stderr,
-						"InnoDB: Dump of"
-						" corresponding page"
-						" in doublewrite buffer:\n");
-					buf_page_print(
-						page, zip_size,
-						BUF_PAGE_PRINT_NO_CRASH);
-
-					fprintf(stderr,
-						"InnoDB: Also the page in the"
-						" doublewrite buffer"
-						" is corrupt.\n"
-						"InnoDB: Cannot continue"
-						" operation.\n"
-						"InnoDB: You can try to"
-						" recover the database"
-						" with the my.cnf\n"
-						"InnoDB: option:\n"
-						"InnoDB:"
-						" innodb_force_recovery=6\n");
-					ut_error;
-				}
-
-				/* Write the good page from the
-				doublewrite buffer to the intended
-				position */
-
-				fil_io(OS_FILE_WRITE,
-					true,
-					space_id,
-					zip_size,
-					page_no,
-					0,
-					zip_size ? zip_size : UNIV_PAGE_SIZE,
-					page,
-					NULL,
-					0);
-
-				ib_logf(IB_LOG_LEVEL_INFO,
-					"Recovered the page from"
-					" the doublewrite buffer.");
-
-			} else if (buf_page_is_zeroes(read_buf, zip_size)) {
-
-				if (!buf_page_is_zeroes(page, zip_size)
-				    && !buf_page_is_corrupted(true, page,
-							      zip_size)) {
-
-					/* Database page contained only
-					zeroes, while a valid copy is
-					available in dblwr buffer. */
-
-					fil_io(OS_FILE_WRITE,
-						true,
-						space_id,
-						zip_size,
-						page_no, 0,
-						zip_size ? zip_size : UNIV_PAGE_SIZE,
-						page,
-						NULL,
-						0);
-				}
-			}
+			continue;
 		}
+
+		if (!space()->size) {
+			fil_space_get_size(space_id);
+		}
+
+		if (UNIV_UNLIKELY(space()->size <= page_no)) {
+			ib_logf(IB_LOG_LEVEL_WARN,
+				"A copy of page " ULINTPF
+				" in the doublewrite buffer slot " ULINTPF
+				" is beyond the end of the tablespace "
+				" %s (" ULINTPF " pages)",
+				page_no, page_no_dblwr,
+				space()->name, space()->size);
+			continue;
+		}
+
+		ulint	zip_size = fsp_flags_get_zip_size(space()->flags);
+		ut_ad(!buf_page_is_zeroes(page, zip_size));
+
+		/* Read in the actual page from the file */
+		fil_io(OS_FILE_READ,
+		       true,
+		       space_id,
+		       zip_size,
+		       page_no,
+		       0,
+		       zip_size ? zip_size : UNIV_PAGE_SIZE,
+		       read_buf,
+		       NULL,
+		       0);
+
+		const bool is_all_zero = buf_page_is_zeroes(
+			read_buf, zip_size);
+		const bool expect_encrypted = space()->crypt_data
+			&& space()->crypt_data->type
+			!= CRYPT_SCHEME_UNENCRYPTED;
+
+		if (is_all_zero) {
+			/* We will check if the copy in the
+			doublewrite buffer is valid. If not, we will
+			ignore this page (there should be redo log
+			records to initialize it). */
+		} else {
+			/* Decompress the page before
+			validating the checksum. */
+			ulint decomp = fil_page_decompress(buf, read_buf);
+			if (!decomp || (decomp != srv_page_size && zip_size)) {
+				goto bad;
+			}
+
+			if (expect_encrypted && mach_read_from_4(
+				    read_buf
+				    + FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION)
+			    ? fil_space_verify_crypt_checksum(read_buf,
+							      zip_size)
+			    : !buf_page_is_corrupted(true, read_buf,
+						     zip_size, space())) {
+				/* The page is good; there is no need
+				to consult the doublewrite buffer. */
+				continue;
+			}
+
+bad:
+			/* We intentionally skip this message for
+			is_all_zero pages. */
+			ib_logf(IB_LOG_LEVEL_INFO,
+				"Trying to recover page " ULINTPF ":" ULINTPF
+				" from the doublewrite buffer.",
+				space_id, page_no);
+		}
+
+		ulint decomp = fil_page_decompress(buf, page);
+		if (!decomp || (decomp != srv_page_size && zip_size)) {
+			continue;
+		}
+
+		if (expect_encrypted && mach_read_from_4(
+			    page + FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION)
+		    ? !fil_space_verify_crypt_checksum(page, zip_size)
+		    : buf_page_is_corrupted(true, page, zip_size, space())) {
+			/* Theoretically we could have another good
+			copy for this page in the doublewrite
+			buffer. If not, we will report a fatal error
+			for a corrupted page somewhere else if that
+			page was truly needed. */
+			continue;
+		}
+
+		if (page_no == 0) {
+			/* Check the FSP_SPACE_FLAGS. */
+			ulint flags = fsp_header_get_flags(page);
+			if (!fsp_flags_is_valid(flags)
+			    && fsp_flags_convert_from_101(flags)
+			    == ULINT_UNDEFINED) {
+				ib_logf(IB_LOG_LEVEL_WARN,
+					"Ignoring a doublewrite copy of page "
+					ULINTPF ":0 due to invalid flags 0x%x",
+					space_id, int(flags));
+				continue;
+			}
+			/* The flags on the page should be converted later. */
+		}
+
+		/* Write the good page from the doublewrite buffer to
+		the intended position. */
+
+		fil_io(OS_FILE_WRITE, true, space_id, zip_size, page_no, 0,
+		       zip_size ? zip_size : UNIV_PAGE_SIZE,
+		       page, NULL, 0);
+
+		ib_logf(IB_LOG_LEVEL_INFO,
+			"Recovered page " ULINTPF ":" ULINTPF " from"
+			" the doublewrite buffer.",
+			space_id, page_no);
 	}
 
+	ut_free(unaligned_read_buf);
 	fil_flush_file_spaces(FIL_TABLESPACE);
 
         {
@@ -780,7 +828,7 @@ buf_dblwr_assert_on_corrupt_block(
 /*==============================*/
 	const buf_block_t*	block)	/*!< in: block to check */
 {
-	buf_page_print(block->frame, 0, BUF_PAGE_PRINT_NO_CRASH);
+	buf_page_print(block->frame, 0);
 
 	ut_print_timestamp(stderr);
 	fprintf(stderr,
@@ -921,6 +969,7 @@ try_again:
 		ib_int64_t	sig_count = os_event_reset(buf_dblwr->b_event);
 		mutex_exit(&buf_dblwr->mutex);
 
+		os_aio_simulated_wake_handler_threads();
 		os_event_wait_low(buf_dblwr->b_event, sig_count);
 		goto try_again;
 	}
@@ -1010,7 +1059,7 @@ flush:
 	srv_stats.dblwr_writes.inc();
 
 	/* Now flush the doublewrite buffer data to disk */
-	fil_flush(TRX_SYS_SPACE);
+	fil_flush(ulint(TRX_SYS_SPACE));
 
 	/* We know that the writes have been flushed to disk now
 	and in recovery we will find them in the doublewrite buffer
@@ -1070,6 +1119,7 @@ try_again:
 		checkpoint. */
 		ib_int64_t	sig_count = os_event_reset(buf_dblwr->b_event);
 		mutex_exit(&buf_dblwr->mutex);
+		os_aio_simulated_wake_handler_threads();
 
 		os_event_wait_low(buf_dblwr->b_event, sig_count);
 		goto try_again;
@@ -1258,7 +1308,7 @@ retry:
 	}
 
 	/* Now flush the doublewrite buffer data to disk */
-	fil_flush(TRX_SYS_SPACE);
+	fil_flush(ulint(TRX_SYS_SPACE));
 
 	/* We know that the write has been flushed to disk now
 	and during recovery we will find it in the doublewrite buffer

@@ -11,28 +11,7 @@
 
 typedef class TBLDEF *PTBLDEF;
 typedef class TDBTBL *PTDBTBL;
-typedef class TDBTBM *PTDBTBM;
 typedef class MYSQLC *PMYC;
-
-/***********************************************************************/
-/*  Defines the structures used for distributed TBM tables.            */
-/***********************************************************************/
-typedef struct _TBMtable *PTBMT;
-
-typedef struct _TBMtable {
-  PTBMT     Next;                 // Points to next data table struct
-  PTABLE    Tap;                  // Points to the sub table
-  PGLOBAL   G;                    // Needed in thread routine
-  bool      Complete;             // TRUE when all results are read
-  bool      Ready;                // TRUE when results are there
-  int       Rows;                 // Total number of rows read so far
-  int       ProgCur;              // Current pos
-  int       ProgMax;              // Max pos
-  int       Rc;                   // Return code
-  THD      *Thd;
-  pthread_attr_t attr;            // ???
-  pthread_t Tid;                  // CheckOpen thread ID
-  } TBMT;
 
 /***********************************************************************/
 /*  TBL table.                                                         */
@@ -123,7 +102,33 @@ class TBTBLK : public TIDBLK {
 
  protected:
   // Must not have additional members
-  }; // end of class TBTBLK
+}; // end of class TBTBLK
+
+#if defined(DEVELOPMENT)
+/***********************************************************************/
+/*  This table type is buggy and removed until a fix is found.         */
+/***********************************************************************/
+typedef class TDBTBM *PTDBTBM;
+
+/***********************************************************************/
+/*  Defines the structures used for distributed TBM tables.            */
+/***********************************************************************/
+typedef struct _TBMtable *PTBMT;
+
+typedef struct _TBMtable {
+	PTBMT     Next;                 // Points to next data table struct
+	PTABLE    Tap;                  // Points to the sub table
+	PGLOBAL   G;                    // Needed in thread routine
+	bool      Complete;             // TRUE when all results are read
+	bool      Ready;                // TRUE when results are there
+	int       Rows;                 // Total number of rows read so far
+	int       ProgCur;              // Current pos
+	int       ProgMax;              // Max pos
+	int       Rc;                   // Return code
+	THD      *Thd;
+	pthread_attr_t attr;            // ???
+	pthread_t Tid;                  // CheckOpen thread ID
+} TBMT;
 
 /***********************************************************************/
 /*  This is the TBM Access Method class declaration.                   */
@@ -138,13 +143,15 @@ class DllExport TDBTBM : public TDBTBL {
   virtual void ResetDB(void);
 
   // Database routines
-  virtual int  GetMaxSize(PGLOBAL g) {return 10;} // Temporary
+	virtual int  Cardinality(PGLOBAL g) { return 10; }
+	virtual int  GetMaxSize(PGLOBAL g) { return 10; } // Temporary
   virtual int  RowNumber(PGLOBAL g, bool b = FALSE);
   virtual bool OpenDB(PGLOBAL g);
   virtual int  ReadDB(PGLOBAL g);
 
  protected:
   // Internal functions
+	bool  IsLocal(PTABLE tbp);
   bool  OpenTables(PGLOBAL g);
   int   ReadNextRemote(PGLOBAL g);
 
@@ -158,3 +165,4 @@ class DllExport TDBTBM : public TDBTBL {
   }; // end of class TDBTBM
 
 pthread_handler_t ThreadOpen(void *p);
+#endif // DEVELOPMENT

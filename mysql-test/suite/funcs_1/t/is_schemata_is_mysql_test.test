@@ -12,6 +12,7 @@
 # This test cannot be used for the embedded server because we check here
 # privileges.
 --source include/not_embedded.inc
+--source include/default_charset.inc
 
 --echo #################################################################################
 --echo # Testcases 3.2.9.2 + 3.2.9.3: INFORMATION_SCHEMA.SCHEMATA accessible information
@@ -45,7 +46,6 @@ eval $my_show1;
 eval $my_show2;
 eval $my_show3;
 
---echo # Establish connection testuser1 (user=testuser1)
 --replace_result $MASTER_MYPORT MYSQL_PORT $MASTER_MYSOCK MYSQL_SOCK
 connect (testuser1, localhost, testuser1, , db_datadict);
 eval $my_select;
@@ -54,8 +54,6 @@ eval $my_show2;
 eval $my_show3;
 
 # Cleanup
---echo # Switch to connection default and close connection testuser1
 connection default;
 DROP USER 'testuser1'@'localhost';
 DROP DATABASE db_datadict;
-

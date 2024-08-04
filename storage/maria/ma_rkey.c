@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 /* Read record based on a key */
 
@@ -36,8 +36,8 @@ int maria_rkey(MARIA_HA *info, uchar *buf, int inx, const uchar *key_data,
   MARIA_KEY key;
   ICP_RESULT icp_res= ICP_MATCH;
   DBUG_ENTER("maria_rkey");
-  DBUG_PRINT("enter", ("base: 0x%lx  buf: 0x%lx  inx: %d  search_flag: %d",
-                       (long) info, (long) buf, inx, search_flag));
+  DBUG_PRINT("enter", ("base:%p  buf:%p  inx: %d  search_flag: %d",
+                       info, buf, inx, search_flag));
 
   if ((inx = _ma_check_index(info,inx)) < 0)
     DBUG_RETURN(my_errno);

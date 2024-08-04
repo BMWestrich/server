@@ -1,4 +1,5 @@
 /* Copyright (c) 2000, 2011, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2017, MariaDB Corporation.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -11,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA */
 
 
 #ifndef _typelib_h
@@ -29,17 +30,15 @@ typedef struct st_typelib {	/* Different types saved here */
 extern my_ulonglong find_typeset(char *x, TYPELIB *typelib,int *error_position);
 extern int find_type_with_warning(const char *x, TYPELIB *typelib,
                                   const char *option);
-extern int find_type_or_exit(const char *x, TYPELIB *typelib,
-                             const char *option);
 #define FIND_TYPE_BASIC           0
 /** makes @c find_type() require the whole name, no prefix */
-#define FIND_TYPE_NO_PREFIX      (1 << 0)
+#define FIND_TYPE_NO_PREFIX      (1U << 0)
 /** always implicitely on, so unused, but old code may pass it */
 #define FIND_TYPE_NO_OVERWRITE   0
 /** makes @c find_type() accept a number. Not used either */
 #define FIND_TYPE_ALLOW_NUMBER   0
 /** makes @c find_type() treat ',' and '=' as terminators */
-#define FIND_TYPE_COMMA_TERM     (1 << 3)
+#define FIND_TYPE_COMMA_TERM     (1U << 3)
 
 extern int find_type(const char *x, const TYPELIB *typelib, unsigned int flags);
 extern void make_type(char *to,unsigned int nr,TYPELIB *typelib);

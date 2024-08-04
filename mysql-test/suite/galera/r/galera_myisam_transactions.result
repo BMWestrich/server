@@ -7,6 +7,7 @@ START TRANSACTION;
 INSERT INTO t1 VALUES (1);
 INSERT INTO t2 VALUES (1);
 COMMIT;
+connection node_2;
 SELECT COUNT(*) = 1 FROM t1;
 COUNT(*) = 1
 1
@@ -16,12 +17,14 @@ COUNT(*) = 0
 SELECT COUNT(*) = 0 FROM t2;
 COUNT(*) = 0
 1
+connection node_1;
 START TRANSACTION;
 INSERT INTO t1 VALUES (1);
 INSERT INTO t2 VALUES (1);
 ROLLBACK;
 Warnings:
 Warning	1196	Some non-transactional changed tables couldn't be rolled back
+connection node_2;
 SELECT COUNT(*) = 1 FROM t1;
 COUNT(*) = 1
 1
@@ -32,3 +35,12 @@ SELECT COUNT(*) = 0 FROM t2;
 COUNT(*) = 0
 1
 DROP TABLE t1, t2, t3;
+SET SESSION lock_wait_timeout=2;
+SET GLOBAL wsrep_replicate_myisam= ON;
+CREATE TEMPORARY TABLE t1 (i INT, PRIMARY KEY pk (i)) ENGINE=MyISAM;
+PREPARE stmt FROM "INSERT INTO t1 (id) SELECT * FROM (SELECT 4 AS i) AS y";
+INSERT INTO t1 VALUES(4);
+DEALLOCATE PREPARE stmt;
+COMMIT;
+DROP TABLE t1;
+SET GLOBAL wsrep_replicate_myisam=OFF;

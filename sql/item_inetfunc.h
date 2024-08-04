@@ -15,7 +15,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 
 #include "item.h"
@@ -30,13 +30,16 @@ public:
   Item_func_inet_aton(THD *thd, Item *a): Item_int_func(thd, a) {}
   longlong val_int();
   const char *func_name() const { return "inet_aton"; }
-  void fix_length_and_dec()
+  bool fix_length_and_dec()
   {
     decimals= 0;
     max_length= 21;
     maybe_null= 1;
     unsigned_flag= 1;
+    return FALSE;
   }
+  Item *get_copy(THD *thd, MEM_ROOT *mem_root)
+  { return get_item_copy<Item_func_inet_aton>(thd, mem_root, this); }
 };
 
 
@@ -51,12 +54,15 @@ public:
   { }
   String* val_str(String* str);
   const char *func_name() const { return "inet_ntoa"; }
-  void fix_length_and_dec()
+  bool fix_length_and_dec()
   {
     decimals= 0;
     fix_length_and_charset(3 * 8 + 7, default_charset());
     maybe_null= 1;
+    return FALSE;
   }
+  Item *get_copy(THD *thd, MEM_ROOT *mem_root)
+  { return get_item_copy<Item_func_inet_ntoa>(thd, mem_root, this); }
 };
 
 
@@ -76,6 +82,7 @@ public:
 
 public:
   virtual longlong val_int();
+  bool need_parentheses_in_default() { return false; }
 
 protected:
   virtual bool calc_value(const String *arg) = 0;
@@ -98,7 +105,7 @@ public:
   virtual String *val_str_ascii(String *buffer);
 
 protected:
-  virtual bool calc_value(String *arg, String *buffer) = 0;
+  virtual bool calc_value(const String *arg, String *buffer) = 0;
 };
 
 
@@ -117,15 +124,18 @@ public:
   virtual const char *func_name() const
   { return "inet6_aton"; }
 
-  virtual void fix_length_and_dec()
+  virtual bool fix_length_and_dec()
   {
     decimals= 0;
     fix_length_and_charset(16, &my_charset_bin);
     maybe_null= 1;
+    return FALSE;
   }
+  Item *get_copy(THD *thd, MEM_ROOT *mem_root)
+  { return get_item_copy<Item_func_inet6_aton>(thd, mem_root, this); }
 
 protected:
-  virtual bool calc_value(String *arg, String *buffer);
+  virtual bool calc_value(const String *arg, String *buffer);
 };
 
 
@@ -144,7 +154,7 @@ public:
   virtual const char *func_name() const
   { return "inet6_ntoa"; }
 
-  virtual void fix_length_and_dec()
+  virtual bool fix_length_and_dec()
   {
     decimals= 0;
 
@@ -154,10 +164,13 @@ public:
     fix_length_and_charset(8 * 4 + 7, default_charset());
 
     maybe_null= 1;
+    return FALSE;
   }
+  Item *get_copy(THD *thd, MEM_ROOT *mem_root)
+  { return get_item_copy<Item_func_inet6_ntoa>(thd, mem_root, this); }
 
 protected:
-  virtual bool calc_value(String *arg, String *buffer);
+  virtual bool calc_value(const String *arg, String *buffer);
 };
 
 
@@ -175,6 +188,8 @@ public:
 public:
   virtual const char *func_name() const
   { return "is_ipv4"; }
+  Item *get_copy(THD *thd, MEM_ROOT *mem_root)
+  { return get_item_copy<Item_func_is_ipv4>(thd, mem_root, this); }
 
 protected:
   virtual bool calc_value(const String *arg);
@@ -195,6 +210,8 @@ public:
 public:
   virtual const char *func_name() const
   { return "is_ipv6"; }
+  Item *get_copy(THD *thd, MEM_ROOT *mem_root)
+  { return get_item_copy<Item_func_is_ipv6>(thd, mem_root, this); }
 
 protected:
   virtual bool calc_value(const String *arg);
@@ -215,6 +232,8 @@ public:
 public:
   virtual const char *func_name() const
   { return "is_ipv4_compat"; }
+  Item *get_copy(THD *thd, MEM_ROOT *mem_root)
+  { return get_item_copy<Item_func_is_ipv4_compat>(thd, mem_root, this); }
 
 protected:
   virtual bool calc_value(const String *arg);
@@ -235,6 +254,8 @@ public:
 public:
   virtual const char *func_name() const
   { return "is_ipv4_mapped"; }
+  Item *get_copy(THD *thd, MEM_ROOT *mem_root)
+  { return get_item_copy<Item_func_is_ipv4_mapped>(thd, mem_root, this); }
 
 protected:
   virtual bool calc_value(const String *arg);

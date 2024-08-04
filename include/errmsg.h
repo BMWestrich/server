@@ -14,7 +14,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /*
   Error messages numbers for MySQL clients.
@@ -36,8 +36,9 @@ extern const char *client_errors[];	/* Error messages */
 #define CR_MIN_ERROR		2000	/* For easier client code */
 #define CR_MAX_ERROR		2999
 #if !defined(ER)
-#define ER(X) (((X) >= CR_ERROR_FIRST && (X) <= CR_ERROR_LAST)? \
-               client_errors[(X)-CR_ERROR_FIRST]: client_errors[CR_UNKNOWN_ERROR])
+#define ER(X) (((X) >= CR_ERROR_FIRST && (X) <= CR_ERROR_LAST) \
+               ? client_errors[(X)-CR_ERROR_FIRST]             \
+               : client_errors[CR_UNKNOWN_ERROR-CR_ERROR_FIRST])
 
 #endif
 #define CLIENT_ERRMAP		2	/* Errormap used by my_error() */

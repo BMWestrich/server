@@ -137,10 +137,10 @@ let $field= Slave_IO_State;
 let $condition= = 'Waiting for master to send event';
 --source include/wait_show_condition.inc
 
-let read_master_log_pos=`select $binlog_start_pos + 65`;
-let relay_log_pos=`select 2*$binlog_start_pos + 105`;
-let relay_log_space1=`select 3*$binlog_start_pos + 144`;
-let relay_log_space2=`select 3*$binlog_start_pos + 163`;
+let read_master_log_pos=`select $binlog_start_pos + 73`;
+let relay_log_pos=`select 2*$binlog_start_pos + 117`;
+let relay_log_space1=`select 3*$binlog_start_pos + 160`;
+let relay_log_space2=`select 3*$binlog_start_pos + 179`;
 --replace_result $SERVER_MYPORT_1 MYPORT_1 $SERVER_MYPORT_2 MYPORT_2 $read_master_log_pos <read_master_log_pos> $relay_log_pos <relay_log_pos> $relay_log_space1 <relay_log_space1> $relay_log_space2 <relay_log_space2>
 show all slaves status;
 
@@ -150,7 +150,7 @@ show all slaves status;
 --append_file $MYSQLTEST_VARDIR/tmp/mysqld.3.expect
 restart
 EOF
---shutdown_server 60
+--shutdown_server
 --source include/wait_until_connected_again.inc
 --source include/wait_for_slave_to_start.inc
 set default_master_connection = 'MASTER 2.2';
@@ -164,9 +164,9 @@ let $condition= = 'Waiting for master to send event';
 --source include/wait_show_condition.inc
 
 
-let relay_log_pos=`select 2*$binlog_start_pos + 40`;
-let relay_log_space1=`select 3*$binlog_start_pos + 79`;
-let relay_log_space2=`select 3*$binlog_start_pos + 98`;
+let relay_log_pos=`select 2*$binlog_start_pos + 44`;
+let relay_log_space1=`select 3*$binlog_start_pos + 87`;
+let relay_log_space2=`select 3*$binlog_start_pos + 106`;
 --replace_result $SERVER_MYPORT_1 MYPORT_1 $SERVER_MYPORT_2 MYPORT_2 $read_master_log_pos <read_master_log_pos> $relay_log_pos <relay_log_pos> $relay_log_space1 <relay_log_space1> $relay_log_space2 <relay_log_space2>
 show all slaves status;
 
@@ -187,14 +187,14 @@ show all slaves status;
 
 # Cleanup
 
---source reset_master_slave.inc
+--source include/reset_master_slave.inc
 --disconnect slave
 
 --connection master1
---source reset_master_slave.inc
+--source include/reset_master_slave.inc
 --disconnect master1
 
 --connection master2
---source reset_master_slave.inc
+--source include/reset_master_slave.inc
 --disconnect master2
 

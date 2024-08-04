@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 /*
   WL#3071 Maria checkpoint
@@ -46,7 +46,7 @@ static mysql_mutex_t LOCK_checkpoint;
 static mysql_cond_t  COND_checkpoint;
 /** @brief control structure for checkpoint background thread */
 static MA_SERVICE_THREAD_CONTROL checkpoint_control=
-  {THREAD_DEAD, FALSE, &LOCK_checkpoint, &COND_checkpoint};
+  {0, FALSE, FALSE, &LOCK_checkpoint, &COND_checkpoint};
 /* is ulong like pagecache->blocks_changed */
 static ulong pages_to_flush_before_next_checkpoint;
 static PAGECACHE_FILE *dfiles, /**< data files to flush in background */
@@ -170,7 +170,7 @@ static int really_execute_checkpoint(void)
     "Horizon" is a lower bound of the LSN of the next log record.
   */
   checkpoint_start_log_horizon= translog_get_horizon();
-  DBUG_PRINT("info",("checkpoint_start_log_horizon (%lu,0x%lx)",
+  DBUG_PRINT("info",("checkpoint_start_log_horizon " LSN_FMT "",
                      LSN_IN_PARTS(checkpoint_start_log_horizon)));
   lsn_store(checkpoint_start_log_horizon_char, checkpoint_start_log_horizon);
 
@@ -326,22 +326,22 @@ end:
 
 int ma_checkpoint_init(ulong interval)
 {
-  pthread_t th;
   int res= 0;
   DBUG_ENTER("ma_checkpoint_init");
   if (ma_service_thread_control_init(&checkpoint_control))
     res= 1;
   else if (interval > 0)
   {
+    size_t intv= interval;
     compile_time_assert(sizeof(void *) >= sizeof(ulong));
-    if (!(res= mysql_thread_create(key_thread_checkpoint,
-                                   &th, NULL, ma_checkpoint_background,
-                                   (void *)interval)))
-    {
-      /* thread lives, will have to be killed */
-      checkpoint_control.status= THREAD_RUNNING;
-    }
+    if ((res= mysql_thread_create(key_thread_checkpoint,
+                                  &checkpoint_control.thread, NULL,
+                                  ma_checkpoint_background,
+                                  (void*) intv)))
+      checkpoint_control.killed= TRUE;
   }
+  else
+    checkpoint_control.killed= TRUE;
   DBUG_RETURN(res);
 }
 
@@ -376,7 +376,7 @@ static void flush_all_tables(int what_to_flush)
                                   MA_STATE_INFO_WRITE_DONT_MOVE_OFFSET|
                                   MA_STATE_INFO_WRITE_LOCK);
         DBUG_PRINT("maria_flush_states",
-                   ("is_of_horizon: LSN (%lu,0x%lx)",
+                   ("is_of_horizon: LSN " LSN_FMT,
                     LSN_IN_PARTS(info->s->state.is_of_horizon)));
         break;
       case 2:
@@ -547,8 +547,8 @@ pthread_handler_t ma_checkpoint_background(void *arg)
     right after "case 0", thus having 'dfile' unset. So the thread cares only
     about the interval's value when it started.
   */
-  const ulong interval= (ulong)arg;
-  uint sleeps, sleep_time;
+  const size_t interval= (size_t)arg;
+  size_t sleeps, sleep_time;
   TRANSLOG_ADDRESS log_horizon_at_last_checkpoint=
     translog_get_horizon();
   ulonglong pagecache_flushes_at_last_checkpoint=
@@ -572,8 +572,6 @@ pthread_handler_t ma_checkpoint_background(void *arg)
   */
   sleeps= 1;
   pages_to_flush_before_next_checkpoint= 0;
-
-  pthread_detach_this_thread();
 
   for(;;) /* iterations of checkpoints and dirty page flushing */
   {
@@ -723,7 +721,6 @@ pthread_handler_t ma_checkpoint_background(void *arg)
     DBUG_EXECUTE_IF("maria_checkpoint_indirect", level= CHECKPOINT_INDIRECT;);
     ma_checkpoint_execute(level, FALSE);
   }
-  my_service_thread_signal_end(&checkpoint_control);
   my_thread_end();
   return 0;
 }

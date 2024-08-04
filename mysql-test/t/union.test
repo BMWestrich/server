@@ -50,13 +50,13 @@ explain select 1 union select a,b from t1 union select 1;
 --error 1222
 explain select a,b from t1 union select 1 limit 0;
 
---error 1221
+--error ER_PARSE_ERROR
 select a,b from t1 into outfile 'skr' union select a,b from t2;
 
---error 1221
+--error ER_PARSE_ERROR
 select a,b from t1 order by a union select a,b from t2;
 
---error 1221
+--error ER_PARSE_ERROR
 insert into t3 select a from t1 order by a union select a from t2;
 
 --error 1222
@@ -236,7 +236,7 @@ SELECT COUNT(*) FROM (
 select found_rows();
 
 # In these case found_rows() should work
---error ER_WRONG_USAGE
+--error ER_PARSE_ERROR
 SELECT SQL_CALC_FOUND_ROWS * FROM t1 LIMIT 1 UNION all SELECT * FROM t2 LIMIT 2;
 SELECT SQL_CALC_FOUND_ROWS * FROM t1 UNION all SELECT * FROM t2 LIMIT 2;
 select found_rows();
@@ -253,17 +253,17 @@ SELECT COUNT(*) FROM (
 SELECT                     * FROM t1 UNION all SELECT * FROM t2) q;
 SELECT SQL_CALC_FOUND_ROWS * FROM t1 UNION SELECT * FROM t2 LIMIT 100;
 select found_rows();
---error ER_WRONG_USAGE
+--error ER_PARSE_ERROR
 SELECT SQL_CALC_FOUND_ROWS * FROM t1 LIMIT 100 UNION SELECT * FROM t2;
 SELECT COUNT(*) FROM (
 (SELECT                     * FROM t1 LIMIT 100) UNION SELECT * FROM t2) q;
 (SELECT SQL_CALC_FOUND_ROWS * FROM t1 LIMIT 100) UNION SELECT * FROM t2;
---error ER_WRONG_USAGE
+--error ER_PARSE_ERROR
 SELECT SQL_CALC_FOUND_ROWS * FROM t1 LIMIT 1 UNION SELECT * FROM t2;
 SELECT COUNT(*) FROM (
 (SELECT                     * FROM t1 LIMIT 1) UNION SELECT * FROM t2) q;
 (SELECT SQL_CALC_FOUND_ROWS * FROM t1 LIMIT 1) UNION SELECT * FROM t2;
---error ER_WRONG_USAGE
+--error ER_PARSE_ERROR
 SELECT SQL_CALC_FOUND_ROWS * FROM t1 LIMIT 1 UNION SELECT * FROM t2 LIMIT 2;
 SELECT COUNT(*) FROM (
 (SELECT                     * FROM t1 LIMIT 1) UNION SELECT * FROM t2) q;
@@ -272,7 +272,7 @@ SELECT SQL_CALC_FOUND_ROWS * FROM t1 UNION SELECT * FROM t2 LIMIT 2,2;
 select found_rows();
 SELECT COUNT(*) FROM (
 SELECT                     * FROM t1 UNION SELECT * FROM t2) q;
---error ER_WRONG_USAGE
+--error ER_PARSE_ERROR
 SELECT SQL_CALC_FOUND_ROWS * FROM t1 limit 2,2 UNION SELECT * FROM t2;
 SELECT COUNT(*) FROM (
 (SELECT                     * FROM t1 limit 2,2) UNION SELECT * FROM t2) q;
@@ -339,7 +339,12 @@ explain extended (select * from t1 where a=1) union (select * from t2 where a=1)
 (select * from t1 where a=5 and a=6) union (select * from t2 where a=1);
 (select t1.a,t1.b from t1,t2 where t1.a=5) union (select * from t2 where a=1);
 (select * from t1 where a=1) union (select t1.a,t2.a from t1,t2 where t1.a=t2.a);
+
+set @save_optimizer_use_condition_selectivity=@@optimizer_use_condition_selectivity,@save_optimizer_switch=@@optimizer_switch;
+SET optimizer_switch='outer_join_with_cache=off',@@optimizer_use_condition_selectivity=1;
 explain (select * from t1 where a=1 and b=10) union (select straight_join t1.a,t2.a from t1,t2 where t1.a=t2.a);
+set @@optimizer_use_condition_selectivity=@save_optimizer_use_condition_selectivity,@@optimizer_switch=@save_optimizer_switch;
+
 explain (select * from t1 where a=1) union (select * from t1 where b=1);
 drop table t1,t2;
 create table t1 (   id int not null auto_increment, primary key (id)   ,user_name text );
@@ -840,7 +845,7 @@ drop tables t1,t2,t3;
 # exceeds mediumtext maximum length
 #
 
-SELECT @tmp_max:= @@global.max_allowed_packet;
+SET @tmp_max= @@global.max_allowed_packet;
 SET @@global.max_allowed_packet=25000000;
 # switching connection to allow the new max_allowed_packet take effect
 --connect (newconn, localhost, root,,)
@@ -999,7 +1004,7 @@ SELECT a,1 FROM t1
 UNION 
 (SELECT b, COUNT(*) FROM t2 GROUP BY b WITH ROLLUP ORDER BY a);
 
---error ER_WRONG_USAGE
+--error ER_PARSE_ERROR
 SELECT a,1 FROM t1
 UNION ALL
 SELECT b, COUNT(*) FROM t2 GROUP BY b WITH ROLLUP ORDER BY a
@@ -1057,7 +1062,6 @@ ORDER BY a;
 DROP TABLE t1;
 
 
---echo End of 5.0 tests
 -- echo #
 -- echo # Bug#32858: Error: "Incorrect usage of UNION and INTO" does not take 
 -- echo # subselects into account
@@ -1087,11 +1091,11 @@ SELECT a INTO DUMPFILE 'union.out.file2' FROM (
 SELECT a FROM t1 UNION SELECT a INTO @v FROM t1;
 SELECT a FROM t1 UNION SELECT a INTO OUTFILE 'union.out.file5' FROM t1;
 SELECT a FROM t1 UNION SELECT a INTO OUTFILE 'union.out.file6' FROM t1;
---error ER_WRONG_USAGE
+--error ER_PARSE_ERROR
 SELECT a INTO @v FROM t1 UNION SELECT a FROM t1;
---error ER_WRONG_USAGE
+--error ER_PARSE_ERROR
 SELECT a INTO OUTFILE 'union.out.file7' FROM t1 UNION SELECT a FROM t1;
---error ER_WRONG_USAGE
+--error ER_PARSE_ERROR
 SELECT a INTO DUMPFILE 'union.out.file8' FROM t1 UNION SELECT a FROM t1;
 
 -- echo # Tests fix in parser rule query_expression_body.
@@ -1160,6 +1164,8 @@ create table t1 (a int);
 insert into t1 values (10),(10),(10),(2),(3),(4),(5),(6),(7),(8),(9),(1),(10);
 --sorted_result
 select a from t1 where false UNION select a from t1 limit 8;
+--sorted_result
+(select a from t1 where false) UNION (select a from t1) limit 8;
 drop table t1;
 
 --echo #
@@ -1178,11 +1184,11 @@ select 4
 order by max(42) + max(1) + max(1) + max(1) + max(1) + max(1)
 ;
 
+--error ER_AGGREGATE_ORDER_FOR_UNION
 eval $my_stmt;
 
+--error ER_AGGREGATE_ORDER_FOR_UNION
 eval prepare stmt1 from '$my_stmt';
-execute stmt1;
-execute stmt1;
 
 let $my_stmt=
 select 1 as foo
@@ -1195,13 +1201,11 @@ union
 order by max(42) + max(1) + max(1) + max(1) + max(1) + max(1)
 ;
 
+--error ER_AGGREGATE_ORDER_FOR_UNION
 eval $my_stmt;
 
+--error ER_AGGREGATE_ORDER_FOR_UNION
 eval prepare stmt1 from '$my_stmt';
-execute stmt1;
-execute stmt1;
-
-deallocate prepare stmt1;
 
 --echo End of 5.1 tests
 
@@ -1385,6 +1389,126 @@ UNION
 
 drop table t1;
 
+
+--echo #
+--echo # MDEV-10172: UNION query returns incorrect rows outside
+--echo # conditional evaluation
+--echo #
+
+create table t1 (d datetime not null primary key);
+insert into t1(d) values ('2016-06-01'),('2016-06-02'),('2016-06-03'),('2016-06-04');
+select * from
+(
+	select * from t1 where d between '2016-06-02' and '2016-06-05'
+	union
+	(select * from t1 where d < '2016-06-05' order by d desc limit 1)
+) onlyJun2toJun4
+order by d;
+drop table t1;
+
+--echo End of 5.0 tests
+
+#
+#  Bug #24595639: INCORRECT BEHAVIOR IN QUERY WITH UNION AND GROUP BY
+#
+create table t1 (a int, b int);
+insert into t1 values (1,1),(2,2),(3,3);
+create table t2 (c varchar(30), d varchar(30));
+insert into t1 values ('1','1'),('2','2'),('4','4');
+create table t3 (e int, f int);
+insert into t3 values (1,1),(2,2),(31,31),(32,32);
+select e,f, (e , f) in (select e,b from t1 union select c,d from t2) as sub from t3;
+select avg(f), (e , f) in (select e,b from t1 union select c,d from t2) as sub from t3 group by sub;
+drop table t1,t2,t3;
+
+--echo #
+--echo # MDEV-14715 Assertion `!table || (!table->read_set ||
+--echo # bitmap_is_set(table->read_set, field_index))'
+--echo # failed in Field_num::val_decimal
+--echo #
+
+CREATE TABLE t1 (a INT, b INT) ENGINE=MyISAM;
+CREATE VIEW v1 AS SELECT * FROM t1;
+INSERT INTO t1 VALUES (1, NULL),(3, 4);
+
+(SELECT a, sum(a) AS f FROM v1 group by a ORDER BY b + sum(a))
+UNION
+(SELECT 2, 2);
+
+(SELECT a, sum(a) AS f FROM v1 group by a ORDER BY b + 1)
+UNION
+(SELECT 2, 2);
+
+SELECT a, b FROM t1
+UNION
+(SELECT a, VAR_POP(a) AS f FROM v1 GROUP BY a ORDER BY b/a );
+
+DROP TABLE t1;
+
+--error ER_VIEW_INVALID
+(SELECT a, sum(a) AS f FROM v1 group by a ORDER BY b + 1)
+UNION
+(SELECT 2, 2);
+
+DROP VIEW v1;
+
+--error ER_NO_SUCH_TABLE
+(SELECT a, sum(a) AS f FROM v1 group by a ORDER BY b + 1)
+UNION
+(SELECT 2, 2);
+
+--echo #
+--echo # Bug#27197235 USER VARIABLE + UINON + DECIMAL COLUMN RETURNS
+--echo #              WRONG VALUES
+--echo #
+
+let $old_charset= `SELECT @@character_set_client`;
+
+SET NAMES utf8;
+SET @advertAcctId = 1000003;
+select @advertAcctId as a from dual union all select 1.0 from dual;
+
+eval SET NAMES $old_charset;
+SET @advertAcctId = 1000003;
+select @advertAcctId as a from dual union all select 1.0 from dual;
+
+--echo #
+--echo # MDEV-13784: query causes seg fault
+--echo #
+
+CREATE TABLE t1 (`bug_id` int NOT NULL PRIMARY KEY, `product_id` int NOT NULL);
+INSERT INTO t1 VALUES (45199,1184);
+
+CREATE TABLE t2 (`product_id` int NOT NULL,`userid` int NOT NULL, PRIMARY KEY (`product_id`,`userid`));
+INSERT INTO t2 VALUES (1184,103),(1184,624),(1184,1577),(1184,1582);
+
+CREATE TABLE t3 (`id` int NOT NULL  PRIMARY KEY,`name` varchar(64));
+
+
+CREATE TABLE t4 ( `userid` int NOT NULL PRIMARY KEY, `login_name` varchar(255));
+INSERT INTO t4 VALUES (103,'foo'),(624,'foo'),(1577,'foo'),(1582,'foo');
+CREATE TABLE t5 (`id` int NOT NULL PRIMARY KEY, `name` varchar(64));
+
+explain select
+(
+  select login_name from t4 where userId = (
+    select userid from t2 where product_id = t1.product_id
+    union
+    select userid from t2 where product_id = (
+      select id from t5 where name = (select name from t3 where id = t1.product_id)) limit 1 )
+) as x  from t1 where (t1.bug_id=45199);
+select
+(
+  select login_name from t4 where userId = (
+    select userid from t2 where product_id = t1.product_id
+    union
+    select userid from t2 where product_id = (
+      select id from t5 where name = (select name from t3 where id = t1.product_id)) limit 1 )
+) as x  from t1 where (t1.bug_id=45199);
+drop table t1, t2, t3, t4, t5;
+
+--echo End of 5.5 tests
+
 --echo #
 --echo # WL#1763 Avoid creating temporary table in UNION ALL
 --echo #
@@ -1487,3 +1611,38 @@ SELECT * FROM t1 t1_1 LEFT JOIN t1 t1_2 ON ( t1_2.b = t1_1.a )
 
 DROP TABLE t1;
 
+--echo #
+--echo # Bug mdev-12788: UNION ALL + impossible having for derived
+--echo #                 with IN subquery in WHERE
+--echo #
+
+CREATE TABLE t1 (i int) ENGINE=MyISAM;
+INSERT INTO t1 VALUES (1);
+
+CREATE TABLE t2 (pk int PRIMARY KEY) ENGINE=MyISAM;
+INSERT INTO t2 VALUES (1),(2);
+
+let $q=
+SELECT 1, 2
+UNION ALL
+SELECT i, COUNT(*) FROM (
+  SELECT * FROM t1 WHERE i IN ( SELECT pk FROM t2 )
+) AS sq
+GROUP BY i
+HAVING i = 10;
+
+eval $q;
+eval EXPLAIN EXTENDED $q;
+
+DROP TABLE t1,t2;
+
+--echo #
+--echo # MDEV-10120: Wrong result of UNION .. ORDER BY GROUP_CONCAT()
+--echo #
+
+CREATE TABLE t1 (a INT);
+INSERT t1 VALUES (1),(2),(3);
+
+--error ER_AGGREGATE_ORDER_FOR_UNION
+(SELECT 1 AS a) UNION (SELECT a FROM t1 GROUP BY a) ORDER BY GROUP_CONCAT(a);
+DROP TABLE t1;

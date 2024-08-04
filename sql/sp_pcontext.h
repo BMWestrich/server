@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #ifndef _SP_PCONTEXT_H_
 #define _SP_PCONTEXT_H_
@@ -323,11 +323,11 @@ public:
   /// @return the current number of variables used in the parent contexts
   /// (from the root), including this context.
   uint current_var_count() const
-  { return m_var_offset + m_vars.elements(); }
+  { return m_var_offset + (uint)m_vars.elements(); }
 
   /// @return the number of variables in this context alone.
   uint context_var_count() const
-  { return m_vars.elements(); }
+  { return (uint)m_vars.elements(); }
 
   /// @return map index in this parsing context to runtime offset.
   uint var_context2runtime(uint i) const
@@ -476,10 +476,10 @@ public:
   const LEX_STRING *find_cursor(uint offset) const;
 
   uint max_cursor_index() const
-  { return m_max_cursor_index + m_cursors.elements(); }
+  { return m_max_cursor_index + (uint)m_cursors.elements(); }
 
   uint current_cursor_count() const
-  { return m_cursor_offset + m_cursors.elements(); }
+  { return m_cursor_offset + (uint)m_cursors.elements(); }
 
 private:
   /// Constructor for a tree node.

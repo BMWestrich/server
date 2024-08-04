@@ -1,6 +1,5 @@
-/*
-   Copyright (c) 2003-2007 MySQL AB, 2009, 2010 Sun Microsystems, Inc.
-   Use is subject to license terms.
+/* Copyright (c) 2003, 2016, Oracle and/or its affiliates.
+   Copyright (c) 2011, 2020, MariaDB
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -13,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 
 /**
@@ -41,7 +40,7 @@
 #include "opt_range.h"
 
 
-Field *Item_geometry_func::create_field_for_create_select(THD *thd, TABLE *t_arg)
+Field *Item_geometry_func::create_field_for_create_select(TABLE *t_arg)
 {
   Field *result;
   if ((result= new Field_geom(max_length, maybe_null, name, t_arg->s,
@@ -50,12 +49,13 @@ Field *Item_geometry_func::create_field_for_create_select(THD *thd, TABLE *t_arg
   return result;
 }
 
-void Item_geometry_func::fix_length_and_dec()
+bool Item_geometry_func::fix_length_and_dec()
 {
   collation.set(&my_charset_bin);
   decimals=0;
   max_length= (uint32) 4294967295U;
   maybe_null= 1;
+  return FALSE;
 }
 
 
@@ -76,9 +76,9 @@ String *Item_func_geometry_from_text::val_str(String *str)
     srid= (uint32)args[1]->val_int();
 
   str->set_charset(&my_charset_bin);
+  str->length(0);
   if (str->reserve(SRID_SIZE, 512))
     return 0;
-  str->length(0);
   str->q_append(srid);
   if ((null_value= !Geometry::create_from_wkt(&buffer, &trs, str, 0)))
     return 0;
@@ -122,6 +122,85 @@ String *Item_func_geometry_from_wkb::val_str(String *str)
 }
 
 
+void report_json_error_ex(String *js, json_engine_t *je,
+                          const char *fname, int n_param,
+                          Sql_condition::enum_warning_level lv);
+
+String *Item_func_geometry_from_json::val_str(String *str)
+{
+  DBUG_ASSERT(fixed == 1);
+  Geometry_buffer buffer;
+  String *js= args[0]->val_str_ascii(&tmp_js);
+  uint32 srid= 0;
+  longlong options= 0;
+  json_engine_t je;
+
+  if ((null_value= args[0]->null_value))
+    return 0;
+
+  if (arg_count > 1 && !args[1]->null_value)
+  {
+    options= args[1]->val_int();
+    if (options > 4 || options < 1)
+    {
+      String *sv= args[1]->val_str(&tmp_js);
+      my_error(ER_WRONG_VALUE_FOR_TYPE, MYF(0),
+               "option", sv->c_ptr_safe(), "ST_GeomFromGeoJSON");
+      null_value= 1;
+      return 0;
+    }
+  }
+
+  if ((arg_count == 3) && !args[2]->null_value)
+    srid= (uint32)args[2]->val_int();
+
+  str->set_charset(&my_charset_bin);
+  if (str->reserve(SRID_SIZE, 512))
+    return 0;
+  str->length(0);
+  str->q_append(srid);
+
+  json_scan_start(&je, js->charset(), (const uchar *) js->ptr(),
+                  (const uchar *) js->end());
+
+  if ((null_value= !Geometry::create_from_json(&buffer, &je, options==1,  str)))
+  {
+    int code= 0;
+
+    switch (je.s.error)
+    {
+    case Geometry::GEOJ_INCORRECT_GEOJSON:
+      code= ER_GEOJSON_INCORRECT;
+      break;
+    case Geometry::GEOJ_TOO_FEW_POINTS:
+      code= ER_GEOJSON_TOO_FEW_POINTS;
+      break;
+    case Geometry::GEOJ_EMPTY_COORDINATES:
+      code= ER_GEOJSON_EMPTY_COORDINATES;
+      break;
+    case Geometry::GEOJ_POLYGON_NOT_CLOSED:
+      code= ER_GEOJSON_NOT_CLOSED;
+      break;
+    case Geometry::GEOJ_DIMENSION_NOT_SUPPORTED:
+      my_error(ER_GIS_INVALID_DATA, MYF(0), "ST_GeomFromGeoJSON");
+      break;
+    default:
+      report_json_error_ex(js, &je, func_name(), 0, Sql_condition::WARN_LEVEL_WARN);
+      return NULL;
+    }
+
+    if (code)
+    {
+      THD *thd= current_thd;
+      push_warning_printf(thd, Sql_condition::WARN_LEVEL_WARN, code,
+                          ER_THD(thd, code));
+    }
+    return 0;
+  }
+  return str;
+}
+
+
 String *Item_func_as_wkt::val_str_ascii(String *str)
 {
   DBUG_ASSERT(fixed == 1);
@@ -145,11 +224,12 @@ String *Item_func_as_wkt::val_str_ascii(String *str)
 }
 
 
-void Item_func_as_wkt::fix_length_and_dec()
+bool Item_func_as_wkt::fix_length_and_dec()
 {
   collation.set(default_charset(), DERIVATION_COERCIBLE, MY_REPERTOIRE_ASCII);
   max_length=MAX_BLOB_WIDTH;
   maybe_null= 1;
+  return FALSE;
 }
 
 
@@ -168,6 +248,69 @@ String *Item_func_as_wkb::val_str(String *str)
   str->copy(swkb->ptr() + SRID_SIZE, swkb->length() - SRID_SIZE,
 	    &my_charset_bin);
   return str;
+}
+
+
+bool Item_func_as_geojson::fix_length_and_dec()
+{
+  collation.set(default_charset(), DERIVATION_COERCIBLE, MY_REPERTOIRE_ASCII);
+  max_length=MAX_BLOB_WIDTH;
+  maybe_null= 1;
+  return FALSE;
+}
+
+
+String *Item_func_as_geojson::val_str_ascii(String *str)
+{
+  DBUG_ASSERT(fixed == 1);
+  String arg_val;
+  String *swkb= args[0]->val_str(&arg_val);
+  uint max_dec= FLOATING_POINT_DECIMALS;
+  longlong options= 0;
+  Geometry_buffer buffer;
+  Geometry *geom= NULL;
+  const char *dummy;
+
+  if ((null_value=
+       (args[0]->null_value ||
+	!(geom= Geometry::construct(&buffer, swkb->ptr(), swkb->length())))))
+    return 0;
+
+  if (arg_count > 1)
+  {
+    max_dec= (uint) args[1]->val_int();
+    if (args[1]->null_value)
+      max_dec= FLOATING_POINT_DECIMALS;
+    if (arg_count > 2)
+    {
+      options= args[2]->val_int();
+      if (args[2]->null_value)
+        options= 0;
+    }
+  }
+
+  str->length(0);
+  str->set_charset(&my_charset_latin1);
+
+  if (str->reserve(1, 512))
+    return 0;
+
+  str->qs_append('{');
+
+  if (options & 1)
+  {
+    if (geom->bbox_as_json(str) || str->append(", ", 2))
+      goto error;
+  }
+
+  if ((geom->as_json(str, max_dec, &dummy) || str->append("}", 1)))
+      goto error;
+
+  return str;
+
+error:
+  null_value= 1;
+  return 0;
 }
 
 
@@ -313,16 +456,18 @@ String *Item_func_boundary::val_str(String *str_value)
   DBUG_ASSERT(fixed == 1);
   String arg_val;
   String *swkb= args[0]->val_str(&arg_val);
+
+  if ((null_value= args[0]->null_value))
+    DBUG_RETURN(0);
+
   Geometry_buffer buffer;
-  Geometry *g;
   uint32 srid= 0;
   Transporter trn(&res_receiver);
-  
-  if ((null_value=
-       args[0]->null_value ||
-       !(g= Geometry::construct(&buffer, swkb->ptr(), swkb->length()))))
+
+  Geometry *g= Geometry::construct(&buffer, swkb->ptr(), swkb->length());
+  if (!g)
     DBUG_RETURN(0);
-  
+
   if (g->store_shapes(&trn))
     goto mem_error;
 
@@ -983,11 +1128,11 @@ Item_func_spatial_rel::get_mm_leaf(RANGE_OPT_PARAM *param,
     tree->max_flag= NO_MAX_RANGE;
     break;
   case SP_WITHIN_FUNC:
-    tree->min_flag= GEOM_FLAG | HA_READ_MBR_WITHIN;// NEAR_MIN;//512;
+    tree->min_flag= GEOM_FLAG | HA_READ_MBR_CONTAIN;// NEAR_MIN;//512;
     tree->max_flag= NO_MAX_RANGE;
     break;
   case SP_CONTAINS_FUNC:
-    tree->min_flag= GEOM_FLAG | HA_READ_MBR_CONTAIN;// NEAR_MIN;//512;
+    tree->min_flag= GEOM_FLAG | HA_READ_MBR_WITHIN;// NEAR_MIN;//512;
     tree->max_flag= NO_MAX_RANGE;
     break;
   case SP_OVERLAPS_FUNC:
@@ -1195,6 +1340,8 @@ static int setup_relate_func(Geometry *g1, Geometry *g2,
     }
     else
       func->repeat_expression(shape_a);
+    if (func->reserve_op_buffer(1))
+      return 1;
     func->add_operation(op_matrix(nc%3), 1);
     if (do_store_shapes)
     {
@@ -1365,11 +1512,13 @@ longlong Item_func_spatial_precise_rel::val_int()
                          Gcalc_function::op_intersection, 2);
       func.add_operation(Gcalc_function::op_internals, 1);
       shape_a= func.get_next_expression_pos();
-      if ((null_value= g1.store_shapes(&trn)))
+      if ((null_value= g1.store_shapes(&trn)) ||
+          func.reserve_op_buffer(1))
         break;
       func.add_operation(Gcalc_function::op_internals, 1);
       shape_b= func.get_next_expression_pos();
-      if ((null_value= g2.store_shapes(&trn)))
+      if ((null_value= g2.store_shapes(&trn)) ||
+          func.reserve_op_buffer(1))
         break;
       func.add_operation(Gcalc_function::v_find_t |
                          Gcalc_function::op_intersection, 2);
@@ -1604,6 +1753,8 @@ int Item_func_buffer::Transporter::single_point(double x, double y)
 {
   if (buffer_op == Gcalc_function::op_difference)
   {
+    if (m_fn->reserve_op_buffer(1))
+      return 1;
     m_fn->add_operation(Gcalc_function::op_false, 0);
     return 0;
   }
@@ -1860,7 +2011,7 @@ String *Item_func_buffer::val_str(String *str_value)
 {
   DBUG_ENTER("Item_func_buffer::val_str");
   DBUG_ASSERT(fixed == 1);
-  String *obj= args[0]->val_str(&tmp_value);
+  String *obj= args[0]->val_str(str_value);
   double dist= args[1]->val_real();
   Geometry_buffer buffer;
   Geometry *g;
@@ -2240,12 +2391,15 @@ double Item_func_distance::val_real()
   MBR mbr1, mbr2;
   const char *c_end;
 
-
-  if ((null_value= (args[0]->null_value || args[1]->null_value ||
-          !(g1= Geometry::construct(&buffer1, res1->ptr(), res1->length())) ||
-          !(g2= Geometry::construct(&buffer2, res2->ptr(), res2->length())) ||
-          g1->get_mbr(&mbr1, &c_end) ||
-          g2->get_mbr(&mbr2, &c_end))))
+  if (args[0]->null_value || args[1]->null_value)
+    goto mem_error;
+  g1= Geometry::construct(&buffer1, res1->ptr(), res1->length());
+  if (!g1)
+    goto mem_error;
+  g2= Geometry::construct(&buffer2, res2->ptr(), res2->length());
+  if (!g2)
+    goto mem_error;
+  if (g1->get_mbr(&mbr1, &c_end) || g2->get_mbr(&mbr2, &c_end))
     goto mem_error;
 
   mbr1.add_mbr(&mbr2);
@@ -2383,18 +2537,158 @@ mem_error:
 }
 
 
+double Item_func_sphere_distance::val_real()
+{
+  /* To test null_value of item, first get well-known bytes as a backups */
+  String bak1, bak2;
+  String *arg1= args[0]->val_str(&bak1);
+  String *arg2= args[1]->val_str(&bak2);
+  double distance= 0.0;
+  double sphere_radius= 6370986.0; // Default radius equals Earth radius
+  
+  null_value= (args[0]->null_value || args[1]->null_value);
+  if (null_value)
+  {
+    return 0;
+  }
+
+  if (arg_count == 3)
+  {
+    sphere_radius= args[2]->val_real();
+    // Radius cannot be Null
+    if (args[2]->null_value)
+    {
+      null_value= true;
+      return 0;
+    }
+    if (sphere_radius <= 0)
+    {
+      my_error(ER_INTERNAL_ERROR, MYF(0), "Radius must be greater than zero.");
+      return 1;
+    }
+  }
+  Geometry_buffer buffer1, buffer2;
+  Geometry *g1, *g2;
+  if (!(g1= Geometry::construct(&buffer1, arg1->ptr(), arg1->length())) ||
+      !(g2= Geometry::construct(&buffer2, arg2->ptr(), arg2->length())))
+  {
+    my_error(ER_GIS_INVALID_DATA, MYF(0), "ST_Distance_Sphere");
+    goto handle_errors;
+  }
+// Method allowed for points and multipoints
+  if (!(g1->get_class_info()->m_type_id == Geometry::wkb_point ||
+        g1->get_class_info()->m_type_id == Geometry::wkb_multipoint) ||
+      !(g2->get_class_info()->m_type_id == Geometry::wkb_point ||
+        g2->get_class_info()->m_type_id == Geometry::wkb_multipoint))
+  {
+    // Generate error message in case different geometry is used? 
+    my_error(ER_INTERNAL_ERROR, MYF(0), func_name());
+    return 0;
+  }
+  distance= spherical_distance_points(g1, g2, sphere_radius);
+  if (distance < 0)
+  {
+    my_error(ER_INTERNAL_ERROR, MYF(0), "Returned distance cannot be negative.");
+    return 1;
+  }
+  return distance;
+
+  handle_errors:
+    return 0;
+}
+
+
+double Item_func_sphere_distance::spherical_distance_points(Geometry *g1,
+                                                            Geometry *g2,
+                                                            const double r)
+{
+  double res= 0.0;
+   // Length for the single point (25 Bytes)
+  uint32 len= SRID_SIZE + POINT_DATA_SIZE + WKB_HEADER_SIZE;
+  int error= 0;
+
+  switch (g2->get_class_info()->m_type_id)
+  {
+    case Geometry::wkb_point:
+    // Optimization for point-point case
+      if (g1->get_class_info()->m_type_id == Geometry::wkb_point)
+      {
+        res= static_cast<Gis_point *>(g2)->calculate_haversine(g1, r, &error);
+      }
+      else
+      {
+        // Optimization for single point in Multipoint
+        if (g1->get_data_size() == len)
+        {
+          res= static_cast<Gis_point *>(g2)->calculate_haversine(g1, r, &error);
+        }
+        else
+        {
+          // There are multipoints in g1
+          // g1 is MultiPoint and calculate MP.sphericaldistance from g2 Point
+          if (g1->get_data_size() != GET_SIZE_ERROR)
+            static_cast<Gis_point *>(g2)->spherical_distance_multipoints(
+                                        (Gis_multi_point *)g1, r, &res, &error);
+        }
+      }
+      break;
+
+    case Geometry::wkb_multipoint:
+      // Optimization for point-point case
+      if (g1->get_class_info()->m_type_id == Geometry::wkb_point)
+      {
+         // Optimization for single point in Multipoint g2
+        if (g2->get_data_size() == len)
+        {
+          res= static_cast<Gis_point *>(g1)->calculate_haversine(g2, r, &error);
+        }
+        else
+        {
+          if (g2->get_data_size() != GET_SIZE_ERROR)
+          // g1 is a point (casted to multi_point) and g2 multipoint
+            static_cast<Gis_point *>(g1)->spherical_distance_multipoints(
+                                        (Gis_multi_point *)g2, r, &res, &error);
+        }
+      }
+      else
+      {
+        // Multipoints in g1 and g2 - no optimization
+        static_cast<Gis_multi_point *>(g1)->spherical_distance_multipoints(
+                                        (Gis_multi_point *)g2, r, &res, &error);
+      }
+      break;
+
+    default:
+      DBUG_ASSERT(0);
+      break;
+  }
+
+  if (res < 0)
+    goto handle_error;
+
+  handle_error:
+    if (error > 0)
+      my_error(ER_STD_OUT_OF_RANGE_ERROR, MYF(0),
+               "Longitude should be [-180,180]", "ST_Distance_Sphere");
+    else if(error < 0)
+      my_error(ER_STD_OUT_OF_RANGE_ERROR, MYF(0),
+               "Latitude should be [-90,90]", "ST_Distance_Sphere");
+  return res;
+}
+
+
 String *Item_func_pointonsurface::val_str(String *str)
 {
   Gcalc_operation_transporter trn(&func, &collector);
 
-  DBUG_ENTER("Item_func_pointonsurface::val_real");
+  DBUG_ENTER("Item_func_pointonsurface::val_str");
   DBUG_ASSERT(fixed == 1);
   String *res= args[0]->val_str(&tmp_value);
   Geometry_buffer buffer;
   Geometry *g;
   MBR mbr;
   const char *c_end;
-  double UNINIT_VAR(px), UNINIT_VAR(py), x0, y0;
+  double UNINIT_VAR(px), UNINIT_VAR(py), x0, UNINIT_VAR(y0);
   String *result= 0;
   const Gcalc_scan_iterator::point *pprev= NULL;
   uint32 srid;

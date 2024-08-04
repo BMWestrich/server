@@ -6,7 +6,7 @@ FUNCTION(TOKU_GET_DEPENDEND_OS_LIBS target result)
   IF(deps)
    FOREACH(lib ${deps})
     # Filter out keywords for used for debug vs optimized builds
-    IF(NOT lib MATCHES "general" AND NOT lib MATCHES "debug" AND NOT lib MATCHES "optimized")
+    IF(TARGET ${lib})
       GET_TARGET_PROPERTY(lib_location ${lib} LOCATION)
       IF(NOT lib_location)
         SET(ret ${ret} ${lib})
@@ -48,7 +48,8 @@ MACRO(TOKU_MERGE_STATIC_LIBS TARGET OUTPUT_NAME LIBS_TO_MERGE)
     ENDIF()
   ENDFOREACH()
   IF(OSLIBS)
-    #LIST(REMOVE_DUPLICATES OSLIBS)
+    # REMOVE_DUPLICATES destroys the order of the libs so disabled
+    # LIST(REMOVE_DUPLICATES OSLIBS)
     TARGET_LINK_LIBRARIES(${TARGET} LINK_PUBLIC ${OSLIBS})
   ENDIF()
 

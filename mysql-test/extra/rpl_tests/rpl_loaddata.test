@@ -11,8 +11,8 @@
 # check if START SLAVE, RESET SLAVE, CHANGE MASTER reset Last_slave_error and
 # Last_slave_errno in SHOW SLAVE STATUS (1st and 3rd commands did not: bug 986)
 
--- source include/master-slave.inc
 source include/have_innodb.inc;
+source include/master-slave.inc;
 
 --disable_query_log
 CALL mtr.add_suppression("Unsafe statement written to the binary log using statement format since BINLOG_FORMAT = STATEMENT");
@@ -197,7 +197,6 @@ DROP TABLE t1;
 -- eval LOAD DATA $lock_option LOCAL INFILE '$MYSQLTEST_VARDIR/std_data/loaddata5.dat' INTO TABLE t1
 
 -- echo ### create connection without default database
--- echo ### connect (conn2,localhost,root,,*NO-ONE*);
 connect (conn2,localhost,root,,*NO-ONE*);
 -- connection conn2
 -- echo ### assertion: works without stating the default database
@@ -216,7 +215,6 @@ connect (conn2,localhost,root,,*NO-ONE*);
 -- let $table= $db1.t1
 --source include/wait_until_rows_count.inc
 
--- echo ### disconnect and switch back to master connection
 -- disconnect conn2
 -- connection master
 

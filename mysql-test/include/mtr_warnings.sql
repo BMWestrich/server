@@ -11,7 +11,7 @@
 --
 -- You should have received a copy of the GNU General Public License
 -- along with this program; if not, write to the Free Software Foundation,
--- 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
+-- 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335  USA
 
 delimiter ||;
 
@@ -133,7 +133,7 @@ INSERT INTO global_suppressions VALUES
  ("Slave: Query caused different errors on master and slave"),
  ("Slave: Table .* doesn't exist"),
  ("Slave: Table width mismatch"),
- ("Slave: The incident LOST_EVENTS occured on the master"),
+ ("Slave: The incident LOST_EVENTS occurred on the master"),
  ("Slave: Unknown error.* 1105"),
  ("Slave: Can't drop database.* database doesn't exist"),
  ("Warning:\s+One can only use the --user.*root"),
@@ -204,14 +204,6 @@ INSERT INTO global_suppressions VALUES
     write()/read(). Bug #50414 */
  ("==[0-9]*== Warning: invalid file descriptor -1 in syscall write()"),
  ("==[0-9]*== Warning: invalid file descriptor -1 in syscall read()"),
-
- /*
-   BUG#42147 - Concurrent DML and LOCK TABLE ... READ for InnoDB 
-   table cause warnings in errlog
-   Note: This is a temporary suppression until Bug#42147 can be 
-   fixed properly. See bug page for more information.
-  */
- ("Found lock of type 6 that is write and read locked"),
 
  /*
    Transient network failures that cause warnings on reconnect.
@@ -292,6 +284,7 @@ CREATE DEFINER=root@localhost
 PROCEDURE add_suppression(pattern VARCHAR(255))
 BEGIN
   INSERT INTO test_suppressions (pattern) VALUES (pattern);
+  FLUSH NO_WRITE_TO_BINLOG TABLE test_suppressions;
 END
 */||
 

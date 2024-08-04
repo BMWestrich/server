@@ -1,19 +1,26 @@
 /* Copyright (c) 2010, 2012, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2017, MariaDB Corporation.
 
-This program is free software; you can redistribute it and/or
-modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; version 2 of the
-License.
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License, version 2.0,
+as published by the Free Software Foundation.
+
+This program is also distributed with certain software (including
+but not limited to OpenSSL) that is licensed under separate terms,
+as designated in a particular file or component or in included license
+documentation.  The authors of MySQL hereby grant you an additional
+permission to link the program and your derivative works with the
+separately licensed software that they have included with MySQL.
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License, version 2.0, for more details.
 
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
-02110-1301  USA
+02110-1335  USA
 */
 
 #ifndef MYSQL_SOCKET_H
@@ -241,7 +248,7 @@ inline_mysql_start_socket_wait(PSI_socket_locker_state *state,
                                MYSQL_SOCKET mysql_socket,
                                enum PSI_socket_operation op,
                                size_t byte_count,
-                               const char *src_file, int src_line)
+                               const char *src_file, uint src_line)
 {
   struct PSI_socket_locker *locker;
   if (mysql_socket.m_psi != NULL)
@@ -560,6 +567,12 @@ inline_mysql_socket_socket
       (key, (const my_socket*)&mysql_socket.fd, NULL, 0);
   }
 #endif
+
+  /* SOCK_CLOEXEC isn't always a number - can't preprocessor compare */
+#if defined(HAVE_FCNTL) && defined(FD_CLOEXEC) && !defined(HAVE_SOCK_CLOEXEC)
+  (void) fcntl(mysql_socket.fd, F_SETFD, FD_CLOEXEC);
+#endif
+
   return mysql_socket;
 }
 
@@ -728,7 +741,7 @@ inline_mysql_socket_send
  MYSQL_SOCKET mysql_socket, const SOCKBUF_T *buf, size_t n, int flags)
 {
   ssize_t result;
-
+  DBUG_ASSERT(mysql_socket.fd != INVALID_SOCKET);
 #ifdef HAVE_PSI_SOCKET_INTERFACE
   if (mysql_socket.m_psi != NULL)
   {
@@ -744,8 +757,7 @@ inline_mysql_socket_send
     /* Instrumentation end */
     if (locker != NULL)
     {
-      size_t bytes_written;
-      bytes_written= (result > -1) ? result : 0;
+      size_t bytes_written= (result > 0) ? (size_t) result : 0;
       PSI_SOCKET_CALL(end_socket_wait)(locker, bytes_written);
     }
 
@@ -770,7 +782,7 @@ inline_mysql_socket_recv
  MYSQL_SOCKET mysql_socket,  SOCKBUF_T *buf, size_t n, int flags)
 {
   ssize_t result;
-
+  DBUG_ASSERT(mysql_socket.fd != INVALID_SOCKET);
 #ifdef HAVE_PSI_SOCKET_INTERFACE
   if (mysql_socket.m_psi != NULL)
   {
@@ -786,8 +798,7 @@ inline_mysql_socket_recv
     /* Instrumentation end */
     if (locker != NULL)
     {
-      size_t bytes_read;
-      bytes_read= (result > -1) ? result : 0;
+      size_t bytes_read= (result > 0) ? (size_t) result : 0;
       PSI_SOCKET_CALL(end_socket_wait)(locker, bytes_read);
     }
 
@@ -828,8 +839,7 @@ inline_mysql_socket_sendto
     /* Instrumentation end */
     if (locker != NULL)
     {
-      size_t bytes_written;
-      bytes_written = (result > -1) ? result : 0;
+      size_t bytes_written = (result > 0) ? (size_t) result : 0;
       PSI_SOCKET_CALL(end_socket_wait)(locker, bytes_written);
     }
 
@@ -871,8 +881,7 @@ inline_mysql_socket_recvfrom
     /* Instrumentation end */
     if (locker != NULL)
     {
-      size_t bytes_read;
-      bytes_read = (result > -1) ? result : 0;
+      size_t bytes_read= (result > 0) ? (size_t) result : 0;
       PSI_SOCKET_CALL(end_socket_wait)(locker, bytes_read);
     }
 
@@ -1034,10 +1043,14 @@ inline_mysql_socket_accept
 #else
     socket_accept.fd= accept(socket_listen.fd, addr, &addr_length);
 #ifdef FD_CLOEXEC
-    flags= fcntl(socket_accept.fd, F_GETFD);
-    if (flags != -1) {
-      flags |= FD_CLOEXEC;
-      fcntl(socket_accept.fd, F_SETFD, flags);
+    if (socket_accept.fd != INVALID_SOCKET)
+    {
+      flags= fcntl(socket_accept.fd, F_GETFD);
+      if (flags != -1)
+      {
+        flags |= FD_CLOEXEC;
+        fcntl(socket_accept.fd, F_SETFD, flags);
+      }
     }
 #endif
 #endif
@@ -1056,10 +1069,14 @@ inline_mysql_socket_accept
 #else
     socket_accept.fd= accept(socket_listen.fd, addr, &addr_length);
 #ifdef FD_CLOEXEC
-    flags= fcntl(socket_accept.fd, F_GETFD);
-    if (flags != -1) {
-      flags |= FD_CLOEXEC;
-      fcntl(socket_accept.fd, F_SETFD, flags);
+    if (socket_accept.fd != INVALID_SOCKET)
+    {
+      flags= fcntl(socket_accept.fd, F_GETFD);
+      if (flags != -1)
+      {
+        flags |= FD_CLOEXEC;
+        fcntl(socket_accept.fd, F_SETFD, flags);
+      }
     }
 #endif
 #endif

@@ -14,7 +14,7 @@
 
  You should have received a copy of the GNU General Public License
  along with this program; if not, write to the Free Software
- Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #ifdef USE_PRAGMA_INTERFACE
 #pragma interface			/* gcc class implementation */
@@ -416,43 +416,44 @@ public:
 };
 
 
-class Type_handler_tiny_blob: public Type_handler_string_result
+class Type_handler_blob_common: public Type_handler_string_result
+{
+public:
+  virtual ~Type_handler_blob_common() { }
+  Field *make_conversion_table_field(TABLE *, uint metadata,
+                                     const Field *target) const;
+};
+
+
+class Type_handler_tiny_blob: public Type_handler_blob_common
 {
 public:
   virtual ~Type_handler_tiny_blob() {}
   enum_field_types field_type() const { return MYSQL_TYPE_TINY_BLOB; }
-  Field *make_conversion_table_field(TABLE *, uint metadata,
-                                     const Field *target) const;
 };
 
 
-class Type_handler_medium_blob: public Type_handler_string_result
+class Type_handler_medium_blob: public Type_handler_blob_common
 {
 public:
   virtual ~Type_handler_medium_blob() {}
   enum_field_types field_type() const { return MYSQL_TYPE_MEDIUM_BLOB; }
-  Field *make_conversion_table_field(TABLE *, uint metadata,
-                                     const Field *target) const;
 };
 
 
-class Type_handler_long_blob: public Type_handler_string_result
+class Type_handler_long_blob: public Type_handler_blob_common
 {
 public:
   virtual ~Type_handler_long_blob() {}
   enum_field_types field_type() const { return MYSQL_TYPE_LONG_BLOB; }
-  Field *make_conversion_table_field(TABLE *, uint metadata,
-                                     const Field *target) const;
 };
 
 
-class Type_handler_blob: public Type_handler_string_result
+class Type_handler_blob: public Type_handler_blob_common
 {
 public:
   virtual ~Type_handler_blob() {}
   enum_field_types field_type() const { return MYSQL_TYPE_BLOB; }
-  Field *make_conversion_table_field(TABLE *, uint metadata,
-                                     const Field *target) const;
 };
 
 

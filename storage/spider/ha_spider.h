@@ -11,7 +11,7 @@
 
   You should have received a copy of the GNU General Public License
   along with this program; if not, write to the Free Software
-  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
+  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 #ifdef USE_PRAGMA_INTERFACE
 #pragma interface
@@ -751,6 +751,8 @@ public:
   );
   uint check_partitioned();
   void check_direct_order_limit();
+  void check_distinct_key_query();
+  bool is_sole_projection_field( uint16 field_index );
   int check_ha_range_eof();
   int drop_tmp_tables();
   bool handler_opened(

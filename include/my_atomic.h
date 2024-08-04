@@ -14,7 +14,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /*
   This header defines five atomic operations:
@@ -112,9 +112,26 @@
 #undef MY_ATOMIC_HAS_8_16
 
 /*
- * Attempt to do atomic ops without locks
- */
-#include "atomic/nolock.h"
+  We choose implementation as follows:
+  ------------------------------------
+  On Windows using Visual C++ the native implementation should be
+  preferrable. When using gcc we prefer the Solaris implementation
+  before the gcc because of stability preference, we choose gcc
+  builtins if available, otherwise we choose the somewhat broken
+  native x86 implementation. If neither Visual C++ or gcc we still
+  choose the Solaris implementation on Solaris (mainly for SunStudio
+  compilers).
+*/
+#if defined(_MSC_VER)
+#include "atomic/generic-msvc.h"
+#elif defined(HAVE_SOLARIS_ATOMIC)
+#include "atomic/solaris.h"
+#elif defined(HAVE_GCC_ATOMIC_BUILTINS)
+#include "atomic/gcc_builtins.h"
+#elif defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))
+#include "atomic/x86-gcc.h"
+#endif
+
 
 #ifndef make_atomic_cas_body
 /* nolock.h was not able to generate even a CAS function, fall back */
@@ -282,8 +299,16 @@ make_atomic_store(ptr)
 
 #if SIZEOF_LONG == 4
 #define my_atomic_addlong(A,B) my_atomic_add32((int32*) (A), (B))
+#define my_atomic_loadlong(A) my_atomic_load32((int32*) (A))
+#define my_atomic_storelong(A,B) my_atomic_store32((int32*) (A), (B))
+#define my_atomic_faslong(A,B) my_atomic_fas32((int32*) (A), (B))
+#define my_atomic_caslong(A,B,C) my_atomic_cas32((int32*) (A), (int32*) (B), (C))
 #else
 #define my_atomic_addlong(A,B) my_atomic_add64((int64*) (A), (B))
+#define my_atomic_loadlong(A) my_atomic_load64((int64*) (A))
+#define my_atomic_storelong(A,B) my_atomic_store64((int64*) (A), (B))
+#define my_atomic_faslong(A,B) my_atomic_fas64((int64*) (A), (B))
+#define my_atomic_caslong(A,B,C) my_atomic_cas64((int64*) (A), (int64*) (B), (C))
 #endif
 
 #ifdef _atomic_h_cleanup_
@@ -334,7 +359,7 @@ make_atomic_store(ptr)
 #define MY_ATOMIC_NOT_1CPU 1
 extern int my_atomic_initialize();
 
-#ifdef __ATOMIC_SEQ_CST
+#ifdef HAVE_GCC_C11_ATOMICS
 #define MY_MEMORY_ORDER_RELAXED __ATOMIC_RELAXED
 #define MY_MEMORY_ORDER_CONSUME __ATOMIC_CONSUME
 #define MY_MEMORY_ORDER_ACQUIRE __ATOMIC_ACQUIRE

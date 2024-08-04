@@ -6,9 +6,12 @@
 --source include/count_sessions.inc
 
 # MERGE tables require MyISAM tables
-let $default=`select @@global.storage_engine`;
-set global storage_engine=myisam;
-set session storage_engine=myisam;
+set @save_default_storage_engine=@@global.storage_engine;
+set global default_storage_engine=myisam;
+set session default_storage_engine=myisam;
+
+# This test assumes a stable character set
+--source include/default_charset.inc
 
 # Clean up resources used in this test case.
 --disable_warnings
@@ -17,7 +20,6 @@ drop database if exists mysqltest;
 --enable_warnings
 
 let $MYSQLD_DATADIR= `select @@datadir`;
-
 create table t1 (a int not null primary key auto_increment, message char(20));
 create table t2 (a int not null primary key auto_increment, message char(20));
 INSERT INTO t1 (message) VALUES ("Testing"),("table"),("t1");
@@ -655,7 +657,7 @@ insert into t1 values (1);
 flush tables;
 # Open t2 and (implicitly) t1.
 select * from t2;
-# Truncate t1, wich was not recognized as open without the bugfix.
+# Truncate t1, which was not recognized as open without the bugfix.
 # After fix for Bug#8306 and before fix for Bug#26379,
 # it should fail with a table-in-use error message, otherwise succeed.
 truncate table t1;
@@ -1559,7 +1561,7 @@ CREATE TABLE m1 (
 ) ENGINE=MRG_MyISAM DEFAULT CHARSET=latin1 INSERT_METHOD=LAST UNION=(t1);
 
 insert into m1 (col1) values (1);
---error ER_DUP_ENTRY
+--error ER_DUP_KEY
 insert into m1 (col1) values (1);
 
 drop table m1, t1;
@@ -1593,7 +1595,7 @@ CREATE TABLE t1 (c1 INT, c2 INT, UNIQUE (c1), UNIQUE (c2));
 CREATE TABLE m1 (c1 INT, c2 INT, UNIQUE (c1)) ENGINE=MRG_MyISAM INSERT_METHOD=LAST UNION=(t1);
 INSERT INTO m1 VALUES (1,2);
 --echo # insert the duplicate value into the merge table
---error ER_DUP_ENTRY
+--error ER_DUP_KEY
 INSERT INTO m1 VALUES (3,2);
 DROP TABLE m1,t1;
 
@@ -1678,6 +1680,7 @@ CREATE TABLE t1(a int);
 CREATE TABLE t2(a int);
 CREATE TABLE t3(a int) ENGINE = MERGE UNION(t1, t2);
 CREATE TRIGGER tr1 AFTER INSERT ON t3 FOR EACH ROW CALL foo();
+--replace_column 7 #
 SHOW CREATE TRIGGER tr1;
 DROP TRIGGER tr1;
 DROP TABLE t1, t2, t3;
@@ -1922,13 +1925,16 @@ set @a=concat("create table t_parent (a int) union(", @a,
 prepare stmt from @a;
 execute stmt;
 prepare stmt from "select * from t_parent";
---error ER_NEED_REPREPARE
+--disable_result_log
+--error 0,ER_NEED_REPREPARE
 execute stmt;
---error ER_NEED_REPREPARE
+--error 0,ER_NEED_REPREPARE
 execute stmt;
---error ER_NEED_REPREPARE
+--error 0,ER_NEED_REPREPARE
 execute stmt;
 deallocate prepare stmt;
+--enable_result_log
+
 --echo #
 --echo # Create merge parent 
 --echo #
@@ -2585,7 +2591,6 @@ DROP TABLE t1, t2, t3, t4, m1, m2;
 --disable_warnings
 DROP TABLE IF EXISTS t1, t2, t3;
 --enable_warnings
---echo # Connection con1.
 connect (con1,localhost,root,,);
 CREATE TABLE t1 (c1 int);
 CREATE TABLE t2 (c1 int);
@@ -2594,12 +2599,10 @@ START TRANSACTION;
 --error ER_ILLEGAL_HA
 HANDLER t3 OPEN;
 DROP TABLE t1, t2, t3;
---echo # Connection default.
 connection default;
---echo # Disconnecting con1, all mdl_tickets must have been released.
+--echo # all mdl_tickets must have been released.
 disconnect con1;
 --echo # The bug-specific case.
---echo # Connection con1.
 connect (con1,localhost,root,,);
 CREATE TABLE t1 (c1 int);
 CREATE TABLE t2 (c1 int);
@@ -2609,9 +2612,8 @@ START TRANSACTION;
 --error ER_WRONG_MRG_TABLE
 HANDLER t3 OPEN;
 DROP TABLE t1, t3;
---echo # Connection default.
 connection default;
---echo # Disconnecting con1, all mdl_tickets must have been released.
+--echo # all mdl_tickets must have been released.
 disconnect con1;
 
 --echo #
@@ -2881,6 +2883,19 @@ drop tables m1, t1, t4;
 drop view t3;
 
 
+--echo #
+--echo # MDEV-10424 - Assertion `ticket == __null' failed in
+--echo #              MDL_request::set_type
+--echo #
+CREATE TABLE t1 (f1 INT) ENGINE=MyISAM;
+CREATE TABLE tmerge (f1 INT) ENGINE=MERGE UNION=(t1);
+PREPARE stmt FROM "ANALYZE TABLE tmerge, t1";
+EXECUTE stmt;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+DROP TABLE t1, tmerge;
+
+
 --echo End of 5.5 tests
 
 
@@ -2964,7 +2979,7 @@ DROP TABLE m1;
 
 --disable_result_log
 --disable_query_log
-eval set global storage_engine=$default;
+set global default_storage_engine=@save_default_storage_engine;
 --enable_result_log
 --enable_query_log
 

@@ -1,6 +1,7 @@
 /*****************************************************************************
 
-Copyright (c) 1997, 2009, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1997, 2016, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2017, 2019, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +13,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -26,17 +27,13 @@ Created 12/15/1997 Heikki Tuuri
 #ifndef pars0sym_h
 #define pars0sym_h
 
-#include "univ.i"
 #include "que0types.h"
-#include "usr0types.h"
-#include "dict0types.h"
 #include "pars0types.h"
 #include "row0types.h"
 
 /******************************************************************//**
 Creates a symbol table for a single stored procedure or query.
-@return	own: symbol table */
-UNIV_INTERN
+@return own: symbol table */
 sym_tab_t*
 sym_tab_create(
 /*===========*/
@@ -45,15 +42,13 @@ sym_tab_create(
 Frees the memory allocated dynamically AFTER parsing phase for variables
 etc. in the symbol table. Does not free the mem heap where the table was
 originally created. Frees also SQL explicit cursor definitions. */
-UNIV_INTERN
 void
 sym_tab_free_private(
 /*=================*/
 	sym_tab_t*	sym_tab);	/*!< in, own: symbol table */
 /******************************************************************//**
 Adds an integer literal to a symbol table.
-@return	symbol table node */
-UNIV_INTERN
+@return symbol table node */
 sym_node_t*
 sym_tab_add_int_lit(
 /*================*/
@@ -61,8 +56,7 @@ sym_tab_add_int_lit(
 	ulint		val);		/*!< in: integer value */
 /******************************************************************//**
 Adds an string literal to a symbol table.
-@return	symbol table node */
-UNIV_INTERN
+@return symbol table node */
 sym_node_t*
 sym_tab_add_str_lit(
 /*================*/
@@ -72,8 +66,7 @@ sym_tab_add_str_lit(
 	ulint		len);		/*!< in: string length */
 /******************************************************************//**
 Add a bound literal to a symbol table.
-@return	symbol table node */
-UNIV_INTERN
+@return symbol table node */
 sym_node_t*
 sym_tab_add_bound_lit(
 /*==================*/
@@ -82,7 +75,6 @@ sym_tab_add_bound_lit(
 	ulint*		lit_type);	/*!< out: type of literal (PARS_*_LIT) */
 /**********************************************************************
 Rebind literal to a node in the symbol table. */
-
 sym_node_t*
 sym_tab_rebind_lit(
 /*===============*/
@@ -92,16 +84,14 @@ sym_tab_rebind_lit(
         ulint           length);        /* in: length of data */
 /******************************************************************//**
 Adds an SQL null literal to a symbol table.
-@return	symbol table node */
-UNIV_INTERN
+@return symbol table node */
 sym_node_t*
 sym_tab_add_null_lit(
 /*=================*/
 	sym_tab_t*	sym_tab);	/*!< in: symbol table */
 /******************************************************************//**
 Adds an identifier to a symbol table.
-@return	symbol table node */
-UNIV_INTERN
+@return symbol table node */
 sym_node_t*
 sym_tab_add_id(
 /*===========*/
@@ -111,8 +101,7 @@ sym_tab_add_id(
 
 /******************************************************************//**
 Add a bound identifier to a symbol table.
-@return	symbol table node */
-UNIV_INTERN
+@return symbol table node */
 sym_node_t*
 sym_tab_add_bound_id(
 /*===========*/
@@ -235,7 +224,7 @@ struct sym_tab_t{
 					/*!< SQL string to parse */
 	size_t			string_len;
 					/*!< SQL string length */
-	int			next_char_pos;
+	size_t			next_char_pos;
 					/*!< position of the next character in
 					sql_string to give to the lexical
 					analyzer */
@@ -250,9 +239,5 @@ struct sym_tab_t{
 	mem_heap_t*		heap;	/*!< memory heap from which we can
 					allocate space */
 };
-
-#ifndef UNIV_NONINL
-#include "pars0sym.ic"
-#endif
 
 #endif

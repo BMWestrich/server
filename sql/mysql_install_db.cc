@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 /*
   mysql_install_db creates a new database instance (optionally as service)
@@ -27,6 +27,8 @@
 #include <shellapi.h>
 #include <accctrl.h>
 #include <aclapi.h>
+struct IUnknown;
+#include <shlwapi.h>
 
 #define USAGETEXT \
 "mysql_install_db.exe  Ver 1.00 for Windows\n" \
@@ -47,6 +49,7 @@ static char *opt_datadir;
 static char *opt_service;
 static char *opt_password;
 static int  opt_port;
+static int  opt_innodb_page_size;
 static char *opt_socket;
 static char *opt_os_user;
 static char *opt_os_password;
@@ -56,6 +59,7 @@ static my_bool opt_skip_networking;
 static my_bool opt_verbose_bootstrap;
 static my_bool verbose_errors;
 
+#define DEFAULT_INNODB_PAGE_SIZE 16*1024
 
 static struct my_option my_long_options[]=
 {
@@ -81,6 +85,8 @@ static struct my_option my_long_options[]=
   {"skip-networking", 'N', "Do not use TCP connections, use pipe instead",
   &opt_skip_networking, &opt_skip_networking, 0 , GET_BOOL, OPT_ARG, 0, 0, 0, 0,
   0, 0},
+  { "innodb-page-size", 'i', "Page size for innodb",
+  &opt_innodb_page_size, &opt_innodb_page_size, 0, GET_INT, REQUIRED_ARG, DEFAULT_INNODB_PAGE_SIZE, 1*1024, 64*1024, 0, 0, 0 },
   {"silent", 's', "Print less information", &opt_silent,
    &opt_silent, 0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
   {"verbose-bootstrap", 'o', "Include mysqld bootstrap output",&opt_verbose_bootstrap,
@@ -119,10 +125,10 @@ static void die(const char *fmt, ...)
   if (verbose_errors)
   {
    fprintf(stderr,
-   "http://kb.askmonty.org/v/installation-issues-on-windows contains some help\n"
+   "https://mariadb.com/kb/en/installation-issues-on-windows contains some help\n"
    "for solving the most common problems.  If this doesn't help you, please\n"
-   "leave a comment in the Knowledgebase or file a bug report at\n"
-   "http://mariadb.org/jira");
+   "leave a comment in the Knowledge Base or file a bug report at\n"
+   "https://jira.mariadb.org");
   }
   fflush(stderr);
   va_end(args);
@@ -195,7 +201,7 @@ int main(int argc, char **argv)
     die("database creation failed");
   }
 
-  printf("Creation of the database was successfull");
+  printf("Creation of the database was successful");
   return 0;
 }
 
@@ -233,6 +239,20 @@ static void get_basedir(char *basedir, int size, const char *mysqld_path)
   }
 }
 
+#define STR(s) _STR(s)
+#define _STR(s) #s
+
+static char *get_plugindir()
+{
+  static char plugin_dir[2*MAX_PATH];
+  get_basedir(plugin_dir, sizeof(plugin_dir), mysqld_path);
+  strcat(plugin_dir, "/" STR(INSTALL_PLUGINDIR));
+
+  if (access(plugin_dir, 0) == 0)
+    return plugin_dir;
+
+  return NULL;
+}
 
 /**
   Allocate and initialize command line for mysqld --bootstrap.
@@ -245,13 +265,13 @@ static char *init_bootstrap_command_line(char *cmdline, size_t size)
   char basedir[MAX_PATH];
   get_basedir(basedir, sizeof(basedir), mysqld_path);
 
-  my_snprintf(cmdline, size-1, 
-    "\"\"%s\" --no-defaults %s --bootstrap"
+  my_snprintf(cmdline, size - 1,
+    "\"\"%s\" --no-defaults %s --innodb-page-size=%d --bootstrap"
     " \"--lc-messages-dir=%s/share\""
     " --basedir=. --datadir=. --default-storage-engine=myisam"
     " --max_allowed_packet=9M "
     " --net-buffer-length=16k\"", mysqld_path,
-    opt_verbose_bootstrap?"--console":"", basedir );
+    opt_verbose_bootstrap ? "--console" : "", opt_innodb_page_size, basedir);
   return cmdline;
 }
 
@@ -302,7 +322,10 @@ static int create_myini()
   {
     fprintf(myini,"port=%d\n", opt_port);
   }
-
+  if (opt_innodb_page_size != DEFAULT_INNODB_PAGE_SIZE)
+  {
+    fprintf(myini, "innodb-page-size=%d\n", opt_innodb_page_size);
+  }
   /* Write out client settings. */
   fprintf(myini, "[client]\n");
 
@@ -313,6 +336,10 @@ static int create_myini()
     fprintf(myini,"protocol=pipe\n");
   else if (opt_port)
     fprintf(myini,"port=%d\n",opt_port);
+
+  char *plugin_dir = get_plugindir();
+  if (plugin_dir)
+    fprintf(myini, "plugin-dir=%s\n", plugin_dir);
   fclose(myini);
   return 0;
 }
@@ -368,8 +395,8 @@ static int register_service()
     CloseServiceHandle(sc_manager);
     die("CreateService failed (%u)", GetLastError());
   }
-
-  SERVICE_DESCRIPTION sd= { "MariaDB database server" };
+  char description[] = "MariaDB database server";
+  SERVICE_DESCRIPTION sd= { description };
   ChangeServiceConfig2(sc_service, SERVICE_CONFIG_DESCRIPTION, &sd);
   CloseServiceHandle(sc_service); 
   CloseServiceHandle(sc_manager);
@@ -379,8 +406,8 @@ static int register_service()
 
 static void clean_directory(const char *dir)
 {
-  char dir2[MAX_PATH+2];
-  *(strmake_buf(dir2, dir)+1)= 0;
+  char dir2[MAX_PATH + 4]= {};
+  snprintf(dir2, MAX_PATH+2, "%s\\*", dir);
 
   SHFILEOPSTRUCT fileop;
   fileop.hwnd= NULL;    /* no status display */
@@ -531,20 +558,84 @@ static int create_db_instance()
   DWORD cwd_len= MAX_PATH;
   char cmdline[3*MAX_PATH];
   FILE *in;
+  bool created_datadir= false;
+  DWORD last_error;
 
   verbose("Running bootstrap");
 
   GetCurrentDirectory(cwd_len, cwd);
-  CreateDirectory(opt_datadir, NULL); /*ignore error, it might already exist */
+
+  /* Create datadir and datadir/mysql, if they do not already exist. */
+
+  if (CreateDirectory(opt_datadir, NULL))
+  {
+    created_datadir= true;
+  }
+  else if (GetLastError() != ERROR_ALREADY_EXISTS)
+  {
+    last_error = GetLastError();
+    switch(last_error)
+    {
+      case ERROR_ACCESS_DENIED:
+        die("Can't create data directory '%s' (access denied)\n",
+            opt_datadir);
+        break;
+      case ERROR_PATH_NOT_FOUND:
+        die("Can't create data directory '%s' "
+            "(one or more intermediate directories do not exist)\n",
+            opt_datadir);
+        break;
+      default:
+        die("Can't create data directory '%s', last error %u\n",
+         opt_datadir, last_error);
+        break;
+    }
+  }
 
   if (!SetCurrentDirectory(opt_datadir))
   {
-    die("Cannot set current directory to '%s'\n",opt_datadir);
-    return -1;
+    last_error = GetLastError();
+    switch (last_error)
+    {
+      case ERROR_DIRECTORY:
+        die("Can't set current directory to '%s', the path is not a valid directory \n",
+            opt_datadir);
+        break;
+      default:
+        die("Can' set current directory to '%s', last error %u\n",
+            opt_datadir, last_error);
+        break;
+    }
   }
 
-  CreateDirectory("mysql",NULL);
-  CreateDirectory("test", NULL);
+  if (!PathIsDirectoryEmpty(opt_datadir))
+  {
+    fprintf(stderr,"ERROR : Data directory %s is not empty."
+        " Only new or empty existing directories are accepted for --datadir\n",opt_datadir);
+    exit(1);
+  }
+
+  if (!CreateDirectory("mysql",NULL))
+  {
+    last_error = GetLastError();
+    DWORD attributes;
+    switch(last_error)
+    {
+      case ERROR_ACCESS_DENIED:
+        die("Can't create subdirectory 'mysql' in '%s' (access denied)\n",opt_datadir);
+        break;
+      case ERROR_ALREADY_EXISTS:
+       attributes = GetFileAttributes("mysql");
+
+       if (attributes == INVALID_FILE_ATTRIBUTES)
+         die("GetFileAttributes() failed for existing file '%s\\mysql', last error %u",
+            opt_datadir, GetLastError());
+       else if (!(attributes & FILE_ATTRIBUTE_DIRECTORY))
+         die("File '%s\\mysql' exists, but it is not a directory", opt_datadir);
+
+       break;
+    }
+  }
 
   /*
     Set data directory permissions for both current user and 
@@ -634,13 +725,6 @@ static int create_db_instance()
     goto end;
   }
 
-  /* 
-    Remove innodb log files if they exist (this works around "different size logs" 
-    error in MSI installation). TODO : remove this with the next Innodb, where
-    different size is handled gracefully.
-  */
-  DeleteFile("ib_logfile0");
-  DeleteFile("ib_logfile1");
 
   /* Create my.ini file in data directory.*/
   ret= create_myini();
@@ -661,6 +745,8 @@ end:
   {
     SetCurrentDirectory(cwd);
     clean_directory(opt_datadir);
+    if (created_datadir)
+      RemoveDirectory(opt_datadir);
   }
   return ret;
 }

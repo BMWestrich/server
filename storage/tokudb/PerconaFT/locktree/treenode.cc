@@ -32,15 +32,29 @@ Copyright (c) 2006, 2015, Percona and/or its affiliates. All rights reserved.
 
     You should have received a copy of the GNU Affero General Public License
     along with PerconaFT.  If not, see <http://www.gnu.org/licenses/>.
+
+----------------------------------------
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
 ======= */
 
 #ident "Copyright (c) 2006, 2015, Percona and/or its affiliates. All rights reserved."
 
 #include <toku_race_tools.h>
 
-void treenode::mutex_lock(void) {
-    toku_mutex_lock(&m_mutex);
-}
+// TODO: source location info might have to be pulled up one caller
+// to be useful
+void treenode::mutex_lock(void) { toku_mutex_lock(&m_mutex); }
 
 void treenode::mutex_unlock(void) {
     toku_mutex_unlock(&m_mutex);
@@ -58,7 +72,7 @@ void treenode::init(const comparator *cmp) {
     toku_pthread_mutexattr_t attr;
     toku_mutexattr_init(&attr);
     toku_mutexattr_settype(&attr, TOKU_MUTEX_ADAPTIVE);
-    toku_mutex_init(&m_mutex, &attr);
+    toku_mutex_init(*treenode_mutex_key, &m_mutex, &attr);
     toku_mutexattr_destroy(&attr);
     m_left_child.set(nullptr);
     m_right_child.set(nullptr);

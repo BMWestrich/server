@@ -5,7 +5,7 @@
 /*                                                                     */
 /* COPYRIGHT:                                                          */
 /* ----------                                                          */
-/*  (C) Copyright to the author Olivier Bertrand 1995-2012             */
+/*  (C) Copyright to the author Olivier Bertrand 1995-2016             */
 /*                                                                     */
 /* WHAT THIS PROGRAM DOES:                                             */
 /* -----------------------                                             */
@@ -178,9 +178,9 @@ void CSORT::DebugSort(int ph, int n, int *base, int *mid, int *tmp)
 /***********************************************************************/
 int CSORT::Qsortx(void)
   {
-  register int  c;
-  register int  lo, hi, min;
-  register int  i, j, rc = 0;
+  int  c;
+  int  lo, hi, min;
+  int  i, j, rc = 0;
   // To do: rc should be checked for being used uninitialized
   int          *top;
 #ifdef DEBTRACE
@@ -344,14 +344,14 @@ int CSORT::Qsortx(void)
 /***********************************************************************/
 void CSORT::Qstx(int *base, int *max)
   {
-  register int *i, *j, *jj, *mid, *him, c;
+  int *i, *j, *jj, *mid, *him, c;
   int          *tmp;
   int           lo, hi, rc;
   size_t        zlo, zhi, cnm;
 
   zlo = zhi = cnm = 0;                  // Avoid warning message
 
-  lo = max - base;                      // Number of elements as longs
+  lo = (int)(max - base);                      // Number of elements as longs
 
   if (Dup)
     cnm = Cmpnum(lo);
@@ -472,7 +472,7 @@ void CSORT::Qstx(int *base, int *max)
     i = him + 1;
 
     if (Pof)
-      Pof[him - Pex] = Pof[mid - Pex] = i - j;
+      Pof[him - Pex] = Pof[mid - Pex] = (int)(i - j);
 
     /*******************************************************************/
     /* Look at sizes of the two partitions, do the smaller one first   */
@@ -481,8 +481,8 @@ void CSORT::Qstx(int *base, int *max)
     /* But only repeat (recursively or by branching) if the partition  */
     /* is of at least size THRESH.                                     */
     /*******************************************************************/
-    lo = j - base;
-    hi = max - i;
+    lo = (int)(j - base);
+    hi = (int)(max - i);
 
     if (Dup) {                         // Update progress information
       zlo = Cmpnum(lo);
@@ -543,9 +543,9 @@ void CSORT::Qstx(int *base, int *max)
 /***********************************************************************/
 int CSORT::Qsortc(void)
   {
-  register int  c;
-  register int  lo, hi, min;
-  register int  i, j, k, m, rc = 0;
+  int  c;
+  int  lo, hi, min;
+  int  i, j, k, m, rc = 0;
   // To do: rc should be checked for being used uninitialized
   int          *max;
 #ifdef DEBTRACE
@@ -720,13 +720,13 @@ int CSORT::Qsortc(void)
 /***********************************************************************/
 void CSORT::Qstc(int *base, int *max)
   {
-  register int *i, *j, *jj, *lt, *eq, *gt, *mid;
-  int           c, lo, hi, rc;
-  size_t         zlo, zhi, cnm;
+  int *i, *j, *jj, *lt, *eq, *gt, *mid;
+  int           c = 0, lo, hi, rc;
+  size_t        zlo, zhi, cnm;
 
   zlo = zhi = cnm = 0;                  // Avoid warning message
 
-  lo = max - base;                      // Number of elements as longs
+  lo = (int)(max - base);                      // Number of elements as longs
 
   if (Dup)
     cnm = Cmpnum(lo);
@@ -774,8 +774,11 @@ void CSORT::Qstc(int *base, int *max)
       /*****************************************************************/
       /*  Small group. Do special quicker processing.                  */
       /*****************************************************************/
-      if ((rc = Qcompare(base, (i = base + 1))) > 0)
-        c = *base, *base = *i, *i = c;
+			if ((rc = Qcompare(base, (i = base + 1))) > 0) {
+				c = *base;
+				*base = *i;
+				*i = c;
+			}	// endif rc
 
       if (Pof)
         Pof[base - Pex] = Pof[i - Pex] = (rc) ? 1 : 2;
@@ -850,7 +853,7 @@ void CSORT::Qstc(int *base, int *max)
     /* the offset array values indicating break point and block size.  */
     /*******************************************************************/
     if (Pof)
-      Pof[lt - Pex] = Pof[(jj - 1) - Pex] = jj - lt;
+      Pof[lt - Pex] = Pof[(jj - 1) - Pex] = (int)(jj - lt);
 
     /*******************************************************************/
     /* Look at sizes of the two partitions, do the smaller one first   */
@@ -859,8 +862,8 @@ void CSORT::Qstc(int *base, int *max)
     /* But only repeat (recursively or by branching) if the partition  */
     /* is of at least size THRESH.                                     */
     /*******************************************************************/
-    lo = lt - base;
-    hi = gt - Swix;
+    lo = (int)(lt - base);
+    hi = (int)(gt - Swix);
 
     if (Dup) {                         // Update progress information
       zlo = Cmpnum(lo);
@@ -904,9 +907,9 @@ void CSORT::Qstc(int *base, int *max)
 /***********************************************************************/
 void CSORT::Istc(int *base, int *hi, int *max)
   {
-  register int  c = 0;
-  register int *lo;
-  register int *i, *j;
+  int  c = 0;
+  int *lo;
+  int *i, *j;
 
   /*********************************************************************/
   /*  First put smallest element, which must be in the first THRESH,   */

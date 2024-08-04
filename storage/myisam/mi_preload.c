@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /*
   Preload indexes into key cache
@@ -41,7 +41,7 @@
 int mi_preload(MI_INFO *info, ulonglong key_map, my_bool ignore_leaves)
 {
   uint i;
-  ulong length, block_length= 0;
+  size_t length, block_length= 0;
   uchar *buff= NULL;
   MYISAM_SHARE* share= info->s;
   uint keys= share->state.header.keys;
@@ -68,7 +68,7 @@ int mi_preload(MI_INFO *info, ulonglong key_map, my_bool ignore_leaves)
     }
   }
   else
-    block_length= share->key_cache->param_block_size;
+    block_length= (size_t)share->key_cache->param_block_size;
 
   length= info->preload_buff_size/block_length * block_length;
   set_if_bigger(length, block_length);
@@ -84,7 +84,7 @@ int mi_preload(MI_INFO *info, ulonglong key_map, my_bool ignore_leaves)
   {
     /* Read the next block of index file into the preload buffer */
     if ((my_off_t) length > (key_file_length-pos))
-      length= (ulong) (key_file_length-pos);
+      length= (size_t) (key_file_length-pos);
     if (mysql_file_pread(share->kfile, (uchar*) buff, length, pos,
                          MYF(MY_FAE|MY_FNABP)))
       goto err;

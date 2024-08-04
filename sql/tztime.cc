@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /*
    Most of the following code and structures were derived from
@@ -148,6 +148,7 @@ typedef struct st_time_zone_info
 
 static my_bool prepare_tz_info(TIME_ZONE_INFO *sp, MEM_ROOT *storage);
 
+my_bool opt_leap, opt_verbose, opt_skip_write_binlog;
 
 #if defined(TZINFO2SQL) || defined(TESTTIME)
 
@@ -309,7 +310,7 @@ tz_load(const char *name, TIME_ZONE_INFO *sp, MEM_ROOT *storage)
     Note: See description of TIME_to_gmt_sec() function first.
     In order to perform MYSQL_TIME -> my_time_t conversion we need to build table
     which defines "shifted by tz offset and leap seconds my_time_t" ->
-    my_time_t function wich is almost the same (except ranges of ambiguity)
+    my_time_t function which is almost the same (except ranges of ambiguity)
     as reverse function to piecewise linear function used for my_time_t ->
     "shifted my_time_t" conversion and which is also specified as table in
     zoneinfo file or in our db (It is specified as start of time type ranges
@@ -612,7 +613,7 @@ sec_to_TIME(MYSQL_TIME * tmp, my_time_t t, long offset)
 
 
 /*
-  Find time range wich contains given my_time_t value
+  Find time range which contains given my_time_t value
 
   SYNOPSIS
     find_time_range()
@@ -708,7 +709,7 @@ find_transition_type(my_time_t t, const TIME_ZONE_INFO *sp)
   TODO
     We can improve this function by creating joined array of transitions and
     leap corrections. This will require adding extra field to TRAN_TYPE_INFO
-    for storing number of "extra" seconds to minute occured due to correction
+    for storing number of "extra" seconds to minute occurred due to correction
     (60th and 61st second, look how we calculate them as "hit" in this
     function).
     Under realistic assumptions about frequency of transitions the same array
@@ -1537,16 +1538,11 @@ my_offset_tzs_get_key(Time_zone_offset *entry,
 static void
 tz_init_table_list(TABLE_LIST *tz_tabs)
 {
-  bzero(tz_tabs, sizeof(TABLE_LIST) * MY_TZ_TABLES_COUNT);
-
   for (int i= 0; i < MY_TZ_TABLES_COUNT; i++)
   {
-    tz_tabs[i].alias= tz_tabs[i].table_name= tz_tables_names[i].str;
-    tz_tabs[i].table_name_length= tz_tables_names[i].length;
-    tz_tabs[i].db= tz_tables_db_name.str;
-    tz_tabs[i].db_length= tz_tables_db_name.length;
-    tz_tabs[i].lock_type= TL_READ;
-
+    tz_tabs[i].init_one_table(tz_tables_db_name.str, tz_tables_db_name.length,
+                              tz_tables_names[i].str, tz_tables_names[i].length,
+                              NULL, TL_READ);
     if (i != MY_TZ_TABLES_COUNT - 1)
       tz_tabs[i].next_global= tz_tabs[i].next_local= &tz_tabs[i+1];
     if (i != 0)
@@ -1620,7 +1616,7 @@ my_tz_init(THD *org_thd, const char *default_tzname, my_bool bootstrap)
   /*
     To be able to run this from boot, we allocate a temporary THD
   */
-  if (!(thd= new THD))
+  if (!(thd= new THD(0)))
     DBUG_RETURN(1);
   thd->thread_stack= (char*) &thd;
   thd->store_globals();
@@ -1661,7 +1657,7 @@ my_tz_init(THD *org_thd, const char *default_tzname, my_bool bootstrap)
   {
     /* If we are in bootstrap mode we should not load time zone tables */
     return_val= time_zone_tables_exist= 0;
-    goto end_with_setting_default_tz;
+    goto end_with_cleanup;
   }
 
   /*
@@ -1703,7 +1699,7 @@ my_tz_init(THD *org_thd, const char *default_tzname, my_bool bootstrap)
   {
     tl->table->use_all_columns();
     /* Force close at the end of the function to free memory. */
-    tl->table->m_needs_reopen= TRUE;
+    tl->table->mark_table_for_reopen();
   }
 
   /*
@@ -2442,6 +2438,14 @@ print_tz_leaps_as_sql(const TIME_ZONE_INFO *sp)
     We are assuming that there are only one list of leap seconds
     For all timezones.
   */
+  if (!opt_skip_write_binlog)
+      printf("\\d |\n"
+        "IF (select count(*) from information_schema.global_variables where\n"
+        "variable_name='wsrep_on' and variable_value='ON') = 1 THEN\n"
+        "ALTER TABLE time_zone_leap_second ENGINE=InnoDB;\n"
+        "END IF|\n"
+        "\\d ;\n");
+
   printf("TRUNCATE TABLE time_zone_leap_second;\n");
 
   if (sp->leapcnt)
@@ -2453,6 +2457,14 @@ print_tz_leaps_as_sql(const TIME_ZONE_INFO *sp)
              sp->lsis[i].ls_trans, sp->lsis[i].ls_corr);
     printf(";\n");
   }
+
+  if (!opt_skip_write_binlog)
+      printf("\\d |\n"
+        "IF (select count(*) from information_schema.global_variables where\n"
+        "variable_name='wsrep_on' and variable_value='ON') = 1 THEN\n"
+        "ALTER TABLE time_zone_leap_second ENGINE=MyISAM;\n"
+        "END IF|\n"
+        "\\d ;\n");
 
   printf("ALTER TABLE time_zone_leap_second ORDER BY Transition_time;\n");
 }
@@ -2610,8 +2622,6 @@ scan_tz_dir(char * name_end, uint symlink_recursion_level, uint verbose)
 }
 
 
-my_bool opt_leap, opt_verbose;
-
 static const char *load_default_groups[]=
 { "mysql_tzinfo_to_sql", 0};
 
@@ -2620,20 +2630,31 @@ static struct my_option my_long_options[] =
   {"help", '?', "Display this help and exit.", 0, 0, 0, GET_NO_ARG, NO_ARG,
    0, 0, 0, 0, 0, 0},
 #ifdef DBUG_OFF
-  {"debug", '#', "This is a non-debug version. Catch this and exit",
+  {"debug", '#', "This is a non-debug version. Catch this and exit.",
    0,0, 0, GET_DISABLED, OPT_ARG, 0, 0, 0, 0, 0, 0},
 #else
   {"debug", '#', "Output debug log. Often this is 'd:t:o,filename'.",
    0, 0, 0, GET_STR, OPT_ARG, 0, 0, 0, 0, 0, 0},
 #endif
-  {"leap", 'l', "Print the leap second information from the given time zone file. By convention, when --leap is used the next argument is the timezonefile",
+  {"leap", 'l', "Print the leap second information from the given time zone file. By convention, when --leap is used the next argument is the timezonefile.",
    &opt_leap, &opt_leap, 0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
-  {"verbose", 'v', "Write non critical warnings",
+  {"verbose", 'v', "Write non critical warnings.",
    &opt_verbose, &opt_verbose, 0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
   {"version", 'V', "Output version information and exit.",
    0, 0, 0, GET_NO_ARG, NO_ARG, 0, 0, 0, 0, 0, 0},
+  {"skip-write-binlog", 'S', "Do not replicate changes to time zone tables to the binary log, or to other nodes in a Galera cluster.",
+   &opt_skip_write_binlog,&opt_skip_write_binlog, 0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
   { 0, 0, 0, 0, 0, 0, GET_NO_ARG, NO_ARG, 0, 0, 0, 0, 0, 0}
 };
+
+
+static char **default_argv;
+
+static void free_allocated_data()
+{
+  free_defaults(default_argv);
+  my_end(0);
+}
 
 
 C_MODE_START
@@ -2647,11 +2668,21 @@ static void print_version(void)
 	 MYSQL_SERVER_VERSION,SYSTEM_TYPE,MACHINE_TYPE);
 }
 
+static const char *default_timezone_dir= "/usr/share/zoneinfo/";
+
+
 static void print_usage(void)
 {
-  fprintf(stderr, "Usage:\n");
-  fprintf(stderr, " %s [options] timezonedir\n", my_progname);
-  fprintf(stderr, " %s [options] timezonefile timezonename\n", my_progname);
+  fprintf(stdout, "Create SQL commands for loading system timezeone data for "
+          "MariaDB\n\n");
+  fprintf(stdout, "Usage:\n");
+  fprintf(stdout, " %s [options] timezonedir\n", my_progname);
+  fprintf(stdout, "or\n");
+  fprintf(stdout, " %s [options] timezonefile timezonename\n", my_progname);
+
+  fprintf(stdout, "\nA typical place for the system timezone directory is "
+          "\"%s\"\n", default_timezone_dir);
+
   print_defaults("my",load_default_groups);
   puts("");
   my_print_help(my_long_options);
@@ -2672,9 +2703,11 @@ get_one_option(int optid, const struct my_option *opt, char *argument)
     print_version();
     puts("");
     print_usage();
+    free_allocated_data();
     exit(0);
   case 'V':
     print_version();
+    free_allocated_data();
     exit(0);
   }
   return 0;
@@ -2684,12 +2717,9 @@ get_one_option(int optid, const struct my_option *opt, char *argument)
 int
 main(int argc, char **argv)
 {
-  char **default_argv;
   MY_INIT(argv[0]);
 
-  if (load_defaults("my",load_default_groups,&argc,&argv))
-    exit(1);
-
+  load_defaults_or_exit("my", load_default_groups, &argc, &argv);
   default_argv= argv;
 
   if ((handle_options(&argc, &argv, my_long_options, get_one_option)))
@@ -2698,15 +2728,34 @@ main(int argc, char **argv)
   if ((argc != 1 && argc != 2) || (opt_leap && argc != 1))
   {
     print_usage();
-    free_defaults(default_argv);
+    free_allocated_data();
     return 1;
   }
 
-  // Replicate MyISAM DDL for this session, cf. lp:1161432
-  // timezone info unfixable in XtraDB Cluster
-  printf("set @prep=if((select count(*) from information_schema.global_variables where variable_name='wsrep_on'), 'SET GLOBAL wsrep_replicate_myisam=?', 'do ?');\n"
-         "prepare set_wsrep_myisam from @prep;\n"
-         "set @toggle=1; execute set_wsrep_myisam using @toggle;\n");
+  if (opt_skip_write_binlog)
+  {
+    /* If skip_write_binlog is set and wsrep is compiled in we disable
+       sql_log_bin and wsrep_on to avoid Galera replicating below
+       truncate table clauses. This will allow user to set different
+       time zones to nodes in Galera cluster. */
+    printf("set @prep1=if((select count(*) from information_schema.global_variables where variable_name='wsrep_on' and variable_value='ON'), 'SET SESSION WSREP_ON=OFF', 'do 0');\n"
+           "SET SESSION SQL_LOG_BIN=0;\n"
+           "execute immediate @prep1;\n");
+  }
+  else
+  {
+      // Alter time zone tables to InnoDB if wsrep_on is enabled
+      // to allow changes to them to replicate with Galera
+      printf("\\d |\n"
+        "IF (select count(*) from information_schema.global_variables where\n"
+        "variable_name='wsrep_on' and variable_value='ON') = 1 THEN\n"
+        "ALTER TABLE time_zone ENGINE=InnoDB;\n"
+        "ALTER TABLE time_zone_name ENGINE=InnoDB;\n"
+        "ALTER TABLE time_zone_transition ENGINE=InnoDB;\n"
+        "ALTER TABLE time_zone_transition_type ENGINE=InnoDB;\n"
+        "END IF|\n"
+        "\\d ;\n");
+  }
 
   if (argc == 1 && !opt_leap)
   {
@@ -2718,9 +2767,11 @@ main(int argc, char **argv)
     printf("TRUNCATE TABLE time_zone_name;\n");
     printf("TRUNCATE TABLE time_zone_transition;\n");
     printf("TRUNCATE TABLE time_zone_transition_type;\n");
+    printf("START TRANSACTION;\n");
 
     if (scan_tz_dir(root_name_end, 0, opt_verbose))
     {
+      printf("ROLLBACK;\n");
       fflush(stdout);
       fprintf(stderr,
               "There were fatal errors during processing "
@@ -2728,6 +2779,7 @@ main(int argc, char **argv)
       return 1;
     }
 
+    printf("COMMIT;\n");
     printf("ALTER TABLE time_zone_transition "
            "ORDER BY Time_zone_id, Transition_time;\n");
     printf("ALTER TABLE time_zone_transition_type "
@@ -2755,8 +2807,19 @@ main(int argc, char **argv)
     free_root(&tz_storage, MYF(0));
   }
 
-  // Reset wsrep_replicate_myisam. lp:1161432
-  printf("set @toggle=0; execute set_wsrep_myisam using @toggle;\n");
+  if(!opt_skip_write_binlog)
+  {
+      // Fall back to MyISAM
+      printf("\\d |\n"
+        "IF (select count(*) from information_schema.global_variables where\n"
+        "variable_name='wsrep_on' and variable_value='ON') = 1 THEN\n"
+        "ALTER TABLE time_zone ENGINE=MyISAM;\n"
+        "ALTER TABLE time_zone_name ENGINE=MyISAM;\n"
+        "ALTER TABLE time_zone_transition ENGINE=MyISAM;\n"
+        "ALTER TABLE time_zone_transition_type ENGINE=MyISAM;\n"
+        "END IF|\n"
+        "\\d ;\n");
+  }
 
   free_defaults(default_argv);
   my_end(0);
@@ -2769,7 +2832,7 @@ main(int argc, char **argv)
 #ifdef TESTTIME
 
 /*
-   Some simple brute-force test wich allowed to catch a pair of bugs.
+   Some simple brute-force test which allowed to catch a pair of bugs.
    Also can provide interesting facts about system's time zone support
    implementation.
 */

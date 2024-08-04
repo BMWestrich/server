@@ -1,6 +1,7 @@
 /*****************************************************************************
 
-Copyright (c) 1997, 2011, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1997, 2014, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2017, 2019, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +13,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -30,17 +31,20 @@ Created 12/14/1997 Heikki Tuuri
 que_node_t */
 
 #include "univ.i"
-#include <math.h>				/* Can't be before univ.i */
+#include <math.h>
 #include "pars0pars.h"
 #include "mem0mem.h"
 #include "que0types.h"
 #include "que0que.h"
 #include "row0sel.h"
 
+#if defined __GNUC__ && (!defined __clang_major__ || __clang_major__ > 11)
+#pragma GCC diagnostic ignored "-Wfree-nonheap-object"
+#endif
+
 #define YYSTYPE que_node_t*
 
 /* #define __STDC__ */
-
 int
 yylex(void);
 %}
@@ -48,8 +52,6 @@ yylex(void);
 %token PARS_INT_LIT
 %token PARS_FLOAT_LIT
 %token PARS_STR_LIT
-%token PARS_FIXBINARY_LIT
-%token PARS_BLOB_LIT
 %token PARS_NULL_LIT
 %token PARS_ID_TOKEN
 %token PARS_AND_TOKEN
@@ -60,12 +62,7 @@ yylex(void);
 %token PARS_NE_TOKEN
 %token PARS_PROCEDURE_TOKEN
 %token PARS_IN_TOKEN
-%token PARS_OUT_TOKEN
-%token PARS_BINARY_TOKEN
-%token PARS_BLOB_TOKEN
 %token PARS_INT_TOKEN
-%token PARS_INTEGER_TOKEN
-%token PARS_FLOAT_TOKEN
 %token PARS_CHAR_TOKEN
 %token PARS_IS_TOKEN
 %token PARS_BEGIN_TOKEN
@@ -78,14 +75,11 @@ yylex(void);
 %token PARS_WHILE_TOKEN
 %token PARS_RETURN_TOKEN
 %token PARS_SELECT_TOKEN
-%token PARS_SUM_TOKEN
 %token PARS_COUNT_TOKEN
-%token PARS_DISTINCT_TOKEN
 %token PARS_FROM_TOKEN
 %token PARS_WHERE_TOKEN
 %token PARS_FOR_TOKEN
 %token PARS_DDOT_TOKEN
-%token PARS_READ_TOKEN
 %token PARS_ORDER_TOKEN
 %token PARS_BY_TOKEN
 %token PARS_ASC_TOKEN
@@ -103,7 +97,6 @@ yylex(void);
 %token PARS_INDEX_TOKEN
 %token PARS_UNIQUE_TOKEN
 %token PARS_CLUSTERED_TOKEN
-%token PARS_DOES_NOT_FIT_IN_MEM_TOKEN
 %token PARS_ON_TOKEN
 %token PARS_ASSIGN_TOKEN
 %token PARS_DECLARE_TOKEN
@@ -113,25 +106,14 @@ yylex(void);
 %token PARS_FETCH_TOKEN
 %token PARS_CLOSE_TOKEN
 %token PARS_NOTFOUND_TOKEN
-%token PARS_TO_CHAR_TOKEN
-%token PARS_TO_NUMBER_TOKEN
 %token PARS_TO_BINARY_TOKEN
-%token PARS_BINARY_TO_NUMBER_TOKEN
 %token PARS_SUBSTR_TOKEN
-%token PARS_REPLSTR_TOKEN
 %token PARS_CONCAT_TOKEN
 %token PARS_INSTR_TOKEN
 %token PARS_LENGTH_TOKEN
-%token PARS_SYSDATE_TOKEN
-%token PARS_PRINTF_TOKEN
-%token PARS_ASSERT_TOKEN
-%token PARS_RND_TOKEN
-%token PARS_RND_STR_TOKEN
-%token PARS_ROW_PRINTF_TOKEN
 %token PARS_COMMIT_TOKEN
 %token PARS_ROLLBACK_TOKEN
 %token PARS_WORK_TOKEN
-%token PARS_UNSIGNED_TOKEN
 %token PARS_EXIT_TOKEN
 %token PARS_FUNCTION_TOKEN
 %token PARS_LOCK_TOKEN
@@ -143,8 +125,6 @@ yylex(void);
 %token PARS_LIKE_TOKEN_SUFFIX
 %token PARS_LIKE_TOKEN_SUBSTR
 %token PARS_TABLE_NAME_TOKEN
-%token PARS_COMPACT_TOKEN
-%token PARS_BLOCK_SIZE_TOKEN
 %token PARS_BIGINT_TOKEN
 
 %left PARS_AND_TOKEN PARS_OR_TOKEN
@@ -155,6 +135,8 @@ yylex(void);
 %left NEG     /* negation--unary minus */
 %left '%'
 
+%expect 41
+
 /* Grammar follows */
 %%
 
@@ -163,7 +145,6 @@ top_statement:
 
 statement:
 	stored_procedure_call
-	| predefined_procedure_call ';'
 	| while_statement ';'
 	| for_statement ';'
 	| exit_statement ';'
@@ -172,7 +153,6 @@ statement:
 	| assignment_statement ';'
 	| select_statement ';'
 	| insert_statement ';'
-	| row_printf_statement ';'
 	| delete_statement_searched ';'
 	| delete_statement_positioned ';'
 	| update_statement_searched ';'
@@ -199,8 +179,6 @@ exp:
 	| PARS_INT_LIT		{ $$ = $1;}
 	| PARS_FLOAT_LIT	{ $$ = $1;}
 	| PARS_STR_LIT		{ $$ = $1;}
-	| PARS_FIXBINARY_LIT	{ $$ = $1;}
-	| PARS_BLOB_LIT		{ $$ = $1;}
 	| PARS_NULL_LIT		{ $$ = $1;}
 	| PARS_SQL_TOKEN	{ $$ = $1;}
 	| exp '+' exp        	{ $$ = pars_op('+', $1, $3); }
@@ -227,18 +205,11 @@ exp:
 ;
 
 function_name:
-	PARS_TO_CHAR_TOKEN	{ $$ = &pars_to_char_token; }
-	| PARS_TO_NUMBER_TOKEN	{ $$ = &pars_to_number_token; }
-	| PARS_TO_BINARY_TOKEN	{ $$ = &pars_to_binary_token; }
-	| PARS_BINARY_TO_NUMBER_TOKEN
-				{ $$ = &pars_binary_to_number_token; }
+	PARS_TO_BINARY_TOKEN	{ $$ = &pars_to_binary_token; }
 	| PARS_SUBSTR_TOKEN	{ $$ = &pars_substr_token; }
 	| PARS_CONCAT_TOKEN	{ $$ = &pars_concat_token; }
 	| PARS_INSTR_TOKEN	{ $$ = &pars_instr_token; }
 	| PARS_LENGTH_TOKEN	{ $$ = &pars_length_token; }
-	| PARS_SYSDATE_TOKEN	{ $$ = &pars_sysdate_token; }
-	| PARS_RND_TOKEN	{ $$ = &pars_rnd_token; }
-	| PARS_RND_STR_TOKEN	{ $$ = &pars_rnd_str_token; }
 ;
 
 question_mark_list:
@@ -251,17 +222,6 @@ stored_procedure_call:
 	'{' PARS_ID_TOKEN '(' question_mark_list ')' '}'
 				{ $$ = pars_stored_procedure_call(
 					static_cast<sym_node_t*>($2)); }
-;
-
-predefined_procedure_call:
-	predefined_procedure_name '(' exp_list ')'
-				{ $$ = pars_procedure_call($1, $3); }
-;
-
-predefined_procedure_name:
-	PARS_REPLSTR_TOKEN	{ $$ = &pars_replstr_token; }
-	| PARS_PRINTF_TOKEN	{ $$ = &pars_printf_token; }
-	| PARS_ASSERT_TOKEN	{ $$ = &pars_assert_token; }
 ;
 
 user_function_call:
@@ -291,19 +251,9 @@ select_item:
 	exp			{ $$ = $1; }
 	| PARS_COUNT_TOKEN '(' '*' ')'
 				{ $$ = pars_func(&pars_count_token,
-				          que_node_list_add_last(NULL,
+					  que_node_list_add_last(NULL,
 					    sym_tab_add_int_lit(
 						pars_sym_tab_global, 1))); }
-	| PARS_COUNT_TOKEN '(' PARS_DISTINCT_TOKEN PARS_ID_TOKEN ')'
-				{ $$ = pars_func(&pars_count_token,
-					    que_node_list_add_last(NULL,
-						pars_func(&pars_distinct_token,
-						     que_node_list_add_last(
-								NULL, $4)))); }
-	| PARS_SUM_TOKEN '(' exp ')'
-				{ $$ = pars_func(&pars_sum_token,
-						que_node_list_add_last(NULL,
-									$3)); }
 ;
 
 select_item_list:
@@ -450,12 +400,6 @@ delete_statement_positioned:
 					NULL); }
 ;
 
-row_printf_statement:
-	PARS_ROW_PRINTF_TOKEN select_statement
-				{ $$ = pars_row_printf_statement(
-					static_cast<sel_node_t*>($2)); }
-;
-
 assignment_statement:
 	PARS_ID_TOKEN PARS_ASSIGN_TOKEN exp
 				{ $$ = pars_assignment_statement(
@@ -540,12 +484,12 @@ fetch_statement:
 ;
 
 column_def:
-	PARS_ID_TOKEN type_name	opt_column_len opt_unsigned opt_not_null
+	PARS_ID_TOKEN type_name	opt_column_len opt_not_null
 				{ $$ = pars_column_def(
 					static_cast<sym_node_t*>($1),
 					static_cast<pars_res_word_t*>($2),
 					static_cast<sym_node_t*>($3),
-					$4, $5); }
+					$4); }
 ;
 
 column_def_list:
@@ -560,13 +504,6 @@ opt_column_len:
 				{ $$ = $2; }
 ;
 
-opt_unsigned:
-	/* Nothing */		{ $$ = NULL; }
-	| PARS_UNSIGNED_TOKEN
-				{ $$ = &pars_int_token;
-					/* pass any non-NULL pointer */ }
-;
-
 opt_not_null:
 	/* Nothing */		{ $$ = NULL; }
 	| PARS_NOT_TOKEN PARS_NULL_LIT
@@ -574,34 +511,12 @@ opt_not_null:
 					/* pass any non-NULL pointer */ }
 ;
 
-not_fit_in_memory:
-	/* Nothing */		{ $$ = NULL; }
-	| PARS_DOES_NOT_FIT_IN_MEM_TOKEN
-				{ $$ = &pars_int_token;
-					/* pass any non-NULL pointer */ }
-;
-
-compact:
-	/* Nothing */		{ $$ = NULL; }
-	| PARS_COMPACT_TOKEN	{ $$ = &pars_int_token;
-					/* pass any non-NULL pointer */ }
-;
-
-block_size:
-	/* Nothing */		{ $$ = NULL; }
-	| PARS_BLOCK_SIZE_TOKEN	'=' PARS_INT_LIT
-			{ $$ = $3; }
-;
-
 create_table:
 	PARS_CREATE_TOKEN PARS_TABLE_TOKEN
 	table_name '(' column_def_list ')'
-	not_fit_in_memory compact block_size
 				{ $$ = pars_create_table(
 					static_cast<sym_node_t*>($3),
-					static_cast<sym_node_t*>($5),
-					static_cast<sym_node_t*>($8),
-					static_cast<sym_node_t*>($9), $7); }
+					static_cast<sym_node_t*>($5)); }
 ;
 
 column_list:
@@ -651,31 +566,8 @@ rollback_statement:
 
 type_name:
 	PARS_INT_TOKEN		{ $$ = &pars_int_token; }
-	| PARS_INTEGER_TOKEN	{ $$ = &pars_int_token; }
 	| PARS_BIGINT_TOKEN	{ $$ = &pars_bigint_token; }
 	| PARS_CHAR_TOKEN	{ $$ = &pars_char_token; }
-	| PARS_BINARY_TOKEN	{ $$ = &pars_binary_token; }
-	| PARS_BLOB_TOKEN	{ $$ = &pars_blob_token; }
-;
-
-parameter_declaration:
-	PARS_ID_TOKEN PARS_IN_TOKEN type_name
-				{ $$ = pars_parameter_declaration(
-					static_cast<sym_node_t*>($1),
-					PARS_INPUT,
-					static_cast<pars_res_word_t*>($3)); }
-	| PARS_ID_TOKEN PARS_OUT_TOKEN type_name
-				{ $$ = pars_parameter_declaration(
-					static_cast<sym_node_t*>($1),
-					PARS_OUTPUT,
-					static_cast<pars_res_word_t*>($3)); }
-;
-
-parameter_declaration_list:
-	/* Nothing */		{ $$ = NULL; }
-	| parameter_declaration	{ $$ = que_node_list_add_last(NULL, $1); }
-	| parameter_declaration_list ',' parameter_declaration
-				{ $$ = que_node_list_add_last($1, $3); }
 ;
 
 variable_declaration:
@@ -717,16 +609,14 @@ declaration_list:
 ;
 
 procedure_definition:
-	PARS_PROCEDURE_TOKEN PARS_ID_TOKEN '(' parameter_declaration_list ')'
+	PARS_PROCEDURE_TOKEN PARS_ID_TOKEN '(' ')'
 	PARS_IS_TOKEN
 	variable_declaration_list
 	declaration_list
 	PARS_BEGIN_TOKEN
 	statement_list
 	PARS_END_TOKEN		{ $$ = pars_procedure_definition(
-					static_cast<sym_node_t*>($2),
-					static_cast<sym_node_t*>($4),
-					$10); }
+					static_cast<sym_node_t*>($2), $9); }
 ;
 
 %%

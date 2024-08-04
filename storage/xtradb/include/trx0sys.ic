@@ -12,7 +12,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -474,10 +474,7 @@ trx_id_t
 trx_sys_get_new_trx_id(void)
 /*========================*/
 {
-#ifndef WITH_WSREP
-	/* wsrep_fake_trx_id  violates this assert */
 	ut_ad(mutex_own(&trx_sys->mutex));
-#endif /* WITH_WSREP */
 
 	/* VERY important: after the database is started, max_trx_id value is
 	divisible by TRX_SYS_TRX_ID_WRITE_MARGIN, and the following if

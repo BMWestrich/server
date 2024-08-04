@@ -1,19 +1,19 @@
 /*************** Tabmul H Declares Source Code File (.H) ***************/
-/*  Name: TABMUL.H   Version 1.4                                       */
+/*  Name: TABMUL.H   Version 1.5                                       */
 /*                                                                     */
-/*  (C) Copyright to PlugDB Software Development          2003-2012    */
+/*  (C) Copyright to PlugDB Software Development          2003-2017    */
 /*  Author: Olivier BERTRAND                                           */
 /*                                                                     */
 /*  This file contains the TDBMUL and TDBDIR classes declares.         */
 /***********************************************************************/
-#if defined(__WIN__)
+#if defined(_WIN32)
 #include <io.h>
-#else   // !__WIN__
+#else   // !_WIN32
 #include <sys/types.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <dirent.h>
-#endif  // !__WIN__
+#endif  // !_WIN32
 //#include "osutil.h"
 #include "block.h"
 
@@ -28,7 +28,7 @@ class DllExport TDBMUL : public TDBASE {
 //friend class MULCOL;
  public:
   // Constructor
-  TDBMUL(PTDBASE tdbp);
+  TDBMUL(PTDB tdbp);
   TDBMUL(PTDBMUL tdbp);
 
   // Implementation
@@ -37,9 +37,9 @@ class DllExport TDBMUL : public TDBASE {
 
   // Methods
   virtual void ResetDB(void);
-  virtual PTDB CopyOne(PTABS t);
+  virtual PTDB Clone(PTABS t);
   virtual bool IsSame(PTDB tp) {return tp == (PTDB)Tdbp;}
-  virtual PSZ  GetFile(PGLOBAL g) {return Tdbp->GetFile(g);}
+  virtual PCSZ GetFile(PGLOBAL g) {return Tdbp->GetFile(g);}
   virtual int  GetRecpos(void) {return 0;}
   virtual PCOL ColDB(PGLOBAL g, PSZ name, int num);
           bool InitFileNames(PGLOBAL g);
@@ -61,13 +61,41 @@ class DllExport TDBMUL : public TDBASE {
  protected:
 
   // Members
-  TDBASE *Tdbp;               // Points to a (file) table class
+  PTDB    Tdbp;               // Points to a (file) table class
   char*  *Filenames;          // Points to file names
   int     Rows;               // Total rows of already read files
   int     Mul;                // Type of multiple file list
   int     NumFiles;           // Number of physical files
   int     iFile;              // Index of currently processed file
   }; // end of class TDBMUL
+
+#if 0
+/***********************************************************************/
+/*  This is the MSD Access Method class declaration for files that are */
+/*  physically split in multiple files having the same format.         */
+/*  This sub-class also include files of the sub-directories.          */
+/***********************************************************************/
+class DllExport TDBMSD : public TDBMUL {
+	//friend class MULCOL;
+public:
+	// Constructor
+	TDBMSD(PTDB tdbp) : TDBMUL(tdbp) {}
+	TDBMSD(PTDBMSD tdbp) : TDBMUL(tdbp) {}
+
+	// Implementation
+	virtual PTDB Duplicate(PGLOBAL g);
+
+	// Methods
+	virtual PTDB Clone(PTABS t);
+	bool InitFileNames(PGLOBAL g);
+
+	// Database routines
+
+protected:
+
+	// Members
+}; // end of class TDBMSD
+#endif
 
 /***********************************************************************/
 /*  Directory listing table.                                           */
@@ -90,7 +118,8 @@ class DllExport DIRDEF : public TABDEF {    /* Directory listing table */
   // Members
   PSZ     Fn;                 /* Path/Name of file search              */
   bool    Incl;               /* true to include sub-directories       */
-  bool    Huge;               /* true if files can be larger than 2GB  */
+	bool    Huge;               /* true if files can be larger than 2GB  */
+	bool    Nodir;							/* true to exclude directories           */
   }; // end of DIRDEF
 
 /***********************************************************************/
@@ -101,18 +130,16 @@ class DllExport DIRDEF : public TABDEF {    /* Directory listing table */
 /***********************************************************************/
 class TDBDIR : public TDBASE {
   friend class DIRCOL;
- public:
+	friend class TDBMUL;
+public:
   // Constructor
   TDBDIR(PDIRDEF tdp);
-  TDBDIR(PTDBDIR tdbp);
+	TDBDIR(PSZ fpat);
 
   // Implementation
   virtual AMT  GetAmType(void) {return TYPE_AM_DIR;}
-  virtual PTDB Duplicate(PGLOBAL g)
-                {return (PTDB)new(g) TDBDIR(this);}
 
   // Methods
-  virtual PTDB CopyOne(PTABS t);
   virtual int GetRecpos(void) {return iFile;}
 
   // Database routines
@@ -127,26 +154,29 @@ class TDBDIR : public TDBASE {
   virtual void CloseDB(PGLOBAL g);
 
  protected:
+	void Init(void);
   char *Path(PGLOBAL g);
 
   // Members
   PSZ  To_File;                 // Points to file search pathname
   int  iFile;                   // Index of currently retrieved file
-#if defined(__WIN__)
-  _finddata_t    FileData;      // Find data structure
-  int  Hsearch;                 // Search handle
+#if defined(_WIN32)
+	PVAL Dvalp;							      // Used to retrieve file date values
+	WIN32_FIND_DATA FileData;			// Find data structure
+	HANDLE hSearch;               // Search handle
   char Drive[_MAX_DRIVE];       // Drive name
-#else   // !__WIN__
+#else   // !_WIN32
   struct stat    Fileinfo;      // File info structure
   struct dirent *Entry;         // Point to directory entry structure
   DIR *Dir;                     // To searched directory structure
   bool Done;                    // true when _splipath is done
   char Pattern[_MAX_FNAME+_MAX_EXT];
-#endif  // !__WIN__
+#endif  // !_WIN32
   char Fpath[_MAX_PATH];        // Absolute file search pattern
   char Direc[_MAX_DIR];         // Search path
   char Fname[_MAX_FNAME];       // File name
   char Ftype[_MAX_EXT];         // File extention
+	bool Nodir;                   // Exclude directories from file list
   }; // end of class TDBDIR
 
 /***********************************************************************/
@@ -158,17 +188,11 @@ class TDBDIR : public TDBASE {
 /***********************************************************************/
 class TDBSDR : public TDBDIR {
   friend class DIRCOL;
+	friend class TDBMUL;
  public:
   // Constructors
   TDBSDR(PDIRDEF tdp) : TDBDIR(tdp) {Sub = NULL;}
-  TDBSDR(PTDBSDR tdbp);
-
-  // Implementation
-  virtual PTDB Duplicate(PGLOBAL g)
-                {return (PTDB)new(g) TDBSDR(this);}
-
-  // Methods
-  virtual PTDB CopyOne(PTABS t);
+	TDBSDR(PSZ fpat) : TDBDIR(fpat) {Sub = NULL;}
 
   // Database routines
   virtual int  GetMaxSize(PGLOBAL g);
@@ -183,11 +207,11 @@ class TDBSDR : public TDBDIR {
   typedef struct _Sub_Dir {
     struct _Sub_Dir *Next;
     struct _Sub_Dir *Prev;
-#if defined(__WIN__)
-    int H;               // Search handle
-#else   // !__WIN__
+#if defined(_WIN32)
+    HANDLE H;               // Search handle
+#else   // !_WIN32
     DIR *D;
-#endif  // !__WIN__
+#endif  // !_WIN32
     size_t Len;           // Initial directory name length
     } SUBDIR, *PSUBDIR;
 
@@ -202,7 +226,7 @@ class TDBSDR : public TDBDIR {
 class DIRCOL : public COLBLK {
  public:
   // Constructors
-  DIRCOL(PCOLDEF cdp, PTDB tdbp, PCOL cprec, int i, PSZ am = "DIR");
+  DIRCOL(PCOLDEF cdp, PTDB tdbp, PCOL cprec, int i, PCSZ am = "DIR");
   DIRCOL(DIRCOL *colp, PTDB tdbp); // Constructor used in copy process
 
   // Implementation
@@ -214,7 +238,11 @@ class DIRCOL : public COLBLK {
  protected:
   // Default constructor not to be used
   DIRCOL(void) {}
+#if defined(_WIN32)
+	void SetTimeValue(PGLOBAL g, FILETIME& ftime);
+#endif   // _WIN32
 
   // Members
+	PTDBDIR	Tdbp;								// To DIR table
   int     N;                  // Column number
   }; // end of class DIRCOL

@@ -13,7 +13,7 @@
 # You should have received a copy of the GNU Library General Public
 # License along with this library; if not, write to the Free
 # Software Foundation, Inc., 51 Franklin St, Fifth Floor, Boston,
-# MA 02110-1301, USA
+# MA 02110-1335  USA
 
 cflags="$c_warnings $extra_flags $EXTRA_FLAGS $EXTRA_CFLAGS"
 cxxflags="$cxx_warnings $base_cxxflags $extra_flags $EXTRA_FLAGS $EXTRA_CXXFLAGS"
@@ -32,10 +32,19 @@ then
   configure="$configure --verbose"
 fi
 
-commands="\
-/bin/rm -rf configure;
-/bin/rm -rf CMakeCache.txt CMakeFiles/
-
+commands=""
+# git clean -fdX removes all ignored (build) files
+if test -d .git
+then
+    commands="\
+git clean -fdX
+cd ./libmariadb
+git submodule update
+cd ../storage/rocksdb/rocksdb
+git submodule update
+cd ../../.."
+fi
+commands="$commands
 path=`dirname $0`
 . \"$path/autorun.sh\""
 

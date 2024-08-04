@@ -11,7 +11,7 @@ GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
-Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
+Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 #ifndef UNICODE
 #define UNICODE
@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
 #undef NOMINMAX
 
 #include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
 #include <winreg.h>
 #include <msi.h>
@@ -32,6 +33,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
 #include <shellapi.h>
 #include <stdlib.h>
 #include <winservice.h>
+
 
 #define ONE_MB 1048576
 UINT ExecRemoveDataDirectory(wchar_t *dir)
@@ -180,7 +182,7 @@ extern "C" UINT __stdcall CheckDirectoryEmpty(MSIHANDLE hInstall,
      empty= true;
      for(;;)
      {
-       if (wcscmp(data.cFileName, L".") || wcscmp(data.cFileName, L".."))
+       if (wcscmp(data.cFileName, L".") &&  wcscmp(data.cFileName, L".."))
        {
          empty= false;
          break;
@@ -255,36 +257,89 @@ bool ExecRemoveService(const wchar_t *name)
    return ret;
 }
 
-/*
-  Check if port is free by trying to bind to the port
-*/
-bool IsPortFree(short port)
+/* Find whether TCP port is in use by trying to bind to the port. */
+static bool IsPortInUse(unsigned short port)
 {
-   WORD wVersionRequested;
-   WSADATA wsaData;
+  struct addrinfo* ai, * a;
+  struct addrinfo hints {};
 
-   wVersionRequested = MAKEWORD(2, 2);
+  char port_buf[NI_MAXSERV];
+  SOCKET ip_sock = INVALID_SOCKET;
+  hints.ai_flags = AI_PASSIVE;
+  hints.ai_socktype = SOCK_STREAM;
+  hints.ai_family = AF_UNSPEC;
+  snprintf(port_buf, NI_MAXSERV, "%u", (unsigned)port);
 
-   WSAStartup(wVersionRequested, &wsaData);
-
-  struct sockaddr_in sin;
-  SOCKET sock;
-  sock = socket(AF_INET, SOCK_STREAM, 0);
-  if(sock == -1)
+  if (getaddrinfo(NULL, port_buf, &hints, &ai))
   {
     return false;
   }
-  sin.sin_port = htons(port);
-  sin.sin_addr.s_addr = 0;
-  sin.sin_addr.s_addr = INADDR_ANY;
-  sin.sin_family = AF_INET;
-  if(bind(sock, (struct sockaddr *)&sin,sizeof(struct sockaddr_in) ) == -1)
+
+  /*
+   Prefer IPv6 socket to IPv4, since we'll use IPv6 dual socket,
+   which coveres both IP versions.
+  */
+  for (a = ai; a; a = a->ai_next)
+  {
+    if (a->ai_family == AF_INET6 &&
+      (ip_sock = socket(a->ai_family, a->ai_socktype, a->ai_protocol)) != INVALID_SOCKET)
+    {
+      break;
+    }
+  }
+
+  if (ip_sock == INVALID_SOCKET)
+  {
+    for (a = ai; a; a = a->ai_next)
+    {
+      if (ai->ai_family == AF_INET &&
+        (ip_sock = socket(a->ai_family, a->ai_socktype, a->ai_protocol)) != INVALID_SOCKET)
+      {
+        break;
+      }
+    }
+  }
+
+  if (ip_sock == INVALID_SOCKET)
   {
     return false;
   }
-  closesocket(sock);
+
+  /* Use SO_EXCLUSIVEADDRUSE to prevent multiple binding. */
+  int arg = 1;
+  setsockopt(ip_sock, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (char*)&arg, sizeof(arg));
+
+  /* Allow dual socket, so that IPv4 and IPv6 are both covered.*/
+  if (a->ai_family == AF_INET6)
+  {
+    arg = 0;
+    setsockopt(ip_sock, IPPROTO_IPV6, IPV6_V6ONLY, (char*)&arg, sizeof(arg));
+  }
+
+  bool in_use = false;
+  if (bind(ip_sock, a->ai_addr, (int)a->ai_addrlen) == SOCKET_ERROR)
+  {
+    DWORD last_error = WSAGetLastError();
+    in_use = (last_error ==  WSAEADDRINUSE || last_error == WSAEACCES);
+  }
+
+  freeaddrinfo(ai);
+  closesocket(ip_sock);
+  return in_use;
+}
+
+
+/*
+  Check if TCP port is free
+*/
+bool IsPortFree(unsigned short port)
+{
+  WORD wVersionRequested = MAKEWORD(2, 2);
+  WSADATA wsaData;
+  WSAStartup(wVersionRequested, &wsaData);
+  bool in_use = IsPortInUse(port);
   WSACleanup();
-  return true;
+  return !in_use;
 }
 
 
@@ -634,7 +689,7 @@ extern "C" UINT  __stdcall CheckDatabaseProperties (MSIHANDLE hInstall)
       goto LExit;
     }
 
-    short port = (short)_wtoi(Port);
+    unsigned short port = (unsigned short)_wtoi(Port);
     if (!IsPortFree(port))
     {
       ErrorMsg = 
@@ -767,6 +822,49 @@ extern "C" UINT __stdcall PresetDatabaseProperties(MSIHANDLE hInstall)
 LExit:
   return WcaFinalize(er);
 }
+
+static BOOL FindErrorLog(const wchar_t *dir, wchar_t * ErrorLogFile, size_t ErrorLogLen)
+{
+  WIN32_FIND_DATA FindFileData;
+  HANDLE hFind;
+  wchar_t name[MAX_PATH];
+  wcsncpy_s(name,dir, MAX_PATH);
+  wcsncat_s(name,L"\\*.err", MAX_PATH);
+  hFind = FindFirstFileW(name,&FindFileData);
+  if (hFind != INVALID_HANDLE_VALUE)
+  {
+    _snwprintf(ErrorLogFile, ErrorLogLen,
+      L"%s\\%s",dir, FindFileData.cFileName);
+    FindClose(hFind);
+    return TRUE;
+  }
+  return FALSE;
+}
+
+static void DumpErrorLog(const wchar_t *dir)
+{
+  wchar_t filepath[MAX_PATH];
+  if (!FindErrorLog(dir, filepath, MAX_PATH))
+    return;
+  FILE *f= _wfopen(filepath, L"r");
+  if (!f)
+    return;
+  char buf[2048];
+  WcaLog(LOGMSG_STANDARD,"=== dumping error log %S === ",filepath);
+  while (fgets(buf, sizeof(buf), f))
+  {
+     /* Strip off EOL chars. */
+     size_t len = strlen(buf);
+     if (len > 0 && buf[len-1] == '\n')
+       buf[--len]= 0;
+     if (len > 0 && buf[len-1] == '\r')
+       buf[--len]= 0;
+     WcaLog(LOGMSG_STANDARD,"%s",buf);
+  }
+  fclose(f);
+  WcaLog(LOGMSG_STANDARD,"=== end of error log ===");
+}
+
 /* Remove service and data directory created by CreateDatabase operation */
 extern "C" UINT __stdcall CreateDatabaseRollback(MSIHANDLE hInstall) 
 {
@@ -774,7 +872,6 @@ extern "C" UINT __stdcall CreateDatabaseRollback(MSIHANDLE hInstall)
   UINT er = ERROR_SUCCESS;
   wchar_t* service= 0;
   wchar_t* dir= 0;
-
   hr = WcaInitialize(hInstall, __FUNCTION__);
   ExitOnFailure(hr, "Failed to initialize");
   WcaLog(LOGMSG_STANDARD, "Initialized.");
@@ -804,6 +901,7 @@ extern "C" UINT __stdcall CreateDatabaseRollback(MSIHANDLE hInstall)
   }
   if(dir)
   {
+    DumpErrorLog(dir);
     ExecRemoveDataDirectory(dir);
   }
 LExit:
@@ -886,11 +984,11 @@ extern "C" UINT __stdcall CheckServiceUpgrades(MSIHANDLE hInstall)
       (QUERY_SERVICE_CONFIGW*)(void *)config_buffer;
     DWORD needed;
     BOOL ok= QueryServiceConfigW(service, config,sizeof(config_buffer),
-      &needed);
+      &needed) && (config->dwStartType != SERVICE_DISABLED);
     CloseServiceHandle(service);
     if (ok)
     {
-        mysqld_service_properties props;
+       mysqld_service_properties props;
        if (get_mysql_service_properties(config->lpBinaryPathName, &props))
                   continue;
         /* 

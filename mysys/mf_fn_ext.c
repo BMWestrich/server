@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 
 #include "mysys_priv.h"
@@ -86,7 +86,7 @@ char *fn_ext2(const char *name)
   if (!(gpos= strrchr(name, FN_LIBCHAR)))
     gpos= name;
 #endif
-  // locate the last occurence of FN_EXTCHAR
+  // locate the last occurrence of FN_EXTCHAR
   pos= strrchr(gpos, FN_EXTCHAR);
   DBUG_RETURN((char*) (pos ? pos : strend(gpos)));
 } /* fn_ext2 */

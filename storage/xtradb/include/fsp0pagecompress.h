@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (C) 2013, 2015, MariaDB Corporation. All Rights Reserved.
+Copyright (C) 2013, 2017, MariaDB Corporation. All Rights Reserved.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +12,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+51 Franklin St, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -46,15 +46,6 @@ ulint
 fsp_header_get_compression_level(
 /*=============================*/
 	const page_t*	page);	/*!< in: first page of a tablespace */
-
-/********************************************************************//**
-Determine if the tablespace is page compressed from dict_table_t::flags.
-@return	TRUE if page compressed, FALSE if not compressed */
-UNIV_INLINE
-ibool
-fsp_flags_is_page_compressed(
-/*=========================*/
-	ulint	flags);	/*!< in: tablespace flags */
 
 /********************************************************************//**
 Extract the page compression level from tablespace flags.

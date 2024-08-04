@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #ifndef _my_audit_h
 #define _my_audit_h
@@ -22,6 +22,10 @@
 */
 
 #include "plugin.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #define MYSQL_AUDIT_CLASS_MASK_SIZE 1
 
@@ -174,5 +178,9 @@ struct st_mysql_audit
   unsigned long class_mask[MYSQL_AUDIT_CLASS_MASK_SIZE];
 };
 
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

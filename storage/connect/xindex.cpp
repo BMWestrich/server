@@ -1,7 +1,7 @@
 /***************** Xindex C++ Class Xindex Code (.CPP) *****************/
-/*  Name: XINDEX.CPP  Version 2.9                                      */
+/*  Name: XINDEX.CPP  Version 3.0                                      */
 /*                                                                     */
-/*  (C) Copyright to the author Olivier BERTRAND          2004-2015    */
+/*  (C) Copyright to the author Olivier BERTRAND          2004-2017    */
 /*                                                                     */
 /*  This file contains the class XINDEX implementation code.           */
 /***********************************************************************/
@@ -10,12 +10,12 @@
 /*  Include relevant sections of the System header files.              */
 /***********************************************************************/
 #include "my_global.h"
-#if defined(__WIN__)
+#if defined(_WIN32)
 #include <io.h>
 #include <fcntl.h>
 #include <errno.h>
 //#include <windows.h>
-#else   // !__WIN__
+#else   // !_WIN32
 #if defined(UNIX)
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -25,7 +25,7 @@
 #include <io.h>
 #endif  // !UNIX
 #include <fcntl.h>
-#endif  // !__WIN__
+#endif  // !_WIN32
 
 /***********************************************************************/
 /*  Include required application header files                          */
@@ -45,7 +45,9 @@
 //nclude "array.h"
 #include "filamtxt.h"
 #include "tabdos.h"
+#if defined(VCT_SUPPORT)
 #include "tabvct.h"
+#endif   // VCT_SUPPORT
 
 /***********************************************************************/
 /*  Macro or external routine definition                               */
@@ -79,7 +81,7 @@ int PlgMakeIndex(PGLOBAL g, PSZ name, PIXDEF pxdf, bool add)
   {
   int     rc;
   PTABLE  tablep;
-  PTDBASE tdbp;
+  PTDB    tdbp;
   PCATLG  cat = PlgGetCatalog(g, true);
 
   /*********************************************************************/
@@ -87,12 +89,12 @@ int PlgMakeIndex(PGLOBAL g, PSZ name, PIXDEF pxdf, bool add)
   /*********************************************************************/
   tablep = new(g) XTAB(name);
 
-  if (!(tdbp = (PTDBASE)cat->GetTable(g, tablep)))
+  if (!(tdbp = cat->GetTable(g, tablep)))
     rc = RC_NF;
   else if (!tdbp->GetDef()->Indexable()) {
     sprintf(g->Message, MSG(TABLE_NO_INDEX), name);
     rc = RC_NF;
-  } else if ((rc = tdbp->MakeIndex(g, pxdf, add)) == RC_INFO)
+  } else if ((rc = ((PTDBASE)tdbp)->MakeIndex(g, pxdf, add)) == RC_INFO)
     rc = RC_OK;            // No or remote index
 
   return rc;
@@ -179,23 +181,23 @@ XXBASE::XXBASE(PTDBDOS tbxp, bool b) : CSORT(b),
 /***********************************************************************/
 /*  Make file output of XINDEX contents.                               */
 /***********************************************************************/
-void XXBASE::Print(PGLOBAL, FILE *f, uint n)
+void XXBASE::Printf(PGLOBAL, FILE *f, uint n)
   {
   char m[64];
 
   memset(m, ' ', n);                    // Make margin string
   m[n] = '\0';
   fprintf(f, "%sXINDEX: Tbxp=%p Num=%d\n", m, Tbxp, Num_K);
-  } // end of Print
+  } // end of Printf
 
 /***********************************************************************/
 /*  Make string output of XINDEX contents.                             */
 /***********************************************************************/
-void XXBASE::Print(PGLOBAL, char *ps, uint z)
+void XXBASE::Prints(PGLOBAL, char *ps, uint z)
   {
   *ps = '\0';
   strncat(ps, "Xindex", z);
-  } // end of Print
+  } // end of Prints
 
 /* -------------------------- XINDEX Class --------------------------- */
 
@@ -270,8 +272,8 @@ void XINDEX::Close(void)
 /***********************************************************************/
 int XINDEX::Qcompare(int *i1, int *i2)
   {
-  register int  k;
-  register PXCOL kcp;
+  int  k;
+  PXCOL kcp;
 
   for (kcp = To_KeyCol, k = 0; kcp; kcp = kcp->Next)
     if ((k = kcp->Compare(*i1, *i2)))
@@ -293,9 +295,11 @@ bool XINDEX::AddColumns(void)
     return false;     // Not applying to static index
   else if (IsMul())
     return false;     // Not done yet for multiple index
-  else if (Tbxp->GetAmType() == TYPE_AM_VCT && ((PTDBVCT)Tbxp)->IsSplit())
+#if defined(VCT_SUPPORT)
+	else if (Tbxp->GetAmType() == TYPE_AM_VCT && ((PTDBVCT)Tbxp)->IsSplit())
     return false;     // This would require to read additional files
-  else
+#endif   // VCT_SUPPORT
+	else
     return true;
 
   } // end of AddColumns
@@ -340,7 +344,7 @@ bool XINDEX::Make(PGLOBAL g, PIXDEF sxp)
 
     } // endif n
 
-  if (trace)
+  if (trace(1))
     htrc("XINDEX Make: n=%d\n", n);
 
   // File position must be stored
@@ -413,7 +417,7 @@ bool XINDEX::Make(PGLOBAL g, PIXDEF sxp)
         if (kcp->Init(g, colp, n, true, 0))
           return true;
 
-        if (trace)
+        if (trace(1))
           htrc("Adding colp=%p Buf_Type=%d size=%d\n",
                 colp, colp->GetResultType(), n);
 
@@ -442,8 +446,8 @@ bool XINDEX::Make(PGLOBAL g, PIXDEF sxp)
 #if 0
     if (!dup->Step) {
       strcpy(g->Message, MSG(QUERY_CANCELLED));
-      longjmp(g->jumper[g->jump_level], 99);
-      } // endif Step
+			throw 99;
+	} // endif Step
 #endif // 0
 
     /*******************************************************************/
@@ -460,7 +464,7 @@ bool XINDEX::Make(PGLOBAL g, PIXDEF sxp)
         if (ApplyFilter(g, filp))
           break;
 
-        // passthru
+        // fall through
       case RC_NF:
         continue;
       case RC_EF:
@@ -480,7 +484,7 @@ bool XINDEX::Make(PGLOBAL g, PIXDEF sxp)
     } else
       To_Rec[nkey] = Tdbp->GetRecpos();
 
-    if (trace > 1)
+    if (trace(2))
       htrc("Make: To_Rec[%d]=%d\n", nkey, To_Rec[nkey]); 
 
     /*******************************************************************/
@@ -549,7 +553,7 @@ bool XINDEX::Make(PGLOBAL g, PIXDEF sxp)
   if ((Ndif = Qsort(g, Num_K)) < 0)
     goto err;       // Error during sort
 
-  if (trace)
+  if (trace(1))
     htrc("Make: Nk=%d n=%d Num_K=%d Ndif=%d addcolp=%p BlkFil=%p X=%p\n",
           Nk, n, Num_K, Ndif, addcolp, Tdbp->To_BlkFil, X);
 
@@ -655,7 +659,7 @@ bool XINDEX::Make(PGLOBAL g, PIXDEF sxp)
   /*  Not true for DBF tables because of eventual soft deleted lines.  */
   /*  Note: for Num_K = 1 any non null value is Ok.                    */
   /*********************************************************************/
-  if (Srtd && !filp && Tdbp->Ftype != RECFM_VAR 
+  if (Srtd && !filp && Tdbp->Ftype != RECFM_VAR && Tdbp->Ftype != RECFM_CSV
                     && Tdbp->Txfp->GetAmType() != TYPE_AM_DBF) {
     Incr = (Num_K > 1) ? To_Rec[1] : Num_K;
     PlgDBfree(Record);
@@ -741,7 +745,7 @@ int XINDEX::ColMaxSame(PXCOL kp)
 /***********************************************************************/
 bool XINDEX::Reorder(PGLOBAL g __attribute__((unused)))
   {
-  register int i, j, k, n;
+  int i, j, k, n;
   bool          sorted = true;
   PXCOL         kcp;
 #if 0
@@ -815,7 +819,7 @@ bool XINDEX::Reorder(PGLOBAL g __attribute__((unused)))
 /***********************************************************************/
 bool XINDEX::SaveIndex(PGLOBAL g, PIXDEF sxp)
   {
-  char   *ftype;
+  PCSZ    ftype;
   char    fn[_MAX_PATH];
   int     n[NZ], nof = (Mul) ? (Ndif + 1) : 0;
   int     id = -1, size = 0;
@@ -833,7 +837,8 @@ bool XINDEX::SaveIndex(PGLOBAL g, PIXDEF sxp)
     case RECFM_FIX: ftype = ".fnx"; break;
     case RECFM_BIN: ftype = ".bnx"; break;
     case RECFM_VCT: ftype = ".vnx"; break;
-    case RECFM_DBF: ftype = ".dbx"; break;
+		case RECFM_CSV: ftype = ".cnx"; break;
+		case RECFM_DBF: ftype = ".dbx"; break;
     default:
       sprintf(g->Message, MSG(INVALID_FTYPE), Tdbp->Ftype);
       return true;
@@ -841,7 +846,7 @@ bool XINDEX::SaveIndex(PGLOBAL g, PIXDEF sxp)
 
   if ((sep = defp->GetBoolCatInfo("SepIndex", false))) {
     // Index is saved in a separate file
-#if defined(__WIN__)
+#if defined(_WIN32)
     char drive[_MAX_DRIVE];
 #else
     char *drive = NULL;
@@ -879,7 +884,7 @@ bool XINDEX::SaveIndex(PGLOBAL g, PIXDEF sxp)
   n[5] = Nblk; n[6] = Sblk;
   n[7] = Srtd ? 1 : 0;        // Values are sorted in the file
 
-  if (trace) {
+  if (trace(1)) {
     htrc("Saving index %s\n", Xdp->GetName());
     htrc("ID=%d Nk=%d nof=%d Num_K=%d Incr=%d Nblk=%d Sblk=%d Srtd=%d\n",
           ID, Nk, nof, Num_K, Incr, Nblk, Sblk, Srtd);
@@ -922,7 +927,7 @@ bool XINDEX::SaveIndex(PGLOBAL g, PIXDEF sxp)
 //  dup->ProgCur += 5;
     } // endfor kcp
 
-  if (trace)
+  if (trace(1))
     htrc("Index %s saved, Size=%d\n", Xdp->GetName(), size);
 
  end:
@@ -944,7 +949,7 @@ bool XINDEX::Init(PGLOBAL g)
   /*  Table will be accessed through an index table.                   */
   /*  If sorting is required, this will be done later.                 */
   /*********************************************************************/
-  char   *ftype;
+  PCSZ    ftype;
   char    fn[_MAX_PATH];
   int     k, n, nv[NZ], id = -1;
   bool    estim = false;
@@ -961,7 +966,7 @@ bool XINDEX::Init(PGLOBAL g)
     // For DBF tables, Cardinality includes bad or soft deleted lines
     // that are not included in the index, and can be larger then the
     // index size.
-    estim = (Tdbp->Ftype == RECFM_DBF);
+    estim = (Tdbp->Ftype == RECFM_DBF || Tdbp->Txfp->GetAmType() == TYPE_AM_ZIP);
     n = Tdbp->Cardinality(g);      // n is exact table size
   } else {
     // Variable table not optimized
@@ -986,7 +991,8 @@ bool XINDEX::Init(PGLOBAL g)
     case RECFM_FIX: ftype = ".fnx"; break;
     case RECFM_BIN: ftype = ".bnx"; break;
     case RECFM_VCT: ftype = ".vnx"; break;
-    case RECFM_DBF: ftype = ".dbx"; break;
+		case RECFM_CSV: ftype = ".cnx"; break;
+		case RECFM_DBF: ftype = ".dbx"; break;
     default:
       sprintf(g->Message, MSG(INVALID_FTYPE), Tdbp->Ftype);
       return true;
@@ -994,7 +1000,7 @@ bool XINDEX::Init(PGLOBAL g)
 
   if (defp->SepIndex()) {
     // Index was saved in a separate file
-#if defined(__WIN__)
+#if defined(_WIN32)
     char drive[_MAX_DRIVE];
 #else
     char *drive = NULL;
@@ -1012,7 +1018,7 @@ bool XINDEX::Init(PGLOBAL g)
 
   PlugSetPath(fn, fn, Tdbp->GetPath());
 
-  if (trace)
+  if (trace(1))
     htrc("Index %s file: %s\n", Xdp->GetName(), fn);
 
   /*********************************************************************/
@@ -1035,7 +1041,7 @@ bool XINDEX::Init(PGLOBAL g)
   } else
     Srtd = false;
 
-  if (trace)
+  if (trace(1))
     htrc("nv=%d %d %d %d %d %d %d (%d)\n",
           nv[0], nv[1], nv[2], nv[3], nv[4], nv[5], nv[6], Srtd);
 
@@ -1044,7 +1050,7 @@ bool XINDEX::Init(PGLOBAL g)
   if (/*nv[0] != ID ||*/ nv[1] != Nk) {
     sprintf(g->Message, MSG(BAD_INDEX_FILE), fn);
 
-    if (trace)
+    if (trace(1))
       htrc("nv[0]=%d ID=%d nv[1]=%d Nk=%d\n", nv[0], ID, nv[1], Nk);
 
     goto err;
@@ -1198,7 +1204,7 @@ bool XINDEX::MapInit(PGLOBAL g)
   const char *ftype;
   BYTE   *mbase;
   char    fn[_MAX_PATH];
-  int    *nv, k, n, id = -1;
+  int    *nv, nv0, k, n, id = -1;
   bool    estim;
   PCOL    colp;
   PXCOL   prev = NULL, kcp = NULL;
@@ -1239,7 +1245,8 @@ bool XINDEX::MapInit(PGLOBAL g)
     case RECFM_FIX: ftype = ".fnx"; break;
     case RECFM_BIN: ftype = ".bnx"; break;
     case RECFM_VCT: ftype = ".vnx"; break;
-    case RECFM_DBF: ftype = ".dbx"; break;
+		case RECFM_CSV: ftype = ".cnx"; break;
+		case RECFM_DBF: ftype = ".dbx"; break;
     default:
       sprintf(g->Message, MSG(INVALID_FTYPE), Tdbp->Ftype);
       return true;
@@ -1247,7 +1254,7 @@ bool XINDEX::MapInit(PGLOBAL g)
 
   if (defp->SepIndex()) {
     // Index was save in a separate file
-#if defined(__WIN__)
+#if defined(_WIN32)
     char drive[_MAX_DRIVE];
 #else
     char *drive = NULL;
@@ -1265,7 +1272,7 @@ bool XINDEX::MapInit(PGLOBAL g)
 
   PlugSetPath(fn, fn, Tdbp->GetPath());
 
-  if (trace)
+  if (trace(1))
     htrc("Index %s file: %s\n", Xdp->GetName(), fn);
 
   /*********************************************************************/
@@ -1279,7 +1286,7 @@ bool XINDEX::MapInit(PGLOBAL g)
     IOFF *noff = (IOFF*)mbase;
 
     // Position the memory base at the offset of this index
-    mbase += noff[id].Low;
+    mbase += noff[id].v.Low;
     } // endif id
 
   //  Now start the mapping process.
@@ -1288,25 +1295,26 @@ bool XINDEX::MapInit(PGLOBAL g)
   if (nv[0] >= MAX_INDX) {
     // New index format
     Srtd = nv[7] != 0;
-    nv[0] -= MAX_INDX;
+    nv0 = nv[0] - MAX_INDX;
     mbase += NZ * sizeof(int);
   } else {
     Srtd = false;
     mbase += (NZ - 1) * sizeof(int);
+		nv0 = nv[0];
   } // endif nv
 
-  if (trace)
+  if (trace(1))
     htrc("nv=%d %d %d %d %d %d %d %d\n",
-          nv[0], nv[1], nv[2], nv[3], nv[4], nv[5], nv[6], Srtd);
+          nv0, nv[1], nv[2], nv[3], nv[4], nv[5], nv[6], Srtd);
 
   // The test on ID was suppressed because MariaDB can change an index ID
   // when other indexes are added or deleted
-  if (/*nv[0] != ID ||*/ nv[1] != Nk) {
+  if (/*nv0 != ID ||*/ nv[1] != Nk) {
     // Not this index
     sprintf(g->Message, MSG(BAD_INDEX_FILE), fn);
 
-    if (trace)
-      htrc("nv[0]=%d ID=%d nv[1]=%d Nk=%d\n", nv[0], ID, nv[1], Nk);
+    if (trace(1))
+      htrc("nv0=%d ID=%d nv[1]=%d Nk=%d\n", nv0, ID, nv[1], Nk);
 
     goto err;
     } // endif nv
@@ -1407,7 +1415,7 @@ err:
 /***********************************************************************/
 bool XINDEX::GetAllSizes(PGLOBAL g,/* int &ndif,*/ int &numk)
   {
-  char   *ftype;
+  PCSZ    ftype;
   char    fn[_MAX_PATH];
   int     nv[NZ], id = -1; // n
 //bool    estim = false;
@@ -1452,7 +1460,8 @@ bool XINDEX::GetAllSizes(PGLOBAL g,/* int &ndif,*/ int &numk)
     case RECFM_FIX: ftype = ".fnx"; break;
     case RECFM_BIN: ftype = ".bnx"; break;
     case RECFM_VCT: ftype = ".vnx"; break;
-    case RECFM_DBF: ftype = ".dbx"; break;
+		case RECFM_CSV: ftype = ".cnx"; break;
+		case RECFM_DBF: ftype = ".dbx"; break;
     default:
       sprintf(g->Message, MSG(INVALID_FTYPE), Tdbp->Ftype);
       return true;
@@ -1460,7 +1469,7 @@ bool XINDEX::GetAllSizes(PGLOBAL g,/* int &ndif,*/ int &numk)
 
   if (defp->SepIndex()) {
     // Index was saved in a separate file
-#if defined(__WIN__)
+#if defined(_WIN32)
     char drive[_MAX_DRIVE];
 #else
     char *drive = NULL;
@@ -1478,7 +1487,7 @@ bool XINDEX::GetAllSizes(PGLOBAL g,/* int &ndif,*/ int &numk)
 
   PlugSetPath(fn, fn, Tdbp->GetPath());
 
-  if (trace)
+  if (trace(1))
     htrc("Index %s file: %s\n", Xdp->GetName(), fn);
 
   /*********************************************************************/
@@ -1495,7 +1504,7 @@ bool XINDEX::GetAllSizes(PGLOBAL g,/* int &ndif,*/ int &numk)
   if (X->Read(g, nv, NZ, sizeof(int)))
     goto err;
 
-  if (trace)
+  if (trace(1))
     htrc("nv=%d %d %d %d\n", nv[0], nv[1], nv[2], nv[3]);
 
   // The test on ID was suppressed because MariaDB can change an index ID
@@ -1503,7 +1512,7 @@ bool XINDEX::GetAllSizes(PGLOBAL g,/* int &ndif,*/ int &numk)
   if (/*nv[0] != ID ||*/ nv[1] != Nk) {
     sprintf(g->Message, MSG(BAD_INDEX_FILE), fn);
 
-    if (trace)
+    if (trace(1))
       htrc("nv[0]=%d ID=%d nv[1]=%d Nk=%d\n", nv[0], ID, nv[1], Nk);
 
     goto err;
@@ -1765,7 +1774,7 @@ int XINDEX::Fetch(PGLOBAL g)
   if (Num_K == 0)
     return -1;                   // means end of file
 
-  if (trace > 1)
+  if (trace(2))
     htrc("XINDEX Fetch: Op=%d\n", Op);
 
   /*********************************************************************/
@@ -1829,7 +1838,7 @@ int XINDEX::Fetch(PGLOBAL g)
 
         Nth++;
 
-        if (trace > 1)
+        if (trace(2))
           htrc("Fetch: Looking for new value Nth=%d\n", Nth);
 
         Cur_K = FastFind();
@@ -1865,8 +1874,8 @@ int XINDEX::Fetch(PGLOBAL g)
 /***********************************************************************/
 int XINDEX::FastFind(void)
   {
-  register int  curk, sup, inf, i= 0, k, n = 2;
-  register PXCOL kp, kcp;
+  int  curk, sup, inf, i= 0, k, n = 2;
+  PXCOL kp, kcp;
 
 //assert((int)nv == Nval);
 
@@ -1902,7 +1911,7 @@ int XINDEX::FastFind(void)
     sup = To_KeyCol->Ndf;
   } // endif Nblk
 
-  if (trace > 2)
+  if (trace(4))
     htrc("XINDEX FastFind: Nblk=%d Op=%d inf=%d sup=%d\n",
                            Nblk, Op, inf, sup); 
 
@@ -1980,7 +1989,7 @@ int XINDEX::FastFind(void)
     curk = (kcp->Kof) ? kcp->Kof[kcp->Val_K] : kcp->Val_K;
     } // endfor kcp
 
-  if (trace > 2)
+  if (trace(4))
     htrc("XINDEX FastFind: curk=%d\n", curk);
 
   return curk;
@@ -2118,7 +2127,7 @@ int XINDXS::Fetch(PGLOBAL g)
   if (Num_K == 0)
     return -1;                   // means end of file
 
-  if (trace > 1)
+  if (trace(2))
     htrc("XINDXS Fetch: Op=%d\n", Op);
 
   /*********************************************************************/
@@ -2171,7 +2180,7 @@ int XINDXS::Fetch(PGLOBAL g)
       else
         Nth++;
 
-      if (trace > 1)
+      if (trace(2))
         htrc("Fetch: Looking for new value Nth=%d\n", Nth);
 
       Cur_K = FastFind();
@@ -2204,8 +2213,8 @@ int XINDXS::Fetch(PGLOBAL g)
 /***********************************************************************/
 int XINDXS::FastFind(void)
   {
-  register int   sup, inf, i= 0, n = 2;
-  register PXCOL kcp = To_KeyCol;
+  int   sup, inf, i= 0, n = 2;
+  PXCOL kcp = To_KeyCol;
 
   if (Nblk && Op == OP_EQ) {
     // Look in block values to find in which block to search
@@ -2238,7 +2247,7 @@ int XINDXS::FastFind(void)
     sup = Ndif;
   } // endif Nblk
 
-  if (trace > 2)
+  if (trace(4))
     htrc("XINDXS FastFind: Nblk=%d Op=%d inf=%d sup=%d\n",
                            Nblk, Op, inf, sup); 
 
@@ -2264,7 +2273,7 @@ int XINDXS::FastFind(void)
     n = 0;
   } // endif sup
 
-  if (trace > 2)
+  if (trace(4))
     htrc("XINDXS FastFind: n=%d i=%d\n", n, i);
 
   // Loop on kcp because of dynamic indexing
@@ -2315,9 +2324,9 @@ XFILE::XFILE(void) : XLOAD()
 /***********************************************************************/
 bool XFILE::Open(PGLOBAL g, char *filename, int id, MODE mode)
   {
-  char *pmod;
-  bool  rc;
-  IOFF  noff[MAX_INDX];
+  PCSZ pmod;
+  bool rc;
+  IOFF noff[MAX_INDX];
 
   /*********************************************************************/
   /*  Open the index file according to mode.                           */
@@ -2332,7 +2341,7 @@ bool XFILE::Open(PGLOBAL g, char *filename, int id, MODE mode)
     } // endswitch mode
 
   if (!(Xfile= global_fopen(g, MSGID_OPEN_ERROR_AND_STRERROR, filename, pmod))) {
-    if (trace)
+    if (trace(1))
       htrc("Open: %s\n", g->Message);
 
     return true;
@@ -2347,10 +2356,10 @@ bool XFILE::Open(PGLOBAL g, char *filename, int id, MODE mode)
       return true;
       } // endif
 
-    NewOff.Low = (int)ftell(Xfile);
+    NewOff.v.Low = (int)ftell(Xfile);
 
-    if (trace)
-      htrc("XFILE Open: NewOff.Low=%d\n", NewOff.Low);
+    if (trace(1))
+      htrc("XFILE Open: NewOff.v.Low=%d\n", NewOff.v.Low);
 
   } else if (mode == MODE_WRITE) {
     if (id >= 0) {
@@ -2358,10 +2367,10 @@ bool XFILE::Open(PGLOBAL g, char *filename, int id, MODE mode)
       memset(noff, 0, sizeof(noff));
       Write(g, noff, sizeof(IOFF), MAX_INDX, rc);
       fseek(Xfile, 0, SEEK_END);
-      NewOff.Low = (int)ftell(Xfile);
+      NewOff.v.Low = (int)ftell(Xfile);
 
-      if (trace)
-        htrc("XFILE Open: NewOff.Low=%d\n", NewOff.Low);
+      if (trace(1))
+        htrc("XFILE Open: NewOff.v.Low=%d\n", NewOff.v.Low);
 
       } // endif id
 
@@ -2372,11 +2381,11 @@ bool XFILE::Open(PGLOBAL g, char *filename, int id, MODE mode)
       return true;
       } // endif MAX_INDX
 
-      if (trace)
-        htrc("XFILE Open: noff[%d].Low=%d\n", id, noff[id].Low);
+      if (trace(1))
+        htrc("XFILE Open: noff[%d].v.Low=%d\n", id, noff[id].v.Low);
 
     // Position the cursor at the offset of this index
-    if (fseek(Xfile, noff[id].Low, SEEK_SET)) {
+    if (fseek(Xfile, noff[id].v.Low, SEEK_SET)) {
       sprintf(g->Message, MSG(FUNC_ERRNO), errno, "Xseek");
       return true;
       } // endif
@@ -2505,10 +2514,10 @@ bool XHUGE::Open(PGLOBAL g, char *filename, int id, MODE mode)
     return true;
     } // endif
 
-  if (trace)
+  if (trace(1))
     htrc(" Xopen: filename=%s id=%d mode=%d\n", filename, id, mode);
 
-#if defined(__WIN__)
+#if defined(_WIN32)
   LONG  high = 0;
   DWORD rc, drc, access, share, creation;
 
@@ -2549,7 +2558,7 @@ bool XHUGE::Open(PGLOBAL g, char *filename, int id, MODE mode)
     return true;
     } // endif Hfile
 
-  if (trace)
+  if (trace(1))
     htrc(" access=%p share=%p creation=%d handle=%p fn=%s\n",
          access, share, creation, Hfile, filename);
 
@@ -2566,14 +2575,14 @@ bool XHUGE::Open(PGLOBAL g, char *filename, int id, MODE mode)
       return true;
       } // endif
 
-    NewOff.Low = (int)rc;
-    NewOff.High = (int)high;
+    NewOff.v.Low = (int)rc;
+    NewOff.v.High = (int)high;
   } else if (mode == MODE_WRITE) {
     if (id >= 0) {
       // New not sep index file. Write the header.
       memset(noff, 0, sizeof(noff));
       rc = WriteFile(Hfile, noff, sizeof(noff), &drc, NULL);
-      NewOff.Low = (int)drc;
+      NewOff.v.Low = (int)drc;
       } // endif id
 
   } else if (mode == MODE_READ && id >= 0) {
@@ -2586,8 +2595,8 @@ bool XHUGE::Open(PGLOBAL g, char *filename, int id, MODE mode)
       } // endif rc
 
     // Position the cursor at the offset of this index
-    rc = SetFilePointer(Hfile, noff[id].Low,
-                       (PLONG)&noff[id].High, FILE_BEGIN);
+    rc = SetFilePointer(Hfile, noff[id].v.Low,
+                       (PLONG)&noff[id].v.High, FILE_BEGIN);
 
     if (rc == INVALID_SET_FILE_POINTER) {
       sprintf(g->Message, MSG(FUNC_ERRNO), GetLastError(), "SetFilePointer");
@@ -2623,13 +2632,13 @@ bool XHUGE::Open(PGLOBAL g, char *filename, int id, MODE mode)
 
   if (Hfile == INVALID_HANDLE_VALUE) {
     /*rc = errno;*/
-    if (trace)
+    if (trace(1))
       htrc("Open: %s\n", g->Message);
 
     return true;
     } // endif Hfile
 
-  if (trace)
+  if (trace(1))
     htrc(" oflag=%p mode=%d handle=%d fn=%s\n", 
            oflag, mode, Hfile, filename);
 
@@ -2642,17 +2651,17 @@ bool XHUGE::Open(PGLOBAL g, char *filename, int id, MODE mode)
       return true;
       } // endif
 
-    if (trace)
+    if (trace(1))
       htrc("INSERT: NewOff=%lld\n", NewOff.Val);
 
   } else if (mode == MODE_WRITE) {
     if (id >= 0) {
       // New not sep index file. Write the header.
       memset(noff, 0, sizeof(noff));
-      NewOff.Low = write(Hfile, &noff, sizeof(noff));
+      NewOff.v.Low = write(Hfile, &noff, sizeof(noff));
       } // endif id
 
-    if (trace)
+    if (trace(1))
       htrc("WRITE: NewOff=%lld\n", NewOff.Val);
 
   } else if (mode == MODE_READ && id >= 0) {
@@ -2662,7 +2671,7 @@ bool XHUGE::Open(PGLOBAL g, char *filename, int id, MODE mode)
       return true;
       } // endif read
       
-	  if (trace)
+	  if (trace(1))
       htrc("noff[%d]=%lld\n", id, noff[id].Val);
 
     // Position the cursor at the offset of this index
@@ -2684,7 +2693,7 @@ bool XHUGE::Open(PGLOBAL g, char *filename, int id, MODE mode)
 /***********************************************************************/
 bool XHUGE::Seek(PGLOBAL g, int low, int high, int origin)
   {
-#if defined(__WIN__)
+#if defined(_WIN32)
   LONG  hi = high;
   DWORD rc = SetFilePointer(Hfile, low, &hi, origin);
 
@@ -2700,13 +2709,13 @@ bool XHUGE::Seek(PGLOBAL g, int low, int high, int origin)
   if (lseek64(Hfile, pos, origin) < 0) {
     sprintf(g->Message, MSG(ERROR_IN_LSK), errno);
 
-    if (trace)
+    if (trace(1))
       htrc("lseek64 error %d\n", errno);
 
     return true;
     } // endif lseek64
 
-  if (trace)
+  if (trace(1))
     htrc("Seek: low=%d high=%d\n", low, high);
 #endif // UNIX
 
@@ -2720,7 +2729,7 @@ bool XHUGE::Read(PGLOBAL g, void *buf, int n, int size)
   {
   bool rc = false;
 
-#if defined(__WIN__)
+#if defined(_WIN32)
   bool    brc;
   DWORD   nbr, count = (DWORD)(n * size);
 
@@ -2733,7 +2742,7 @@ bool XHUGE::Read(PGLOBAL g, void *buf, int n, int size)
       } // endif nbr
 
   } else {
-    char *buf[256];
+    char  buf[256];
     DWORD drc = GetLastError();
 
     FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM |
@@ -2745,13 +2754,13 @@ bool XHUGE::Read(PGLOBAL g, void *buf, int n, int size)
 #else    // UNIX
   ssize_t count = (ssize_t)(n * size);
 
-  if (trace)
+  if (trace(1))
     htrc("Hfile=%d n=%d size=%d count=%d\n", Hfile, n, size, count);
 
   if (read(Hfile, buf, count) != count) {
     sprintf(g->Message, MSG(READ_ERROR), "Index file", strerror(errno));
 
-    if (trace)
+    if (trace(1))
       htrc("read error %d\n", errno);
 
     rc = true;
@@ -2766,7 +2775,7 @@ bool XHUGE::Read(PGLOBAL g, void *buf, int n, int size)
 /***********************************************************************/
 int XHUGE::Write(PGLOBAL g, void *buf, int n, int size, bool& rc)
   {
-#if defined(__WIN__)
+#if defined(_WIN32)
   bool    brc;
   DWORD   nbw, count = (DWORD)n * (DWORD) size;
 
@@ -2805,10 +2814,10 @@ int XHUGE::Write(PGLOBAL g, void *buf, int n, int size, bool& rc)
 /***********************************************************************/
 void XHUGE::Close(char *fn, int id)
   {
-  if (trace)
+  if (trace(1))
     htrc("XHUGE::Close: fn=%s id=%d NewOff=%lld\n", fn, id, NewOff.Val);
 
-#if defined(__WIN__)
+#if defined(_WIN32)
   if (id >= 0 && fn) {
     CloseFileHandle(Hfile);
     Hfile = CreateFile(fn, GENERIC_READ | GENERIC_WRITE, 0, NULL,
@@ -2823,7 +2832,7 @@ void XHUGE::Close(char *fn, int id)
         } // endif SetFilePointer
 
     } // endif id
-#else   // !__WIN__
+#else   // !_WIN32
   if (id >= 0 && fn) {
     if (Hfile != INVALID_HANDLE_VALUE) {
       if (lseek64(Hfile, id * sizeof(IOFF), SEEK_SET) >= 0) {
@@ -2839,7 +2848,7 @@ void XHUGE::Close(char *fn, int id)
       htrc("(XHUGE)error reopening %s: %s\n", fn, strerror(errno));
 
     } // endif id
-#endif  // !__WIN__
+#endif  // !_WIN32
 
   XLOAD::Close();
   } // end of Close
@@ -3003,7 +3012,8 @@ KXYCOL::KXYCOL(PKXBASE kp) : To_Keys(Keys.Memp),
 /***********************************************************************/
 bool KXYCOL::Init(PGLOBAL g, PCOL colp, int n, bool sm, int kln)
   {
-  int len = colp->GetLength(), prec = colp->GetScale();
+  int  len = colp->GetLength(), prec = colp->GetScale();
+	bool un = colp->IsUnsigned();
 
   // Currently no indexing on NULL columns
   if (colp->IsNullable() && kln) {
@@ -3016,18 +3026,18 @@ bool KXYCOL::Init(PGLOBAL g, PCOL colp, int n, bool sm, int kln)
     Prefix = true;
     } // endif kln
 
-  if (trace)
+  if (trace(1))
     htrc("KCOL(%p) Init: col=%s n=%d type=%d sm=%d\n",
          this, colp->GetName(), n, colp->GetResultType(), sm);
 
   // Allocate the Value object used when moving items
   Type = colp->GetResultType();
 
-  if (!(Valp = AllocateValue(g, Type, len, prec, colp->IsUnsigned())))
+  if (!(Valp = AllocateValue(g, Type, len, prec, un)))
     return true;
 
   Klen = Valp->GetClen();
-  Keys.Size = n * Klen;
+  Keys.Size = (size_t)n * (size_t)Klen;
 
   if (!PlgDBalloc(g, NULL, Keys)) {
     sprintf(g->Message, MSG(KEY_ALLOC_ERROR), Klen, n);
@@ -3039,7 +3049,7 @@ bool KXYCOL::Init(PGLOBAL g, PCOL colp, int n, bool sm, int kln)
   // Currently we set it to true to be compatible with QRY blocks,
   // and the one before last is to enable length/type checking, set to
   // true if not a prefix key.
-  Kblp = AllocValBlock(g, To_Keys, Type, n, len, prec, !Prefix, true);
+  Kblp = AllocValBlock(g, To_Keys, Type, n, len, prec, !Prefix, true, un);
   Asc = sm;                    // Sort mode: Asc=true  Desc=false
   Ndf = n;
 
@@ -3059,7 +3069,8 @@ bool KXYCOL::Init(PGLOBAL g, PCOL colp, int n, bool sm, int kln)
 /***********************************************************************/
 BYTE* KXYCOL::MapInit(PGLOBAL g, PCOL colp, int *n, BYTE *m)
   {
-  int len = colp->GetLength(), prec = colp->GetScale();
+  int  len = colp->GetLength(), prec = colp->GetScale();
+	bool un = colp->IsUnsigned();
 
   if (n[3] && colp->GetLength() > n[3]
            && colp->GetResultType() == TYPE_STRING) {
@@ -3069,12 +3080,12 @@ BYTE* KXYCOL::MapInit(PGLOBAL g, PCOL colp, int *n, BYTE *m)
 
   Type = colp->GetResultType();
 
-  if (trace)
+  if (trace(1))
     htrc("MapInit(%p): colp=%p type=%d n=%d len=%d m=%p\n",
          this, colp, Type, n[0], len, m);
 
   // Allocate the Value object used when moving items
-  Valp = AllocateValue(g, Type, len, prec, colp->IsUnsigned());
+  Valp = AllocateValue(g, Type, len, prec, un);
   Klen = Valp->GetClen();
 
   if (n[2]) {
@@ -3083,7 +3094,7 @@ BYTE* KXYCOL::MapInit(PGLOBAL g, PCOL colp, int *n, BYTE *m)
     Bkeys.Sub = true;
 
     // Allocate the Valblk containing initial block key values
-    Blkp = AllocValBlock(g, To_Bkeys, Type, n[2], len, prec, true, true);
+    Blkp = AllocValBlock(g, To_Bkeys, Type, n[2], len, prec, true, true, un);
     } // endif nb
 
   Keys.Size = n[0] * Klen;
@@ -3094,7 +3105,7 @@ BYTE* KXYCOL::MapInit(PGLOBAL g, PCOL colp, int *n, BYTE *m)
   // by blanks (if true) or keep the zero ending char (if false).
   // Currently we set it to true to be compatible with QRY blocks,
   // and last one to enable type checking (no conversion).
-  Kblp = AllocValBlock(g, To_Keys, Type, n[0], len, prec, !Prefix, true);
+  Kblp = AllocValBlock(g, To_Keys, Type, n[0], len, prec, !Prefix, true, un);
 
   if (n[1]) {
     Koff.Size = n[1] * sizeof(int);
@@ -3189,7 +3200,7 @@ bool KXYCOL::InitFind(PGLOBAL g, PXOB xp)
     Valp->SetValue_pval(xp->GetValue(), false);
   } // endif Type
 
-  if (trace > 1) {
+  if (trace(2)) {
     char buf[32];
 
     htrc("KCOL InitFind: value=%s\n", Valp->GetCharString(buf));
@@ -3228,9 +3239,9 @@ void KXYCOL::FillValue(PVAL valp)
 int KXYCOL::Compare(int i1, int i2)
   {
   // Do the actual comparison between values.
-  register int k = Kblp->CompVal(i1, i2);
+  int k = Kblp->CompVal(i1, i2);
 
-  if (trace > 2)
+  if (trace(4))
     htrc("Compare done result=%d\n", k);
 
   return (Asc) ? k : -k;
@@ -3242,8 +3253,8 @@ int KXYCOL::Compare(int i1, int i2)
 int KXYCOL::CompVal(int i)
   {
   // Do the actual comparison between numerical values.
-  if (trace > 2) {
-    register int k = (int)Kblp->CompVal(Valp, (int)i);
+  if (trace(4)) {
+    int k = (int)Kblp->CompVal(Valp, (int)i);
 
     htrc("Compare done result=%d\n", k);
     return k;

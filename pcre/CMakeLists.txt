@@ -65,10 +65,19 @@
 #            so it has been removed.
 # 2013-10-08 PH got rid of the "source" command, which is a bash-ism (use ".")
 # 2013-11-05 PH added support for PARENS_NEST_LIMIT
+# 2016-03-01 PH applied Chris Wilson's patch for MSVC static build
+# 2016-06-24 PH applied Chris Wilson's revised patch (adds a separate option)
+# 2021-06-14 PH changed CMAKE_MODULE_PATH definition to add, not replace
+# 2021-06-14 PH applied Wolfgang Stöggl's patch for generating pcre-config and
+#            libpcre*.pc files (Bugzilla #2583)
 
 PROJECT(PCRE C CXX)
 
-SET(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake) # for FindReadline.cmake
+# For FindReadline.cmake. This was changed to allow setting CMAKE_MODULE_PATH
+# on the command line.
+# SET(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake) # for FindReadline.cmake
+
+LIST(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 
 # Enable Unicode properties
 OPTION(PCRE_SUPPORT_UNICODE_PROPERTIES "Unicode properties" ON)
@@ -81,6 +90,7 @@ INCLUDE(CheckIncludeFile)
 INCLUDE(CheckIncludeFileCXX)
 INCLUDE(CheckFunctionExists)
 INCLUDE(CheckTypeSize)
+INCLUDE(GNUInstallDirs) # for CMAKE_INSTALL_LIBDIR
 
 CHECK_INCLUDE_FILE(dirent.h     HAVE_DIRENT_H)
 CHECK_INCLUDE_FILE(stdint.h     HAVE_STDINT_H)
@@ -126,9 +136,9 @@ SET(PCREGREP_BUFSIZE "20480" CACHE STRING
 SET(PCRE_NEWLINE "LF" CACHE STRING
     "What to recognize as a newline (one of CR, LF, CRLF, ANY, ANYCRLF).")
 
-# MARIADB: Changed the default from OFF to ON as pcre_test.bat on Windows
-# MARIADB: fails complaining about too small stack size on Windows.
-SET(PCRE_NO_RECURSE ON CACHE BOOL
+# Windows has much smaller stack (pcre recursion limit of 112, vs
+# 250-500 on Linuxes)
+SET(PCRE_NO_RECURSE "${WIN32}" CACHE BOOL
     "If ON, then don't use stack recursion when matching. See NO_RECURSE in config.h.in for details.")
 
 SET(PCRE_POSIX_MALLOC_THRESHOLD "10" CACHE STRING
@@ -253,7 +263,7 @@ foreach(configure_line ${configure_lines})
     foreach(_substitution_variable ${SEARCHED_VARIABLES})
         string(TOUPPER ${_substitution_variable} _substitution_variable_upper)
         if (NOT ${_substitution_variable_upper})
-            string(REGEX MATCH "m4_define\\(${_substitution_variable}, \\[(.*)\\]" MACTHED_STRING ${configure_line})
+            string(REGEX MATCH "m4_define\\(${_substitution_variable}, \\[(.*)\\]" MATCHED_STRING ${configure_line})
             if (CMAKE_MATCH_1)
                 set(${_substitution_variable_upper} ${CMAKE_MATCH_1})
             endif()
@@ -467,7 +477,6 @@ MARK_AS_ADVANCED(PCRE_POSIX_MALLOC_THRESHOLD)
 MARK_AS_ADVANCED(PCRE_SUPPORT_BSR_ANYCRLF)
 MARK_AS_ADVANCED(PCRE_SUPPORT_UNICODE_PROPERTIES)
 
-
 IF(PCRE_SHOW_REPORT)
   STRING(TOUPPER "${CMAKE_BUILD_TYPE}" buildtype)
   IF (CMAKE_C_FLAGS)
@@ -478,7 +487,7 @@ IF(PCRE_SHOW_REPORT)
   ENDIF(CMAKE_CXX_FLAGS)
   MESSAGE(STATUS "")
   MESSAGE(STATUS "")
-  MESSAGE(STATUS "PCRE configuration summary:")
+  MESSAGE(STATUS "PCRE-${PCRE_MAJOR}.${PCRE_MINOR} configuration summary:")
   MESSAGE(STATUS "")
 #  MESSAGE(STATUS "  Install prefix .................. : ${CMAKE_INSTALL_PREFIX}")
   MESSAGE(STATUS "  C compiler ...................... : ${CMAKE_C_COMPILER}")
@@ -508,6 +517,6 @@ IF(PCRE_SHOW_REPORT)
   MESSAGE(STATUS "")
 ENDIF(PCRE_SHOW_REPORT)
 
-INSTALL(FILES ${CMAKE_BINARY_DIR}/pcre/pcre.h DESTINATION ${INSTALL_INCLUDEDIR}/private COMPONENT Development)
+INSTALL(FILES ${CMAKE_BINARY_DIR}/pcre/pcre.h DESTINATION ${INSTALL_INCLUDEDIR}/server/private COMPONENT Development)
 
 # end CMakeLists.txt

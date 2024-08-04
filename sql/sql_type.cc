@@ -12,7 +12,7 @@
 
  You should have received a copy of the GNU General Public License
  along with this program; if not, write to the Free Software
- Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #include "sql_type.h"
 #include "sql_const.h"
@@ -258,7 +258,6 @@ Type_handler_decimal_result::make_num_distinct_aggregator_field(
                                                             const Item *item)
                                                             const
 {
-  DBUG_ASSERT(item->decimals <= DECIMAL_MAX_SCALE);
   return new (mem_root)
          Field_new_decimal(NULL, item->max_length,
                            (uchar *) (item->maybe_null ? "" : 0),
@@ -548,47 +547,17 @@ Field *Type_handler_varchar::make_conversion_table_field(TABLE *table,
 }
 
 
-Field *Type_handler_tiny_blob::make_conversion_table_field(TABLE *table,
-                                                           uint metadata,
-                                                           const Field *target)
-                                                           const
+Field *Type_handler_blob_common::make_conversion_table_field(TABLE *table,
+                                                            uint metadata,
+                                                            const Field *target)
+                                                            const
 {
+  uint pack_length= metadata & 0x00ff;
+  if (pack_length < 1 || pack_length > 4)
+    return NULL; // Broken binary log?
   return new(table->in_use->mem_root)
          Field_blob(NULL, (uchar *) "", 1, Field::NONE, TMPNAME,
-                    table->s, 1, target->charset());
-}
-
-
-Field *Type_handler_blob::make_conversion_table_field(TABLE *table,
-                                                      uint metadata,
-                                                      const Field *target)
-                                                      const
-{
-  return new(table->in_use->mem_root)
-         Field_blob(NULL, (uchar *) "", 1, Field::NONE, TMPNAME,
-                    table->s, 2, target->charset());
-}
-
-
-Field *Type_handler_medium_blob::make_conversion_table_field(TABLE *table,
-                                                           uint metadata,
-                                                           const Field *target)
-                                                           const
-{
-  return new(table->in_use->mem_root)
-         Field_blob(NULL, (uchar *) "", 1, Field::NONE, TMPNAME,
-                    table->s, 3, target->charset());
-}
-
-
-Field *Type_handler_long_blob::make_conversion_table_field(TABLE *table,
-                                                           uint metadata,
-                                                           const Field *target)
-                                                           const
-{
-  return new(table->in_use->mem_root)
-         Field_blob(NULL, (uchar *) "", 1, Field::NONE, TMPNAME,
-                    table->s, 4, target->charset());
+                    table->s, pack_length, target->charset());
 }
 
 

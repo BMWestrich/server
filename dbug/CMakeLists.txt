@@ -11,7 +11,7 @@
 # 
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335 USA
 
 INCLUDE_DIRECTORIES(
   ${CMAKE_SOURCE_DIR}/dbug
@@ -29,7 +29,7 @@ IF(NOT CMAKE_CROSSCOMPILING)
   TARGET_LINK_LIBRARIES(factorial dbug)
 ENDIF()
 
-IF(NOT WIN32 AND NOT CMAKE_GENERATOR MATCHES Xcode)
+IF(NOT WIN32 AND NOT CMAKE_GENERATOR MATCHES Xcode AND NOT RPM AND NOT DEB)
   FIND_PROGRAM(GROFF groff)
   FIND_PROGRAM(NROFF nroff)
   MARK_AS_ADVANCED(GROFF)
@@ -58,13 +58,13 @@ IF(NOT WIN32 AND NOT CMAKE_GENERATOR MATCHES Xcode)
     ADD_CUSTOM_COMMAND(OUTPUT user.ps
                        DEPENDS user.r ${OUTPUT_INC} ${SOURCE_INC}
                        COMMAND ${GROFF} -mm ${CMAKE_CURRENT_SOURCE_DIR}/user.r > user.ps || touch user.ps)
-    ADD_CUSTOM_TARGET(ps ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/user.ps)
+    ADD_CUSTOM_TARGET(user_ps ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/user.ps)
   ENDIF(GROFF)
   IF(NROFF)
     ADD_CUSTOM_COMMAND(OUTPUT user.t
                        DEPENDS user.r ${OUTPUT_INC} ${SOURCE_INC}
                        COMMAND ${NROFF} -mm ${CMAKE_CURRENT_SOURCE_DIR}/user.r > user.t || touch user.t)
-    ADD_CUSTOM_TARGET(t ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/user.t)
+    ADD_CUSTOM_TARGET(user_t ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/user.t)
   ENDIF(NROFF)
 
 ENDIF()

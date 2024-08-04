@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #ifndef SQL_ALTER_TABLE_H
 #define SQL_ALTER_TABLE_H
@@ -70,60 +70,60 @@ public:
   // Set for DISABLE KEYS | ENABLE KEYS
   static const uint ALTER_KEYS_ONOFF            = 1L <<  9;
 
-  // Set for CONVERT TO CHARACTER SET
-  static const uint ALTER_CONVERT               = 1L << 10;
-
   // Set for FORCE
   // Set for ENGINE(same engine)
   // Set by mysql_recreate_table()
-  static const uint ALTER_RECREATE              = 1L << 11;
+  static const uint ALTER_RECREATE              = 1L << 10;
 
   // Set for ADD PARTITION
-  static const uint ALTER_ADD_PARTITION         = 1L << 12;
+  static const uint ALTER_ADD_PARTITION         = 1L << 11;
 
   // Set for DROP PARTITION
-  static const uint ALTER_DROP_PARTITION        = 1L << 13;
+  static const uint ALTER_DROP_PARTITION        = 1L << 12;
 
   // Set for COALESCE PARTITION
-  static const uint ALTER_COALESCE_PARTITION    = 1L << 14;
+  static const uint ALTER_COALESCE_PARTITION    = 1L << 13;
 
   // Set for REORGANIZE PARTITION ... INTO
-  static const uint ALTER_REORGANIZE_PARTITION  = 1L << 15;
+  static const uint ALTER_REORGANIZE_PARTITION  = 1L << 14;
 
   // Set for partition_options
-  static const uint ALTER_PARTITION             = 1L << 16;
+  static const uint ALTER_PARTITION             = 1L << 15;
 
   // Set for LOAD INDEX INTO CACHE ... PARTITION
   // Set for CACHE INDEX ... PARTITION
-  static const uint ALTER_ADMIN_PARTITION       = 1L << 17;
+  static const uint ALTER_ADMIN_PARTITION       = 1L << 16;
 
   // Set for REORGANIZE PARTITION
-  static const uint ALTER_TABLE_REORG           = 1L << 18;
+  static const uint ALTER_TABLE_REORG           = 1L << 17;
 
   // Set for REBUILD PARTITION
-  static const uint ALTER_REBUILD_PARTITION     = 1L << 19;
+  static const uint ALTER_REBUILD_PARTITION     = 1L << 18;
 
   // Set for partitioning operations specifying ALL keyword
-  static const uint ALTER_ALL_PARTITION         = 1L << 20;
+  static const uint ALTER_ALL_PARTITION         = 1L << 19;
 
   // Set for REMOVE PARTITIONING
-  static const uint ALTER_REMOVE_PARTITIONING   = 1L << 21;
+  static const uint ALTER_REMOVE_PARTITIONING   = 1L << 20;
 
   // Set for ADD FOREIGN KEY
-  static const uint ADD_FOREIGN_KEY             = 1L << 22;
+  static const uint ADD_FOREIGN_KEY             = 1L << 21;
 
   // Set for DROP FOREIGN KEY
-  static const uint DROP_FOREIGN_KEY            = 1L << 23;
+  static const uint DROP_FOREIGN_KEY            = 1L << 22;
 
   // Set for EXCHANGE PARITION
-  static const uint ALTER_EXCHANGE_PARTITION    = 1L << 24;
+  static const uint ALTER_EXCHANGE_PARTITION    = 1L << 23;
 
   // Set by Sql_cmd_alter_table_truncate_partition::execute()
-  static const uint ALTER_TRUNCATE_PARTITION    = 1L << 25;
+  static const uint ALTER_TRUNCATE_PARTITION    = 1L << 24;
 
   // Set for ADD [COLUMN] FIRST | AFTER
-  static const uint ALTER_COLUMN_ORDER          = 1L << 26;
+  static const uint ALTER_COLUMN_ORDER          = 1L << 25;
 
+  static const uint ALTER_ADD_CHECK_CONSTRAINT  = 1L << 27;
+  static const uint ALTER_DROP_CHECK_CONSTRAINT = 1L << 28;
+  static const uint ALTER_RENAME_COLUMN         = 1L << 29;
 
   enum enum_enable_or_disable { LEAVE_AS_IS, ENABLE, DISABLE };
 
@@ -166,12 +166,15 @@ public:
 
   // Columns and keys to be dropped.
   List<Alter_drop>              drop_list;
-  // Columns for ALTER_COLUMN_CHANGE_DEFAULT.
+  // Columns for ALTER_CHANGE_COLUMN_DEFAULT.
   List<Alter_column>            alter_list;
   // List of keys, used by both CREATE and ALTER TABLE.
   List<Key>                     key_list;
   // List of columns, used by both CREATE and ALTER TABLE.
   List<Create_field>            create_list;
+
+  static const uint CHECK_CONSTRAINT_IF_NOT_EXISTS= 1;
+  List<Virtual_column_info>     check_constraint_list;
   // Type of ALTER TABLE operation.
   uint                          flags;
   // Enable or disable keys.
@@ -200,6 +203,7 @@ public:
     alter_list.empty();
     key_list.empty();
     create_list.empty();
+    check_constraint_list.empty();
     flags= 0;
     keys_onoff= LEAVE_AS_IS;
     num_parts= 0;
@@ -388,7 +392,8 @@ protected:
   Sql_cmd_alter_table represents the generic ALTER TABLE statement.
   @todo move Alter_info and other ALTER specific structures from Lex here.
 */
-class Sql_cmd_alter_table : public Sql_cmd_common_alter_table
+class Sql_cmd_alter_table : public Sql_cmd_common_alter_table,
+                            public Storage_engine_name
 {
 public:
   /**
@@ -399,6 +404,8 @@ public:
 
   ~Sql_cmd_alter_table()
   {}
+
+  Storage_engine_name *option_storage_engine_name() { return this; }
 
   bool execute(THD *thd);
 };

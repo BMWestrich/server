@@ -1,3 +1,5 @@
+set @save_character_set_client=@@character_set_client;
+set @save_userstat=@@global.userstat, @@global.userstat= 0;
 use test;
 drop table if exists t1,t2,t3,t4;
 drop view if exists v1;
@@ -791,7 +793,7 @@ comment 'Characteristics procedure test'
   insert into t1 values ("chistics", 1)|
 show create procedure chistics|
 Procedure	sql_mode	Create Procedure	character_set_client	collation_connection	Database Collation
-chistics	NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION	CREATE DEFINER=`root`@`localhost` PROCEDURE `chistics`()
+chistics	STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION	CREATE DEFINER=`root`@`localhost` PROCEDURE `chistics`()
     MODIFIES SQL DATA
     COMMENT 'Characteristics procedure test'
 insert into t1 values ("chistics", 1)	latin1	latin1_swedish_ci	latin1_swedish_ci
@@ -803,7 +805,7 @@ delete from t1|
 alter procedure chistics sql security invoker|
 show create procedure chistics|
 Procedure	sql_mode	Create Procedure	character_set_client	collation_connection	Database Collation
-chistics	NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION	CREATE DEFINER=`root`@`localhost` PROCEDURE `chistics`()
+chistics	STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION	CREATE DEFINER=`root`@`localhost` PROCEDURE `chistics`()
     MODIFIES SQL DATA
     SQL SECURITY INVOKER
     COMMENT 'Characteristics procedure test'
@@ -818,7 +820,7 @@ comment 'Characteristics procedure test'
   return 42|
 show create function chistics|
 Function	sql_mode	Create Function	character_set_client	collation_connection	Database Collation
-chistics	NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION	CREATE DEFINER=`root`@`localhost` FUNCTION `chistics`() RETURNS int(11)
+chistics	STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION	CREATE DEFINER=`root`@`localhost` FUNCTION `chistics`() RETURNS int(11)
     DETERMINISTIC
     SQL SECURITY INVOKER
     COMMENT 'Characteristics procedure test'
@@ -831,7 +833,7 @@ no sql
 comment 'Characteristics function test'|
 show create function chistics|
 Function	sql_mode	Create Function	character_set_client	collation_connection	Database Collation
-chistics	NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION	CREATE DEFINER=`root`@`localhost` FUNCTION `chistics`() RETURNS int(11)
+chistics	STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION	CREATE DEFINER=`root`@`localhost` FUNCTION `chistics`() RETURNS int(11)
     NO SQL
     DETERMINISTIC
     SQL SECURITY INVOKER
@@ -997,9 +999,9 @@ select f5(1)|
 f5(1)
 1
 select f5(2)|
-ERROR HY000: Recursive stored functions and triggers are not allowed.
+ERROR HY000: Recursive stored functions and triggers are not allowed
 select f5(3)|
-ERROR HY000: Recursive stored functions and triggers are not allowed.
+ERROR HY000: Recursive stored functions and triggers are not allowed
 create function f6() returns int
 begin
 declare n int;
@@ -1048,11 +1050,11 @@ ERROR HY000: View 'test.v1' references invalid table(s) or column(s) or function
 create function f1() returns int
 return (select sum(data) from t1) + (select sum(data) from v1)|
 select f1()|
-ERROR HY000: Recursive stored functions and triggers are not allowed.
+ERROR HY000: Recursive stored functions and triggers are not allowed
 select * from v1|
-ERROR HY000: Recursive stored functions and triggers are not allowed.
+ERROR HY000: Recursive stored functions and triggers are not allowed
 select * from v2|
-ERROR HY000: Recursive stored functions and triggers are not allowed.
+ERROR HY000: Recursive stored functions and triggers are not allowed
 drop function f1|
 create function f1() returns int
 return (select sum(data) from t1)|
@@ -1140,9 +1142,12 @@ insert into t3 values (1), (2), (3);
 return (select count(*) from t3 as a, t3 as b);
 end|
 select f11()|
-ERROR HY000: Can't reopen table: 'a'
+f11()
+9
 select f11() from t1|
-ERROR HY000: Can't reopen table: 'a'
+f11()
+9
+9
 create function f12_1() returns int
 begin
 drop temporary table if exists t3;
@@ -1156,6 +1161,7 @@ drop temporary table t3|
 select f12_1()|
 f12_1()
 3
+drop temporary table t3|
 select f12_1() from t1 limit 1|
 f12_1()
 3
@@ -3338,7 +3344,8 @@ l√§bel1: begin end|
 call bug6063()|
 call bug7088_1()|
 call bug7088_2()|
-set character set default|
+set @@character_set_client=@save_character_set_client|
+set @@character_set_results=@save_character_set_client|
 show create procedure bug6063|
 Procedure	sql_mode	Create Procedure	character_set_client	collation_connection	Database Collation
 bug6063		CREATE DEFINER=`root`@`localhost` PROCEDURE `bug6063`()
@@ -4060,9 +4067,9 @@ select @@max_sp_recursion_depth|
 @@max_sp_recursion_depth
 4
 select bug10100f(3)|
-ERROR HY000: Recursive stored functions and triggers are not allowed.
+ERROR HY000: Recursive stored functions and triggers are not allowed
 select bug10100f(6)|
-ERROR HY000: Recursive stored functions and triggers are not allowed.
+ERROR HY000: Recursive stored functions and triggers are not allowed
 call bug10100t(5)|
 res
 120
@@ -4131,7 +4138,7 @@ select @@max_sp_recursion_depth|
 @@max_sp_recursion_depth
 0
 select bug10100f(5)|
-ERROR HY000: Recursive stored functions and triggers are not allowed.
+ERROR HY000: Recursive stored functions and triggers are not allowed
 call bug10100t(5)|
 ERROR HY000: Recursive limit 0 (as set by the max_sp_recursion_depth variable) was exceeded for routine bug10100p
 deallocate prepare stmt2|
@@ -4609,7 +4616,7 @@ call bug15231_3()|
 Result
 Missed it (correct)
 Level	Code	Message
-Warning	1366	Incorrect decimal value: 'zap' for column 'x' at row 1
+Warning	1366	Incorrect decimal value: 'zap' for column ``.``.`x` at row 1
 Result
 Caught it (correct)
 call bug15231_5()|
@@ -5295,7 +5302,7 @@ CREATE DEFINER=longer_than_80_45678901234567890123456789012345678901234567890123
 BEGIN
 SET @a = 1;
 END|
-ERROR HY000: String 'longer_than_80_4567890123456789012345678901234567890123456789012345678' is too long for user name (should be no longer than 80)
+ERROR HY000: String 'longer_than_80_4567890123456789012345678901234567890123456789012345...' is too long for user name (should be no longer than 80)
 CREATE DEFINER=some_user_name@1234567890abcdefghij1234567890abcdefghij1234567890abcdefghijQWERTY
 FUNCTION bug16899_f1() RETURNS INT
 BEGIN
@@ -6041,12 +6048,12 @@ select bug20777(9223372036854775810) as '9223372036854775810   2**63+2';
 9223372036854775810   2**63+2
 9223372036854775810
 select bug20777(-9223372036854775808) as 'lower bounds signed bigint';
-ERROR 22003: BIGINT UNSIGNED value is out of range in '(f1@0 - 10)'
+ERROR 22003: BIGINT UNSIGNED value is out of range in 'f1@0 - 10'
 select bug20777(9223372036854775807) as 'upper bounds signed bigint';
 upper bounds signed bigint
 9223372036854775807
 select bug20777(0) as 'lower bounds unsigned bigint';
-ERROR 22003: BIGINT UNSIGNED value is out of range in '(f1@0 - 10)'
+ERROR 22003: BIGINT UNSIGNED value is out of range in 'f1@0 - 10'
 select bug20777(18446744073709551615) as 'upper bounds unsigned bigint';
 upper bounds unsigned bigint
 18446744073709551615
@@ -6056,7 +6063,7 @@ upper bounds unsigned bigint + 1
 Warnings:
 Warning	1264	Out of range value for column 'f1' at row 1
 select bug20777(-1) as 'lower bounds unsigned bigint - 1';
-ERROR 22003: BIGINT UNSIGNED value is out of range in '(f1@0 - 10)'
+ERROR 22003: BIGINT UNSIGNED value is out of range in 'f1@0 - 10'
 create table examplebug20777 as select 
 0 as 'i',
 bug20777(9223372036854775806) as '2**63-2',
@@ -6246,7 +6253,8 @@ END|
 CALL p1();
 ·‚‰
 NULL
-SET NAMES default;
+set @@character_set_client=@save_character_set_client;
+set @@character_set_results=@save_character_set_client;
 DROP PROCEDURE p1;
 drop procedure if exists proc_25411_a;
 drop procedure if exists proc_25411_b;
@@ -6417,6 +6425,8 @@ set x=-1;
 return x;
 end|
 create view v1 as select 1 as one, f1() as days;
+connect  bug29408, localhost, root,,*NO-ONE*;
+connection bug29408;
 show create view test.v1;
 View	Create View	character_set_client	collation_connection
 v1	CREATE ALGORITHM=UNDEFINED DEFINER=`root`@`localhost` SQL SECURITY DEFINER VIEW `test`.`v1` AS select 1 AS `one`,`f1`() AS `days`	latin1	latin1_swedish_ci
@@ -6425,6 +6435,8 @@ where table_name='v1' and table_schema='test';
 column_name
 one
 days
+connection default;
+disconnect bug29408;
 drop view v1;
 drop function f1;
 
@@ -6468,7 +6480,7 @@ DROP TABLE t1;
 
 CALL p2('text');
 Warnings:
-Warning	1366	Incorrect integer value: 'text' for column 'v' at row 1
+Warning	1366	Incorrect integer value: 'text' for column ``.``.`v` at row 1
 SHOW CREATE TABLE t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
@@ -6790,7 +6802,7 @@ ERROR 42S02: Table 'test.t1' doesn't exist
 create table t1 (a integer)$
 call p1$
 a
-alter table t1 add b integer;
+alter table t1 add b integer$
 call p1$
 a
 drop table t1;
@@ -6929,7 +6941,7 @@ CREATE TEMPORARY TABLE t3 LIKE t1;
 CREATE PROCEDURE p1 () BEGIN SELECT f1 FROM t3 AS A WHERE A.f1 IN ( SELECT f1 FROM t3 ) ;
 END|
 CALL p1;
-ERROR HY000: Can't reopen table: 'A'
+f1
 CREATE VIEW t3 AS SELECT f1 FROM t2 A WHERE A.f1 IN ( SELECT f1 FROM t2 );
 DROP TABLE t3;
 CALL p1;
@@ -7635,6 +7647,23 @@ c1	c2	count(c3)
 2012-03-01 02:00:00	3	1
 DROP PROCEDURE p1;
 # End of 5.5 test
+FLUSH USER_STATISTICS;
+CREATE PROCEDURE sp() ALTER TABLE non_existing_table OPTIMIZE PARTITION p0;
+CALL sp;
+Table	Op	Msg_type	Msg_text
+test.non_existing_table	optimize	Error	Table 'test.non_existing_table' doesn't exist
+test.non_existing_table	optimize	status	Operation failed
+SELECT 1;
+1
+1
+DROP PROCEDURE sp;
+CREATE PROCEDURE sp() SET STATEMENT SQL_SELECT_LIMIT=0 FOR SHOW USER_STATISTICS;
+CALL sp;
+User	Total_connections	Concurrent_connections	Connected_time	Busy_time	Cpu_time	Bytes_received	Bytes_sent	Binlog_bytes_written	Rows_read	Rows_sent	Rows_deleted	Rows_inserted	Rows_updated	Select_commands	Update_commands	Other_commands	Commit_transactions	Rollback_transactions	Denied_connections	Lost_connections	Access_denied	Empty_queries	Total_ssl_connections	Max_statement_time_exceeded
+SELECT 1;
+1
+1
+DROP PROCEDURE sp;
 #
 # Bug#12663165 SP DEAD CODE REMOVAL DOESN'T UNDERSTAND CONTINUE HANDLERS
 #
@@ -7716,6 +7745,7 @@ Handler_read_key	0
 Handler_read_last	0
 Handler_read_next	0
 Handler_read_prev	0
+Handler_read_retry	0
 Handler_read_rnd	0
 Handler_read_rnd_deleted	0
 Handler_read_rnd_next	0
@@ -7727,6 +7757,7 @@ Handler_read_key	2
 Handler_read_last	0
 Handler_read_next	4097
 Handler_read_prev	0
+Handler_read_retry	0
 Handler_read_rnd	0
 Handler_read_rnd_deleted	0
 Handler_read_rnd_next	0
@@ -7860,6 +7891,95 @@ v1
 6
 DROP PROCEDURE p1;
 DROP TABLE t1;
+#
+# MDEV-10713: signal 11 error on multi-table update - crash in
+# handler::increment_statistics or in make_select or assertion
+# failure pfs_thread == ((PFS_thread*) pthread_getspecific((THR_PFS)))
+#
+CREATE TABLE `t1` (
+`CLOSE_YN` varchar(10) COLLATE utf8_bin DEFAULT NULL
+) DEFAULT CHARSET=utf8 COLLATE=utf8_bin ;
+CREATE TABLE `t2` (
+`ap_close_to` varchar(8) COLLATE utf8_bin DEFAULT NULL
+) DEFAULT CHARSET=utf8 COLLATE=utf8_bin ;
+insert t1 values (1);
+CREATE  FUNCTION `f1`(`P_DC_CD` VARBINARY(50), `P_SYS_DATE` DATETIME) RETURNS datetime
+DETERMINISTIC
+SQL SECURITY INVOKER
+BEGIN
+DECLARE V_SYS_DATE DATETIME;
+SELECT now() AS LOC_DATE INTO V_SYS_DATE ;
+RETURN v_sys_date ;
+END $$
+update t1 S
+JOIN
+(
+SELECT CASE
+WHEN DATE_FORMAT( f1('F01', NOW()) , '%Y%m%d') <= CLOSE_YMD
+THEN '99991231'
+	     ELSE '' END ACCOUNT_APPLY_YYYYMMDD
+FROM (
+select case
+when 'AP'='AP'
+                   then ap_close_to
+end AS CLOSE_YMD
+from t2
+) A
+) X
+SET S.CLOSE_YN = ''
+where 1=1;
+drop function if exists f1;
+drop table t1,t2;
+#
+# MDEV-16957: Server crashes in Field_iterator_natural_join::next
+# upon 2nd execution of SP
+#
+CREATE TABLE t1 (a INT, b VARCHAR(32));
+CREATE PROCEDURE sp() SELECT * FROM t1 AS t1x JOIN t1 AS t1y USING (c);
+CALL sp;
+ERROR 42S22: Unknown column 'c' in 'from clause'
+CALL sp;
+ERROR 42S22: Unknown column 'c' in 'from clause'
+CALL sp;
+ERROR 42S22: Unknown column 'c' in 'from clause'
+alter table t1 add column c int;
+CALL sp;
+c	a	b	a	b
+DROP PROCEDURE sp;
+DROP TABLE t1;
+#
+# MDEV-17055: Server crashes in find_order_in_list upon
+# 2nd (3rd) execution of SP with UPDATE
+#
+CREATE TABLE t1 (a INT);
+CREATE VIEW v1 AS SELECT * FROM t1;
+CREATE TABLE t2 (c INT);
+CREATE PROCEDURE sp() UPDATE v1 SET a = 1 ORDER BY a, b LIMIT 1;
+LOCK TABLE t2 READ;
+CALL sp;
+ERROR HY000: Table 'v1' was not locked with LOCK TABLES
+UNLOCK TABLES;
+CALL sp;
+ERROR 42S22: Unknown column 'b' in 'order clause'
+CALL sp;
+ERROR 42S22: Unknown column 'b' in 'order clause'
+CALL sp;
+ERROR 42S22: Unknown column 'b' in 'order clause'
+DROP PROCEDURE sp;
+CREATE PROCEDURE sp() UPDATE v1 SET a = 1 WHERE a=1 and b=2;
+LOCK TABLE t2 READ;
+CALL sp;
+ERROR HY000: Table 'v1' was not locked with LOCK TABLES
+UNLOCK TABLES;
+CALL sp;
+ERROR 42S22: Unknown column 'b' in 'where clause'
+CALL sp;
+ERROR 42S22: Unknown column 'b' in 'where clause'
+CALL sp;
+ERROR 42S22: Unknown column 'b' in 'where clause'
+DROP PROCEDURE sp;
+DROP VIEW v1;
+DROP TABLE t1, t2;
 # End of 5.5 test
 #
 #  MDEV-7040: Crash in field_conv, memcpy_field_possible, part#2
@@ -7905,7 +8025,7 @@ CLOSE cur1;
 end|
 set @tmp_toc= @@table_open_cache;
 set @tmp_tdc= @@table_definition_cache;
-set global table_open_cache=1;
+set global table_open_cache=10;
 set global table_definition_cache=1;
 Warnings:
 Warning	1292	Truncated incorrect table_definition_cache value: '1'
@@ -7914,6 +8034,44 @@ set global table_open_cache= @tmp_toc;
 set global table_definition_cache= @tmp_tdc;
 drop procedure p1;
 drop table t1,t2,t3,t4,t5,t6;
+#
+# MDEV-11935: Queries in stored procedures with and
+# EXISTS(SELECT * FROM VIEW) crashes and closes hte conneciton.
+#
+CREATE TABLE ANY_TABLE (
+ENTITY_UID    BIGINT NOT NULL
+);
+CREATE TABLE SECURITY_PATH(
+origid BIGINT UNSIGNED NOT NULL,
+destid BIGINT UNSIGNED NOT NULL,
+KEY (destid)
+);
+CREATE VIEW ENTITY_ACCESS (
+ENTITY_UID,
+OWNER_UID
+) AS
+SELECT SP1.origid,
+SP2.destid
+FROM SECURITY_PATH SP1
+JOIN SECURITY_PATH SP2 ON SP1.destid = SP2.origid
+;
+CREATE PROCEDURE SP_EXAMPLE_SELECT ()
+BEGIN
+SELECT *
+FROM ANY_TABLE AT1
+WHERE EXISTS ( SELECT *
+FROM ENTITY_ACCESS EA
+WHERE AT1.ENTITY_UID = EA.ENTITY_UID
+AND   EA.OWNER_UID IS NULL );
+END
+//
+CALL SP_EXAMPLE_SELECT ();
+ENTITY_UID
+CALL SP_EXAMPLE_SELECT ();
+ENTITY_UID
+drop procedure SP_EXAMPLE_SELECT;
+drop view ENTITY_ACCESS;
+drop table ANY_TABLE, SECURITY_PATH;
 # End of 10.0 test
 CREATE FUNCTION f(f1 VARCHAR(64) COLLATE latin1_german2_ci)
 RETURNS VARCHAR(64)
@@ -7991,3 +8149,384 @@ return 1;
 end |
 ERROR 0A000: Not allowed to return a result set from a function
 drop table t1,t2;
+#
+# MDEV-11584: GRANT inside an SP does not work well on 2nd execution
+#
+CREATE PROCEDURE sp1()
+GRANT ALL PRIVILEGES ON *.* TO 'foo'@'%' IDENTIFIED BY 'pass';
+CALL sp1();
+CALL sp1();
+drop user 'foo'@'%';
+drop procedure sp1;
+#
+# MDEV-10972: Insert from select / view / union --
+# repeatable crash in 10.1, 10.2 Linux/Mac/Windows
+#
+create table t (id int auto_increment primary key);
+insert into t values (9494),(9495),(9496),(9497),(9498),(9499),(9500),(9501),(9502),(9503);
+create VIEW v AS
+select id from t
+union
+select id from t
+;
+drop procedure if exists p;
+Warnings:
+Note	1305	PROCEDURE test.p does not exist
+create procedure p()
+insert into tmp_t select t.id from (
+select id from v
+union
+select id from v
+) sq
+inner join t on (sq.id = t.id);
+CALL p();
+ERROR 42S02: Table 'test.tmp_t' doesn't exist
+create table tmp_t (id int null);
+CALL p();
+drop procedure p;
+drop view v;
+drop table t, tmp_t;
+#
+# MDEV-13936: Server crashes in Time_and_counter_tracker::incr_loops
+#
+CREATE TABLE t1 (i INT);
+CREATE VIEW v1 AS SELECT * FROM t1 WHERE RAND() > 0.5;
+CREATE FUNCTION f1() RETURNS INT RETURN ( SELECT MAX(i) FROM v1 );
+REPLACE INTO v1 VALUES (f1());
+ERROR HY000: The target table v1 of the INSERT is not insertable-into
+SET @aux = f1();
+DROP FUNCTION f1;
+DROP VIEW v1;
+DROP TABLE t1;
+#
+# MDEV-14857: problem with 10.2.11 server crashing when
+# executing stored procedure
+#
+SET max_sp_recursion_depth=10;
+CREATE TABLE t1 (a INT);
+CREATE TABLE t2 (b INT);
+CREATE PROCEDURE proc_0()
+BEGIN
+CALL empty_1();
+CALL proc_1();
+END ||
+CREATE PROCEDURE proc_1()
+BEGIN
+CALL proc_2();
+CALL proc_3();
+CALL proc_4();
+CALL proc_5();
+END ||
+CREATE PROCEDURE proc_2()
+CALL proc_6();
+||
+CREATE PROCEDURE proc_3()
+BEGIN
+CALL empty_2();
+CALL empty_3();
+END ||
+CREATE PROCEDURE proc_4()
+CALL proc_7();
+||
+CREATE PROCEDURE proc_5()
+CALL proc_select();
+||
+CREATE PROCEDURE proc_6()
+BEGIN
+CALL empty_4();
+CALL empty_5();
+CALL empty_6();
+CALL empty_7();
+CALL proc_8();
+END ||
+CREATE PROCEDURE proc_7()
+CALL proc_9('foo');
+||
+CREATE PROCEDURE proc_8()
+CALL proc_10();
+||
+CREATE PROCEDURE proc_9(IN opt VARCHAR(40))
+IF LEFT(opt,1) <> '_' THEN
+CALL proc_11();
+END IF;
+||
+CREATE PROCEDURE proc_10()
+CALL proc_12();
+||
+CREATE PROCEDURE proc_11()
+BEGIN
+CALL empty_8();
+CALL empty_9();
+CALL empty_10();
+CALL proc_13();
+END ||
+CREATE PROCEDURE proc_12()
+BEGIN
+CALL empty_11();
+CALL empty_12();
+CALL empty_13();
+END ||
+CREATE PROCEDURE proc_13()
+BEGIN
+CALL proc_9('_bar');
+CALL empty_14();
+END ||
+CREATE PROCEDURE empty_1() BEGIN END ;
+CREATE PROCEDURE empty_2() BEGIN END ;
+CREATE PROCEDURE empty_3() BEGIN END ;
+CREATE PROCEDURE empty_4() BEGIN END ;
+CREATE PROCEDURE empty_5() BEGIN END ;
+CREATE PROCEDURE empty_6() BEGIN END ;
+CREATE PROCEDURE empty_7() BEGIN END ;
+CREATE PROCEDURE empty_8() BEGIN END ;
+CREATE PROCEDURE empty_9() BEGIN END ;
+CREATE PROCEDURE empty_10() BEGIN END ;
+CREATE PROCEDURE empty_11() BEGIN END ;
+CREATE PROCEDURE empty_12() BEGIN END ;
+CREATE PROCEDURE empty_13() BEGIN END ;
+CREATE PROCEDURE empty_14() BEGIN END ;
+CREATE PROCEDURE proc_select()
+SELECT * FROM t1 WHERE NOT EXISTS ( SELECT * FROM t2)
+;
+CALL proc_0();
+a
+DROP PROCEDURE empty_1;
+DROP PROCEDURE empty_2;
+DROP PROCEDURE empty_3;
+DROP PROCEDURE empty_4;
+DROP PROCEDURE empty_5;
+DROP PROCEDURE empty_6;
+DROP PROCEDURE empty_7;
+DROP PROCEDURE empty_8;
+DROP PROCEDURE empty_9;
+DROP PROCEDURE empty_10;
+DROP PROCEDURE empty_11;
+DROP PROCEDURE empty_12;
+DROP PROCEDURE empty_13;
+DROP PROCEDURE empty_14;
+DROP PROCEDURE proc_0;
+DROP PROCEDURE proc_1;
+DROP PROCEDURE proc_2;
+DROP PROCEDURE proc_3;
+DROP PROCEDURE proc_4;
+DROP PROCEDURE proc_5;
+DROP PROCEDURE proc_6;
+DROP PROCEDURE proc_7;
+DROP PROCEDURE proc_8;
+DROP PROCEDURE proc_9;
+DROP PROCEDURE proc_10;
+DROP PROCEDURE proc_11;
+DROP PROCEDURE proc_12;
+DROP PROCEDURE proc_13;
+DROP PROCEDURE proc_select;
+DROP TABLE t1, t2;
+SET max_sp_recursion_depth=default;
+#
+# MDEV-15347: Valgrind or ASAN errors in mysql_make_view on query
+# from information_schema
+#
+CREATE VIEW v AS SELECT 1;
+CREATE FUNCTION f() RETURNS INT RETURN 1;
+SELECT * FROM INFORMATION_SCHEMA.TABLES JOIN INFORMATION_SCHEMA.PARAMETERS
+UNION
+SELECT * FROM INFORMATION_SCHEMA.TABLES JOIN INFORMATION_SCHEMA.PARAMETERS;
+DROP FUNCTION f;
+DROP VIEW v;
+#
+# MDEV-17963: Assertion `field_pos < field_count' failed in Protocol_text::store,
+# Assertion `field_handlers == 0 || field_pos < field_count'
+#
+CREATE TABLE t1 (ct time);
+INSERT INTO t1 VALUES ('16:11:28');
+CREATE FUNCTION f1 () RETURNS varchar(100)
+BEGIN
+DECLARE xxx varchar(100);
+ANALYZE SELECT sum(ct) FROM t1 INTO xxx ;
+RETURN xxx;
+END|
+ERROR 0A000: Not allowed to return a result set from a function
+drop table t1;
+#End of 10.1 tests
+#
+# MDEV-11081: CURSOR for query with GROUP BY
+#
+CREATE TABLE t1 (name VARCHAR(10), value INT);
+INSERT INTO t1 VALUES ('b',1);
+INSERT INTO t1 VALUES ('b',1);
+INSERT INTO t1 VALUES ('c',1);
+INSERT INTO t1 VALUES ('a',1);
+INSERT INTO t1 VALUES ('a',1);
+INSERT INTO t1 VALUES ('a',1);
+CREATE PROCEDURE p1 ()
+BEGIN
+DECLARE done INT DEFAULT FALSE;
+DECLARE v_name VARCHAR(10);
+DECLARE v_total INT;
+DECLARE c CURSOR FOR
+SELECT name, SUM(value) AS total FROM t1 GROUP BY name;
+DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = TRUE;
+OPEN c;
+read_loop:
+LOOP
+FETCH c INTO v_name, v_total;
+IF done THEN
+LEAVE read_loop;
+END IF;
+SELECT v_name, v_total;
+END LOOP;
+CLOSE c;
+END;
+|
+CALL p1();
+v_name	v_total
+a	3
+v_name	v_total
+b	2
+v_name	v_total
+c	1
+DROP PROCEDURE p1;
+DROP TABLE t1;
+#
+# MDEV-13346: CURSOR a query with GROUP BY using derived table
+#
+CREATE PROCEDURE p1()
+BEGIN
+DECLARE c CURSOR FOR
+SELECT
+IFNULL(NULL,1) AS col
+FROM
+( select 1 as id ) AS t
+GROUP BY t.id
+;
+OPEN c;
+END
+|
+CALL p1();
+DROP PROCEDURE p1;
+#
+# MDEV-15057 Crash when using an unknown identifier as an SP parameter
+#
+CREATE OR REPLACE PROCEDURE p1 (a VARCHAR(10)) SELECT 1;
+CALL p1(a);
+ERROR 42S22: Unknown column 'a' in 'field list'
+drop procedure p1;
+CREATE OR REPLACE PROCEDURE p1 (a VARCHAR(10)) SELECT a|
+CREATE OR REPLACE PROCEDURE p2 ()
+BEGIN
+DECLARE name VARCHAR(10);
+SET name="hello";
+call p1(name);
+END|
+CREATE OR REPLACE PROCEDURE p3 ()
+BEGIN
+DECLARE name VARCHAR(10);
+SET name="hello";
+call p1(name2);
+END|
+call p2();
+a
+hello
+call p3();
+ERROR 42S22: Unknown column 'name2' in 'field list'
+drop procedure p1;
+drop procedure p2;
+drop procedure p3;
+#
+# MDEV-15328: MariaDB 10.2.13 Crashes upon CALL PROCEDURE PARAM
+# LAST_INSERT_ID ()
+# (part 1, part 2 is in query_cache.test)
+#
+CREATE PROCEDURE foo ( IN i INT UNSIGNED ) BEGIN END;
+CALL foo( LAST_INSERT_ID() );
+DROP PROCEDURE foo;
+#
+# MDEV-15870 Using aggregate and window function in unexpected places can crash the server
+#
+CREATE PROCEDURE p1 (a TEXT) BEGIN END;
+CALL p1(RANK() OVER (ORDER BY 1));
+ERROR HY000: Window function is allowed only in SELECT list and ORDER BY clause
+CALL p1(ROW_NUMBER() OVER ());
+ERROR HY000: Window function is allowed only in SELECT list and ORDER BY clause
+CALL p1(SUM(1));
+ERROR HY000: Invalid use of group function
+DROP PROCEDURE p1;
+#
+# MDEV-16311 Server crash when using a NAME_CONST() with a CURSOR
+#
+SET sql_mode=STRICT_ALL_TABLES;
+CREATE TABLE t1 (a INT);
+INSERT INTO t1 VALUES (10);
+BEGIN NOT ATOMIC
+DECLARE a INT;
+DECLARE c CURSOR FOR SELECT NAME_CONST('x','y') FROM t1;
+OPEN c;
+FETCH c INTO a;
+CLOSE c;
+END;
+$$
+ERROR 22007: Incorrect integer value: 'y' for column ``.``.`a` at row 1
+DROP TABLE t1;
+SET sql_mode=DEFAULT;
+#
+# MDEV-24220: error when opening a table for the second call of SP
+#
+CREATE TABLE t1 (a INT, b INT);
+INSERT INTO t1 VALUES (1,1),(2,2);
+CREATE VIEW v1 AS SELECT MAX(a) as f FROM t1;
+CREATE PROCEDURE p1()
+BEGIN
+SELECT * FROM v1;
+END $
+CALL p1;
+f
+2
+ALTER TABLE t1 DROP a;
+CALL p1;
+ERROR HY000: View 'test.v1' references invalid table(s) or column(s) or function(s) or definer/invoker of view lack rights to use them
+DROP PROCEDURE p1;
+DROP VIEW v1;
+DROP TABLE t1;
+#
+# BUG#30366310: USING A FUNCTION TO ASSIGN DEFAULT VALUES TO
+# 2 OR MORE VARIABLES CRASHES SERVER
+#
+create function f1() returns bigint return now()-1|
+create procedure p1()
+begin
+declare b, c bigint default f1();
+select b-c;
+end|
+call p1()|
+b-c
+0
+drop procedure p1|
+drop function f1|
+#
+# MDEV-24827: MariaDB 10.5.5 crash (sig 11) during a SELECT
+#
+CREATE TABLE t1 (c1 INT PRIMARY KEY, c2 INT);
+CREATE TABLE t2 (c1 INT PRIMARY KEY, c2 INT, KEY idx_c2(c2));
+INSERT INTO t1 (c1, c2) SELECT seq, seq FROM seq_1_to_10000;
+INSERT INTO t2 (c1, c2) SELECT seq, seq FROM seq_1_to_20000;
+CREATE OR REPLACE PROCEDURE p1()
+begin
+DECLARE done INT DEFAULT FALSE;
+DECLARE a INT;
+DECLARE cur1 CURSOR FOR
+SELECT t2.c1 AS c1 FROM t1 LEFT JOIN t2 ON t1.c1 = t2.c1
+WHERE EXISTS (SELECT 1 FROM t1 WHERE c2 = -1) ORDER BY c1;
+DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = TRUE;
+OPEN cur1;
+read_loop: LOOP
+FETCH cur1 INTO a;
+IF done THEN
+LEAVE read_loop;
+END IF;
+END LOOP;
+CLOSE cur1;
+END $
+CALL p1();
+DROP PROCEDURE p1;
+DROP TABLE t1;
+DROP TABLE t2;
+#End of 10.2 tests

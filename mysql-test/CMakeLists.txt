@@ -1,4 +1,5 @@
 # Copyright (c) 2009, 2013, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2012, 2018, MariaDB Corporation
 # 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,7 +12,7 @@
 # 
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335 USA
 
 INSTALL_MYSQL_TEST("." ".")
 
@@ -22,6 +23,7 @@ IF(NOT ${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
     ${CMAKE_CURRENT_BINARY_DIR}/mysql-test-run.pl
     @ONLY
   )
+  SET(out_of_source_build TRUE)
 ENDIF()
 IF(UNIX)
   EXECUTE_PROCESS(
@@ -32,9 +34,9 @@ IF(UNIX)
    ./mysql-test-run.pl mysql-test-run
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
   ) 
-  IF(INSTALL_MYSQLTESTDIR)
-    INSTALL(FILES ${CMAKE_CURRENT_BINARY_DIR}/mtr 
-      ${CMAKE_CURRENT_BINARY_DIR}/mysql-test-run 
+  IF(INSTALL_MYSQLTESTDIR AND out_of_source_build)
+    INSTALL(FILES ${CMAKE_CURRENT_BINARY_DIR}/mtr
+      ${CMAKE_CURRENT_BINARY_DIR}/mysql-test-run
       DESTINATION ${INSTALL_MYSQLTESTDIR}
       COMPONENT Test)
   ENDIF()

@@ -1,4 +1,5 @@
 # Copyright (c) 2010, 2011, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2011, 2018, MariaDB Corporation
 # 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,7 +12,7 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA 
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335  USA 
 
 # This file includes build settings used for MySQL release
 
@@ -27,7 +28,10 @@ ENDIF()
 IF(SIZEOF_VOIDP EQUAL 8)
   SET(64BIT 1)
 ENDIF()
- 
+
+# include aws_key_management plugin in release builds
+OPTION(AWS_SDK_EXTERNAL_PROJECT  "Allow download and build AWS C++ SDK" ON)
+
 SET(FEATURE_SET "community" CACHE STRING 
 " Selection of features. Options are
  - xsmall : 
@@ -59,7 +63,7 @@ IF(FEATURE_SET)
     SET(WITH_NONE ON)
   ENDIF()
   
-  IF(num GREATER FEATURE_SET_xsmall)
+  IF(num GREATER FEATURE_SET_xsmall AND NOT WIN32)
     SET(WITH_EMBEDDED_SERVER ON CACHE BOOL "")
   ENDIF()
   IF(num GREATER FEATURE_SET_small)
@@ -82,19 +86,55 @@ IF(FEATURE_SET)
   ENDIF()
 ENDIF()
 
-OPTION(ENABLED_LOCAL_INFILE "" ON)
-IF(RPM)
+SET(WITH_INNODB_SNAPPY OFF CACHE STRING "")
+SET(WITH_NUMA 0 CACHE BOOL "")
+SET(CPU_LEVEL1_DCACHE_LINESIZE 0)
+
+IF(NOT EXISTS ${CMAKE_SOURCE_DIR}/.git)
+  SET(GIT_EXECUTABLE GIT_EXECUTABLE-NOTFOUND CACHE FILEPATH "")
+ENDIF()
+
+IF(WIN32)
+  SET(INSTALL_MYSQLTESTDIR "" CACHE STRING "")
+  SET(INSTALL_SQLBENCHDIR  "" CACHE STRING "")
+  SET(INSTALL_SUPPORTFILESDIR ""  CACHE STRING "")
+ELSEIF(RPM)
   SET(WITH_SSL system CACHE STRING "")
   SET(WITH_ZLIB system CACHE STRING "")
+  SET(CHECKMODULE /usr/bin/checkmodule CACHE FILEPATH "")
+  SET(SEMODULE_PACKAGE /usr/bin/semodule_package CACHE FILEPATH "")
+  SET(WITH_JEMALLOC "yes" CACHE STRING "")
+  IF(RPM MATCHES "fedora|centos|rhel")
+    SET(WITH_INNODB_BZIP2 OFF CACHE STRING "")
+    SET(WITH_INNODB_LZO OFF CACHE STRING "")
+    SET(WITH_ROCKSDB_BZip2 OFF CACHE STRING "")
+  ENDIF()
+  IF(RPM MATCHES "opensuse|sles|centos|rhel")
+    SET(WITH_INNODB_LZ4 OFF CACHE STRING "")
+    SET(WITH_ROCKSDB_LZ4 OFF CACHE STRING "")
+    SET(GRN_WITH_LZ4 no CACHE STRING "")
+  ENDIF()
 ELSEIF(DEB)
   SET(WITH_SSL system CACHE STRING "")
   SET(WITH_ZLIB system CACHE STRING "")
   SET(WITH_LIBWRAP ON)
   SET(HAVE_EMBEDDED_PRIVILEGE_CONTROL ON)
+  SET(WITH_JEMALLOC "yes" CACHE STRING "")
+  SET(WITH_INNODB_BZIP2 OFF CACHE STRING "")
+  SET(WITH_INNODB_LZMA OFF CACHE STRING "")
+  SET(WITH_INNODB_LZO OFF CACHE STRING "")
+  SET(WITH_ROCKSDB_BZip2 OFF CACHE STRING "")
 ELSE()
   SET(WITH_SSL bundled CACHE STRING "")
+  SET(WITH_PCRE bundled CACHE STRING "")
   SET(WITH_ZLIB bundled CACHE STRING "")
   SET(WITH_JEMALLOC static CACHE STRING "")
+  SET(WITH_INNODB_BZIP2 OFF CACHE STRING "")
+  SET(WITH_INNODB_LZ4 OFF CACHE STRING "")
+  SET(WITH_INNODB_LZO OFF CACHE STRING "")
+  SET(WITH_ROCKSDB_BZip2 OFF CACHE STRING "")
+  SET(WITH_ROCKSDB_LZ4 OFF CACHE STRING "")
+  SET(GRN_WITH_LZ4 no CACHE STRING "")
 ENDIF()
 
 IF(NOT COMPILATION_COMMENT)
@@ -110,6 +150,7 @@ ENDIF()
 
 IF(UNIX)
   SET(WITH_EXTRA_CHARSETS all CACHE STRING "")
+  SET(PLUGIN_AUTH_PAM YES CACHE BOOL "")
 
   IF(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     IF(NOT IGNORE_AIO_CHECK)
@@ -124,7 +165,7 @@ IF(UNIX)
           RedHat/Fedora/Oracle Linux: yum install libaio-devel
           SuSE:                       zypper install libaio-devel
 
-        If you really do not want it, pass -DIGNORE_AIO_CHECK to cmake.
+          If you really do not want it, pass -DIGNORE_AIO_CHECK=ON to cmake.
         ")
       ENDIF()
 

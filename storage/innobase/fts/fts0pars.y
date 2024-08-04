@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2007, 2014,  Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2007, 2014, Oracle and/or its affiliates. All rights reserved.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +12,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -24,18 +24,19 @@ this program; if not, write to the Free Software Foundation, Inc.,
  */
 
 %{
-
+#include "ha_prototypes.h"
 #include "mem0mem.h"
 #include "fts0ast.h"
 #include "fts0blex.h"
 #include "fts0tlex.h"
 #include "fts0pars.h"
+#include <my_sys.h>
 
 extern	int fts_lexer(YYSTYPE*, fts_lexer_t*);
 extern	int fts_blexer(YYSTYPE*, yyscan_t);
 extern	int fts_tlexer(YYSTYPE*, yyscan_t);
 
-typedef int (*fts_scan)();
+
 
 extern int ftserror(const char* p);
 
@@ -48,8 +49,8 @@ extern int ftserror(const char* p);
 #define YYPARSE_PARAM state
 #define YYLEX_PARAM ((fts_ast_state_t*) state)->lexer
 
-typedef	int	(*fts_scanner_alt)(YYSTYPE* val, yyscan_t yyscanner);
-typedef	int	(*fts_scanner)();
+
+typedef	int	(*fts_scanner)(YYSTYPE* val, yyscan_t yyscanner);
 
 struct fts_lexer_struct {
 	fts_scanner	scanner;
@@ -139,7 +140,7 @@ expr	: term		{
 	}
 
 	| text '@' FTS_NUMB {
-		fts_ast_term_set_distance($1, fts_ast_string_to_ul($3, 10));
+		fts_ast_text_set_distance($1, fts_ast_string_to_ul($3, 10));
 		fts_ast_string_free($3);
 	}
 
@@ -157,7 +158,7 @@ expr	: term		{
 	| prefix text '@' FTS_NUMB {
 		$$ = fts_ast_create_node_list(state, $1);
 		fts_ast_add_node($$, $2);
-		fts_ast_term_set_distance($2, fts_ast_string_to_ul($4, 10));
+		fts_ast_text_set_distance($2, fts_ast_string_to_ul($4, 10));
 		fts_ast_string_free($4);
 	}
 
@@ -224,7 +225,6 @@ ftserror(
 
 /********************************************************************
 Create a fts_lexer_t instance.*/
-
 fts_lexer_t*
 fts_lexer_create(
 /*=============*/
@@ -233,18 +233,18 @@ fts_lexer_create(
 	ulint		query_len)
 {
 	fts_lexer_t*	fts_lexer = static_cast<fts_lexer_t*>(
-		ut_malloc(sizeof(fts_lexer_t)));
+		ut_malloc_nokey(sizeof(fts_lexer_t)));
 
 	if (boolean_mode) {
 		fts0blex_init(&fts_lexer->yyscanner);
-		fts0b_scan_bytes((char*) query, query_len, fts_lexer->yyscanner);
-		fts_lexer->scanner = (fts_scan) fts_blexer;
+		fts0b_scan_bytes((char*) query, (int) query_len, fts_lexer->yyscanner);
+		fts_lexer->scanner = fts_blexer;
 		/* FIXME: Debugging */
 		/* fts0bset_debug(1 , fts_lexer->yyscanner); */
 	} else {
 		fts0tlex_init(&fts_lexer->yyscanner);
-		fts0t_scan_bytes((char*) query, query_len, fts_lexer->yyscanner);
-		fts_lexer->scanner = (fts_scan) fts_tlexer;
+		fts0t_scan_bytes((char*) query, (int) query_len, fts_lexer->yyscanner);
+		fts_lexer->scanner = fts_tlexer;
 	}
 
 	return(fts_lexer);
@@ -258,7 +258,7 @@ fts_lexer_free(
 /*===========*/
 	fts_lexer_t*	fts_lexer)
 {
-	if (fts_lexer->scanner == (fts_scan) fts_blexer) {
+	if (fts_lexer->scanner == fts_blexer) {
 		fts0blex_destroy(fts_lexer->yyscanner);
 	} else {
 		fts0tlex_destroy(fts_lexer->yyscanner);
@@ -269,16 +269,15 @@ fts_lexer_free(
 
 /********************************************************************
 Call the appropaiate scanner.*/
-
 int
 fts_lexer(
 /*======*/
 	YYSTYPE*	val,
 	fts_lexer_t*	fts_lexer)
 {
-	fts_scanner_alt func_ptr;
+	fts_scanner func_ptr;
 
-	func_ptr = (fts_scanner_alt) fts_lexer->scanner;
+	func_ptr = fts_lexer->scanner;
 
 	return(func_ptr(val, fts_lexer->yyscanner));
 }

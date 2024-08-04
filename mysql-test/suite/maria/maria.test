@@ -6,6 +6,8 @@
 -- source include/have_maria.inc
 -- source include/have_partition.inc
 
+call mtr.add_suppression("Can't find record in '.*'");
+
 select * from INFORMATION_SCHEMA.ENGINES where ENGINE="ARIA";
 
 let $default_engine=`select @@global.storage_engine`;
@@ -63,7 +65,7 @@ disable_query_log;
 SET SQL_WARNINGS=0;
 while ($1)
 {
-  eval insert into t1 (b) values(repeat(char(65+$1),65550-$1));
+  eval insert ignore into t1 (b) values(repeat(char(65+$1),65550-$1));
   dec $1;
 }
 SET SQL_WARNINGS=1;
@@ -919,16 +921,20 @@ source include/varchar.inc;
 
 create table t1 (v varchar(65530), key(v));
 drop table if exists t1;
+set statement sql_mode = 'NO_ENGINE_SUBSTITUTION' for
 create table t1 (v varchar(65536));
 show create table t1;
 drop table t1;
+set statement sql_mode = 'NO_ENGINE_SUBSTITUTION' for
 create table t1 (v varchar(65530) character set utf8);
 show create table t1;
 drop table t1;
 
 # ARIA specific varchar tests
---error 1118
+set statement sql_mode='' for
 create table t1 (v varchar(65535));
+show create table t1;
+drop table t1;
 
 #
 # Test concurrent insert
@@ -1878,9 +1884,11 @@ drop table t1;
 #
 
 create table t1(a int primary key, b blob, c blob) engine=aria;
+set sql_mode='';
 insert into t1 values(1,repeat('a',100), repeat('b',657860));
 --error ER_DUP_ENTRY
 insert into t1 values(1,repeat('a',100), repeat('b',657860));
+set sql_mode=default;
 check table t1;
 drop table t1;
 
@@ -1967,6 +1975,55 @@ select count(*) from t1;
 drop table t1;
 
 --echo #
+--echo # MDEV-14690: Assertion `page_link == &fake_link' failed in
+--echo # pagecache_write_part
+--echo #
+
+CREATE TABLE t1 (a CHAR(8), b CHAR(8), c CHAR(8) NOT NULL DEFAULT '', f FLOAT, KEY(f)) ENGINE=Aria;
+INSERT INTO t1 (a) VALUES ('foo');
+DELETE FROM t1 WHERE c < 'bar';
+ALTER TABLE t1 DISABLE KEYS;
+INSERT INTO t1 (b) VALUES ('');
+ALTER TABLE t1 ENABLE KEYS;
+
+# Cleanup
+DROP TABLE t1;
+
+--echo #
+--echo # Start of 5.5 tests
+--echo #
+
+--echo #
+--echo # MDEV-16534 PPC64: Unexpected error with a negative values into auto-increment columns in HEAP, MyISAM, ARIA
+--echo #
+
+CREATE TABLE t1 (
+  id TINYINT NOT NULL AUTO_INCREMENT,
+  name CHAR(30) NOT NULL,
+  PRIMARY KEY (id)
+) ENGINE=ARIA;
+SHOW CREATE TABLE t1;
+INSERT INTO t1 (name) VALUES ('dog');
+UPDATE t1 SET id=-1 WHERE id=1;
+INSERT INTO t1 (name) VALUES ('cat');
+SELECT * FROM t1;
+DROP TABLE t1;
+
+#
+# MDEV-16682
+# Assertion `(buff[7] & 7) == HEAD_PAGE' failed.
+#
+
+CREATE TABLE t1 (pk int, i2 int) ENGINE=Aria;
+INSERT INTO t1 VALUES (1,2), (2,3),(3,4);
+DELETE FROM tt.*, t1.* USING t1 AS tt LEFT JOIN t1 ON (tt.i2 = t1.pk);
+DROP TABLE t1;
+
+--echo #
+--echo # End of 5.5 tests
+--echo #
+
+--echo #
 --echo # BUG#47444 - --myisam_repair_threads > 1 can result in all index
 --echo #             cardinalities=1
 --echo #
@@ -2013,6 +2070,19 @@ SET aria_sort_buffer_size=@@global.aria_sort_buffer_size;
 DROP TABLE t1;
 
 #
+# Check FLUSH FOR EXPORT
+#
+
+CREATE TABLE t1(a INT, b CHAR(10), KEY(a), KEY(b));
+INSERT INTO t1 VALUES(1,'0'),(2,'0'),(3,'0'),(4,'0'),(5,'0'),
+                     (6,'0'),(7,'0');
+flush tables test.t1 for export;
+--error ER_TABLE_NOT_LOCKED_FOR_WRITE
+insert into t1 values (8,'0');
+unlock tables;
+drop table t1;
+
+#
 # End of test
 #
 # Set defaults back
@@ -2023,3 +2093,16 @@ aria_page_checksum=$default_checksum,
 aria_log_file_size=$default_log_file_size;
 --enable_result_log
 --enable_query_log
+
+--echo #
+--echo # MDEV-22284 Aria table key read crash because wrong index used
+--echo #
+create table t1 (
+    a int auto_increment,
+    b int, c int,
+    key(c, a), unique(b)
+) engine aria
+partition by hash (b);
+replace into t1 values (1, 0, 0), (2, 0, 0), (0, 0, 0);
+# cleanup
+drop table t1;

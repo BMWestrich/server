@@ -14,7 +14,7 @@
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
-   02110-1301  USA */
+   02110-1335  USA */
 
 /*
   Replace strings in textfile
@@ -36,7 +36,7 @@
   The programs make a DFA-state-machine of the strings and the speed isn't
   dependent on the count of replace-strings (only of the number of replaces).
   A line is assumed ending with \n or \0.
-  There are no limit exept memory on length of strings.
+  There are no limit except memory on length of strings.
 
   Written by Monty.
   fill_buffer_retaining() is taken from gnu-grep and modified.
@@ -174,6 +174,7 @@ register char **argv[];
 	break;
       case 'V':
 	version=1;
+        /* fall through */
       case 'I':
       case '?':
 	help=1;					/* Help text written */

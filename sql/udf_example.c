@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /*
 ** example file of UDF (user definable functions) that are dynamicly loaded
@@ -1095,7 +1095,7 @@ my_bool is_const_init(UDF_INIT *initid, UDF_ARGS *args, char *message)
     strmov(message, "IS_CONST accepts only one argument");
     return 1;
   }
-  initid->ptr= (char*)((args->args[0] != NULL) ? 1UL : 0);
+  initid->ptr= (char*)((args->args[0] != NULL) ? (size_t)1 : (size_t)0);
   return 0;
 }
 

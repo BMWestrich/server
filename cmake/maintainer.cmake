@@ -1,4 +1,5 @@
 # Copyright (c) 2010, 2014, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2011, 2021, MariaDB
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,51 +12,48 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA
+
+IF(MYSQL_MAINTAINER_MODE STREQUAL "NO")
+  RETURN()
+ENDIF()
 
 # Common warning flags for GCC, G++, Clang and Clang++
-SET(MY_WARNING_FLAGS "-Wall -Wextra -Wformat-security -Wno-init-self")
-MY_CHECK_C_COMPILER_FLAG("-Wvla") # Requires GCC 4.3+ or Clang
-IF(have_C__Wvla)
-  SET(MY_WARNING_FLAGS "${MY_WARNING_FLAGS} -Wvla")
+SET(MY_WARNING_FLAGS
+  -Wall
+  -Wdeclaration-after-statement
+  -Wextra
+  -Wformat-security
+  -Wno-format-truncation
+  -Wno-init-self
+  -Wno-nonnull-compare
+  -Wno-null-conversion
+  -Wno-unused-parameter
+  -Wno-unused-private-field
+  -Woverloaded-virtual
+  -Wvla
+  -Wwrite-strings
+  )
+
+FOREACH(F ${MY_WARNING_FLAGS})
+  MY_CHECK_AND_SET_COMPILER_FLAG(${F} DEBUG RELWITHDEBINFO)
+ENDFOREACH()
+
+SET(MY_ERROR_FLAGS -Werror)
+
+IF(CMAKE_COMPILER_IS_GNUCC AND CMAKE_C_COMPILER_VERSION VERSION_LESS "6.0.0")
+  SET(MY_ERROR_FLAGS ${MY_ERROR_FLAGS} -Wno-error=maybe-uninitialized)
 ENDIF()
 
-# Common warning flags for GCC and Clang
-SET(MY_C_WARNING_FLAGS
-    "${MY_WARNING_FLAGS} -Wwrite-strings -Wdeclaration-after-statement")
-
-# Common warning flags for G++ and Clang++
-SET(MY_CXX_WARNING_FLAGS
-    "${MY_WARNING_FLAGS} -Woverloaded-virtual -Wno-unused-parameter")
-
-# Extra warning flags for Clang++
-IF(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  SET(MY_CXX_WARNING_FLAGS
-      "${MY_CXX_WARNING_FLAGS} -Wno-null-conversion -Wno-unused-private-field")
-ENDIF()
-
-# Turn on Werror (warning => error) when using maintainer mode.
-IF(MYSQL_MAINTAINER_MODE MATCHES "ERR")
-  SET(MY_C_WARNING_FLAGS "${MY_C_WARNING_FLAGS} -DFORCE_INIT_OF_VARS -Werror")
-  SET(MY_CXX_WARNING_FLAGS "${MY_CXX_WARNING_FLAGS} -DFORCE_INIT_OF_VARS -Werror")
-ENDIF()
-
-# Set warning flags for GCC/Clang
-IF(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
-  SET(MY_MAINTAINER_C_WARNINGS "${MY_C_WARNING_FLAGS}")
-ENDIF()
-# Set warning flags for G++/Clang++
-IF(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-  SET(MY_MAINTAINER_CXX_WARNINGS "${MY_CXX_WARNING_FLAGS}")
-ENDIF()
-
-IF(MYSQL_MAINTAINER_MODE MATCHES "ON")
-  SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${MY_MAINTAINER_C_WARNINGS}")
-  SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${MY_MAINTAINER_CXX_WARNINGS}")
+IF(MYSQL_MAINTAINER_MODE MATCHES "OFF|WARN")
+  RETURN()
 ELSEIF(MYSQL_MAINTAINER_MODE MATCHES "AUTO")
-  SET(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} ${MY_MAINTAINER_C_WARNINGS}")
-  SET(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} ${MY_MAINTAINER_CXX_WARNINGS}")
+  SET(WHERE DEBUG)
 ENDIF()
+
+FOREACH(F ${MY_ERROR_FLAGS})
+  MY_CHECK_AND_SET_COMPILER_FLAG(${F} ${WHERE})
+ENDFOREACH()
 
 IF(CMAKE_C_COMPILER_ID MATCHES "GNU")
   STRING(REPLACE " -E " " -E -dDI " CMAKE_C_CREATE_PREPROCESSED_SOURCE ${CMAKE_C_CREATE_PREPROCESSED_SOURCE})

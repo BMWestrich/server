@@ -14,7 +14,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 /* ======================================================================
    Open Query Graph Computation Engine, based on a concept by Arjen Lentz
@@ -63,7 +63,7 @@
 #ifdef VERBOSE_DEBUG
 #else
 #undef DBUG_PRINT
-#define DBUG_PRINT(x ...)
+#define DBUG_PRINT(x,y)
 #endif
 
 #ifdef RETAIN_INT_LATCH_COMPATIBILITY
@@ -623,9 +623,8 @@ int ha_oqgraph::open(const char *name, int mode, uint test_if_locked)
   }
 
   if (enum open_frm_error err= open_table_from_share(thd, share, "",
-                            (uint) (HA_OPEN_KEYFILE | HA_OPEN_RNDFILE |
-                                    HA_GET_INDEX | HA_TRY_READ_ONLY),
-                            READ_KEYINFO | COMPUTE_TYPES | EXTRA_RECORD,
+                            (uint) (HA_OPEN_KEYFILE | HA_TRY_READ_ONLY),
+                            EXTRA_RECORD,
                             thd->open_options, edges, FALSE))
   {
     open_table_error(share, err, EMFILE); // NOTE - EMFILE is probably bogus, it reports as too many open files (!)
@@ -663,7 +662,7 @@ int ha_oqgraph::open(const char *name, int mode, uint test_if_locked)
     {
       fprint_error("Column '%s.%s' (origid) is not a not-null integer type",
           options->table_name, options->origid);
-      closefrm(edges, 0);
+      closefrm(edges);
       free_table_share(share);
       DBUG_RETURN(-1);
     }
@@ -673,7 +672,7 @@ int ha_oqgraph::open(const char *name, int mode, uint test_if_locked)
 
   if (!origid) {
     fprint_error("Invalid OQGRAPH backing store ('%s.origid' attribute not set to a valid column of '%s')", p+1, options->table_name);
-    closefrm(edges, 0);
+    closefrm(edges);
     free_table_share(share);
     DBUG_RETURN(-1);
   }
@@ -688,7 +687,7 @@ int ha_oqgraph::open(const char *name, int mode, uint test_if_locked)
     {
       fprint_error("Column '%s.%s' (destid) is not a not-null integer type or is a different type to origid attribute.",
           options->table_name, options->destid);
-      closefrm(edges, 0);
+      closefrm(edges);
       free_table_share(share);
       DBUG_RETURN(-1);
     }
@@ -698,7 +697,7 @@ int ha_oqgraph::open(const char *name, int mode, uint test_if_locked)
 
   if (!destid) {
     fprint_error("Invalid OQGRAPH backing store ('%s.destid' attribute not set to a valid column of '%s')", p+1, options->table_name);
-    closefrm(edges, 0);
+    closefrm(edges);
     free_table_share(share);
     DBUG_RETURN(-1);
   }
@@ -706,7 +705,7 @@ int ha_oqgraph::open(const char *name, int mode, uint test_if_locked)
   // Make sure origid column != destid column
   if (strcmp( origid->field_name, destid->field_name)==0) {
     fprint_error("Invalid OQGRAPH backing store ('%s.destid' attribute set to same column as origid attribute)", p+1, options->table_name);
-    closefrm(edges, 0);
+    closefrm(edges);
     free_table_share(share);
     DBUG_RETURN(-1);
   }
@@ -720,7 +719,7 @@ int ha_oqgraph::open(const char *name, int mode, uint test_if_locked)
     {
       fprint_error("Column '%s.%s' (weight) is not a not-null real type",
           options->table_name, options->weight);
-      closefrm(edges, 0);
+      closefrm(edges);
       free_table_share(share);
       DBUG_RETURN(-1);
     }
@@ -730,7 +729,7 @@ int ha_oqgraph::open(const char *name, int mode, uint test_if_locked)
 
   if (!weight && options->weight) {
     fprint_error("Invalid OQGRAPH backing store ('%s.weight' attribute not set to a valid column of '%s')", p+1, options->table_name);
-    closefrm(edges, 0);
+    closefrm(edges);
     free_table_share(share);
     DBUG_RETURN(-1);
   }
@@ -738,7 +737,7 @@ int ha_oqgraph::open(const char *name, int mode, uint test_if_locked)
   if (!(graph_share = oqgraph::create(edges, origid, destid, weight)))
   {
     fprint_error("Unable to create graph instance.");
-    closefrm(edges, 0);
+    closefrm(edges);
     free_table_share(share);
     DBUG_RETURN(-1);
   }
@@ -753,13 +752,17 @@ int ha_oqgraph::open(const char *name, int mode, uint test_if_locked)
 int ha_oqgraph::close(void)
 {
   DBUG_PRINT( "oq-debug", ("close()"));
+  if (graph->get_thd() != current_thd) {
+    DBUG_PRINT( "oq-debug", ("index_next_same g->table->in_use: 0x%lx <-- current_thd 0x%lx", (long) graph->get_thd(), (long) current_thd));
+    graph->set_thd(current_thd);
+  }
   oqgraph::free(graph); graph= 0;
   oqgraph::free(graph_share); graph_share= 0;
 
   if (have_table_share)
   {
     if (edges->file)
-      closefrm(edges, 0);
+      closefrm(edges);
     free_table_share(share);
     have_table_share = false;
   }
@@ -904,7 +907,7 @@ int ha_oqgraph::index_read_idx(byte * buf, uint index, const byte * key,
   bmove_align(buf, table->s->default_values, table->s->reclength);
   key_restore(buf, (byte*) key, key_info, key_len);
 
-  my_bitmap_map *old_map= dbug_tmp_use_all_columns(table, table->read_set);
+  MY_BITMAP *old_map= dbug_tmp_use_all_columns(table, &table->read_set);
   my_ptrdiff_t ptrdiff= buf - table->record[0];
 
   if (ptrdiff)
@@ -933,7 +936,7 @@ int ha_oqgraph::index_read_idx(byte * buf, uint index, const byte * key,
           field[1]->move_field_offset(-ptrdiff);
           field[2]->move_field_offset(-ptrdiff);
         }
-        dbug_tmp_restore_column_map(table->read_set, old_map);
+        dbug_tmp_restore_column_map(&table->read_set, old_map);
         return error_code(oqgraph::NO_MORE_DATA);
       }
     }
@@ -958,7 +961,7 @@ int ha_oqgraph::index_read_idx(byte * buf, uint index, const byte * key,
     field[1]->move_field_offset(-ptrdiff);
     field[2]->move_field_offset(-ptrdiff);
   }
-  dbug_tmp_restore_column_map(table->read_set, old_map);
+  dbug_tmp_restore_column_map(&table->read_set, old_map);
 
   // Keep the latch around so we can use it in the query result later -
   // See fill_record().
@@ -991,7 +994,7 @@ int ha_oqgraph::fill_record(byte *record, const open_query::row &row)
 
   bmove_align(record, table->s->default_values, table->s->reclength);
 
-  my_bitmap_map *old_map= dbug_tmp_use_all_columns(table, table->write_set);
+  MY_BITMAP *old_map= dbug_tmp_use_all_columns(table, &table->write_set);
   my_ptrdiff_t ptrdiff= record - table->record[0];
 
   if (ptrdiff)
@@ -1067,7 +1070,7 @@ int ha_oqgraph::fill_record(byte *record, const open_query::row &row)
     field[4]->move_field_offset(-ptrdiff);
     field[5]->move_field_offset(-ptrdiff);
   }
-  dbug_tmp_restore_column_map(table->write_set, old_map);
+  dbug_tmp_restore_column_map(&table->write_set, old_map);
 
   return 0;
 }
@@ -1132,6 +1135,10 @@ int ha_oqgraph::info(uint flag)
 
 int ha_oqgraph::extra(enum ha_extra_function operation)
 {
+  if (graph->get_thd() != ha_thd()) {
+    DBUG_PRINT( "oq-debug", ("rnd_pos g->table->in_use: 0x%lx <-- current_thd 0x%lx", (long) graph->get_thd(), (long) current_thd));
+    graph->set_thd(current_thd);
+  }
   return edges->file->extra(operation);
 }
 
@@ -1372,6 +1379,6 @@ maria_declare_plugin(oqgraph)
   oqgraph_status,                /* status variables             */
   oqgraph_sysvars,               /* system variables             */
   "3.0",
-  MariaDB_PLUGIN_MATURITY_BETA
+  MariaDB_PLUGIN_MATURITY_GAMMA
 }
 maria_declare_plugin_end;

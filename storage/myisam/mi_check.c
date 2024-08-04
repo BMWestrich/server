@@ -1,4 +1,4 @@
-/* Copyright (c) 2000, 2013, Oracle and/or its affiliates.
+/* Copyright (c) 2000, 2018, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /* Describe, check and repair of MyISAM tables */
 
@@ -75,7 +75,7 @@ static int sort_delete_record(MI_SORT_PARAM *sort_param);
 static SORT_KEY_BLOCKS	*alloc_key_blocks(HA_CHECK *, uint, uint);
 static ha_checksum mi_byte_checksum(const uchar *buf, uint length);
 static void set_data_file_type(MI_SORT_INFO *sort_info, MYISAM_SHARE *share);
-static int replace_data_file(HA_CHECK *, MI_INFO *, const char *, File);
+static int replace_data_file(HA_CHECK *param, MI_INFO *info, File new_file);
 
 void myisamchk_init(HA_CHECK *param)
 {
@@ -283,7 +283,7 @@ static int check_k_link(HA_CHECK *param, register MI_INFO *info, uint nr)
     /*
       Read the key block with MI_MIN_KEY_BLOCK_LENGTH to find next link.
       If the key cache block size is smaller than block_size, we can so
-      avoid unecessary eviction of cache block.
+      avoid unnecessary eviction of cache block.
     */
     if (!(buff=key_cache_read(info->s->key_cache,
                               info->s->kfile, next_link, DFLT_INIT_HITS,
@@ -1190,6 +1190,8 @@ int chk_data_link(HA_CHECK *param, MI_INFO *info, my_bool extend)
       DBUG_ASSERT(0);                           /* Impossible */
       break;
     } /* switch */
+    if (param->fix_record)
+      param->fix_record(info, record, -1);
     if (! got_error)
     {
       intern_record_checksum+=(ha_checksum) start_recpos;
@@ -1584,6 +1586,8 @@ int mi_repair(HA_CHECK *param, register MI_INFO *info,
   sort_param.filepos=new_header_length;
   param->read_cache.end_of_file=sort_info.filelength=
     mysql_file_seek(info->dfile, 0L, MY_SEEK_END, MYF(0));
+  if (info->state->data_file_length == 0)
+    info->state->data_file_length= sort_info.filelength;
   sort_info.dupp=0;
   sort_param.fix_datafile= (my_bool) (! rep_quick);
   sort_param.master=1;
@@ -1708,7 +1712,7 @@ err:
     /* Replace the actual file with the temporary file */
     if (new_file >= 0)
     {
-      got_error= replace_data_file(param, info, name, new_file);
+      got_error= replace_data_file(param, info, new_file);
       new_file= -1;
       param->retry_repair= 0;
     }
@@ -1894,7 +1898,7 @@ int flush_blocks(HA_CHECK *param, KEY_CACHE *key_cache, File file,
 } /* flush_blocks */
 
 
-	/* Sort index for more efficent reads */
+	/* Sort index for more efficient reads */
 
 int mi_sort_index(HA_CHECK *param, register MI_INFO *info, char * name)
 {
@@ -2207,7 +2211,7 @@ int mi_repair_by_sort(HA_CHECK *param, register MI_INFO *info,
     printf("- recovering (with sort) MyISAM-table '%s'\n",name);
     printf("Data records: %s\n", llstr(start_records,llbuff));
   }
-  param->testflag|=T_REP; /* for easy checking */
+  param->testflag|=T_REP_BY_SORT; /* for easy checking */
   param->retry_repair= 0;
   param->warning_printed= param->error_printed= param->note_printed= 0;
 
@@ -2288,6 +2292,8 @@ int mi_repair_by_sort(HA_CHECK *param, register MI_INFO *info,
   sort_info.buff=0;
   param->read_cache.end_of_file=sort_info.filelength=
     mysql_file_seek(param->read_cache.file, 0L, MY_SEEK_END, MYF(0));
+  if (info->state->data_file_length == 0)
+    info->state->data_file_length= sort_info.filelength;
 
   sort_param.wordlist=NULL;
   init_alloc_root(&sort_param.wordroot, FTPARSER_MEMROOT_ALLOC_SIZE, 0,
@@ -2522,7 +2528,7 @@ err:
     /* Replace the actual file with the temporary file */
     if (new_file >= 0)
     {
-      got_error= replace_data_file(param, info, name, new_file);
+      got_error= replace_data_file(param, info, new_file);
       new_file= -1;
     }
   }
@@ -2536,7 +2542,7 @@ err:
       (void) mysql_file_delete(mi_key_file_datatmp,
                                param->temp_filename, MYF(MY_WME));
       if (info->dfile == new_file) /* Retry with key cache */
-        if (unlikely(mi_open_datafile(info, share, name, -1)))
+        if (unlikely(mi_open_datafile(info, share)))
           param->retry_repair= 0; /* Safety */
     }
     mi_mark_crashed_on_repair(info);
@@ -2608,7 +2614,7 @@ int mi_repair_parallel(HA_CHECK *param, register MI_INFO *info,
 			const char * name, int rep_quick)
 {
   int got_error;
-  uint i,key, total_key_length, istep;
+  uint i,key, istep;
   ulong rec_length;
   ha_rows start_records;
   my_off_t new_header_length,del;
@@ -2637,7 +2643,7 @@ int mi_repair_parallel(HA_CHECK *param, register MI_INFO *info,
     printf("- parallel recovering (with sort) MyISAM-table '%s'\n",name);
     printf("Data records: %s\n", llstr(start_records,llbuff));
   }
-  param->testflag|=T_REP; /* for easy checking */
+  param->testflag|=T_REP_PARALLEL; /* for easy checking */
   param->retry_repair= 0;
   param->warning_printed= 0;
   param->error_printed= 0;
@@ -2675,6 +2681,8 @@ int mi_repair_parallel(HA_CHECK *param, register MI_INFO *info,
   */
   DBUG_PRINT("info", ("is quick repair: %d", rep_quick));
   bzero((char*)&sort_info,sizeof(sort_info));
+  if (!rep_quick)
+    my_b_clear(&new_data_cache);
   /* Initialize pthread structures before goto err. */
   mysql_mutex_init(mi_key_mutex_MI_SORT_INFO_mutex,
                    &sort_info.mutex, MY_MUTEX_INIT_FAST);
@@ -2753,6 +2761,8 @@ int mi_repair_parallel(HA_CHECK *param, register MI_INFO *info,
   sort_info.buff=0;
   param->read_cache.end_of_file=sort_info.filelength=
     mysql_file_seek(param->read_cache.file, 0L, MY_SEEK_END, MYF(0));
+  if (info->state->data_file_length == 0)
+    info->state->data_file_length= sort_info.filelength;
 
   if (share->data_file_type == DYNAMIC_RECORD)
     rec_length=MY_MAX(share->base.min_pack_length+1,share->base.min_block_length);
@@ -2779,7 +2789,7 @@ int mi_repair_parallel(HA_CHECK *param, register MI_INFO *info,
   del=info->state->del;
   param->glob_crc=0;
   /* for compressed tables */
-  max_pack_reclength= share->base.pack_reclength;
+  max_pack_reclength= MY_MAX(share->base.pack_reclength, share->vreclength);
   if (share->options & HA_OPTION_COMPRESS_RECORD)
     set_if_bigger(max_pack_reclength, share->max_pack_length);
   if (!(sort_param=(MI_SORT_PARAM *)
@@ -2790,7 +2800,9 @@ int mi_repair_parallel(HA_CHECK *param, register MI_INFO *info,
     mi_check_print_error(param,"Not enough memory for key!");
     goto err;
   }
-  total_key_length=0;
+#ifdef USING_SECOND_APPROACH
+  uint total_key_length=0;
+#endif
   rec_per_key_part= param->rec_per_key_part;
   info->state->records=info->state->del=share->state.split=0;
   info->state->empty=0;
@@ -2859,7 +2871,9 @@ int mi_repair_parallel(HA_CHECK *param, register MI_INFO *info,
       if (keyseg->flag & HA_NULL_PART)
         sort_param[i].key_length++;
     }
+#ifdef USING_SECOND_APPROACH
     total_key_length+=sort_param[i].key_length;
+#endif
 
     if (sort_param[i].keyinfo->flag & HA_FULLTEXT)
     {
@@ -2912,8 +2926,8 @@ int mi_repair_parallel(HA_CHECK *param, register MI_INFO *info,
     */
     sort_param[i].read_cache= ((rep_quick || !i) ? param->read_cache :
                                new_data_cache);
-    DBUG_PRINT("io_cache_share", ("thread: %u  read_cache: 0x%lx",
-                                  i, (long) &sort_param[i].read_cache));
+    DBUG_PRINT("io_cache_share", ("thread: %u  read_cache: %p",
+                                  i, &sort_param[i].read_cache));
 
     /*
       two approaches: the same amount of memory for each thread
@@ -3045,23 +3059,23 @@ err:
   /*
     Destroy the write cache. The master thread did already detach from
     the share by remove_io_thread() or it was not yet started (if the
-    error happend before creating the thread).
+    error happened before creating the thread).
   */
   (void) end_io_cache(&info->rec_cache);
   /*
     Destroy the new data cache in case of non-quick repair. All slave
     threads did either detach from the share by remove_io_thread()
-    already or they were not yet started (if the error happend before
+    already or they were not yet started (if the error happened before
     creating the threads).
   */
-  if (!rep_quick)
+  if (!rep_quick && my_b_inited(&new_data_cache))
     (void) end_io_cache(&new_data_cache);
   if (!got_error)
   {
     /* Replace the actual file with the temporary file */
     if (new_file >= 0)
     {
-      got_error= replace_data_file(param, info, name, new_file);
+      got_error= replace_data_file(param, info, new_file);
       new_file= -1;
     }
   }
@@ -3075,7 +3089,7 @@ err:
       (void) mysql_file_delete(mi_key_file_datatmp,
                                param->temp_filename, MYF(MY_WME));
       if (info->dfile == new_file) /* Retry with key cache */
-        if (unlikely(mi_open_datafile(info, share, name, -1)))
+        if (unlikely(mi_open_datafile(info, share)))
           param->retry_repair= 0; /* Safety */
     }
     mi_mark_crashed_on_repair(info);
@@ -3124,6 +3138,7 @@ static int sort_key_read(MI_SORT_PARAM *sort_param, void *key)
   }
   if (info->state->records == sort_info->max_records)
   {
+    my_errno= HA_ERR_WRONG_IN_RECORD;
     mi_check_print_error(sort_info->param,
 			 "Key %d - Found too many records; Can't continue",
                          sort_param->key+1);
@@ -3268,12 +3283,9 @@ static int sort_get_next_record(MI_SORT_PARAM *sort_param)
       sort_param->max_pos=(sort_param->pos+=share->base.pack_reclength);
       if (*sort_param->record)
       {
-	if (sort_param->calc_checksum)
-	  param->glob_crc+= (info->checksum=
-                             (*info->s->calc_check_checksum)(info,
-                                                             sort_param->
-                                                             record));
-	DBUG_RETURN(0);
+        if (sort_param->calc_checksum)
+          info->checksum= (*info->s->calc_check_checksum)(info, sort_param->record);
+        goto finish;
       }
       if (!sort_param->fix_datafile && sort_param->master)
       {
@@ -3333,6 +3345,7 @@ static int sort_get_next_record(MI_SORT_PARAM *sort_param)
 	  param->error_printed=1;
           param->retry_repair=1;
           param->testflag|=T_RETRY_WITHOUT_QUICK;
+          my_errno= HA_ERR_WRONG_IN_RECORD;
 	  DBUG_RETURN(1);	/* Something wrong with data */
 	}
 	b_type=_mi_get_block_info(&block_info,-1,pos);
@@ -3555,7 +3568,7 @@ static int sort_get_next_record(MI_SORT_PARAM *sort_param)
 	if (sort_param->calc_checksum)
 	  info->checksum= (*info->s->calc_check_checksum)(info,
                                                           sort_param->record);
-	if ((param->testflag & (T_EXTEND | T_REP)) || searching)
+	if ((param->testflag & (T_EXTEND | T_REP_ANY)) || searching)
 	{
 	  if (_mi_rec_check(info, sort_param->record, sort_param->rec_buff,
                             sort_param->find_length,
@@ -3568,9 +3581,7 @@ static int sort_get_next_record(MI_SORT_PARAM *sort_param)
 	    goto try_next;
 	  }
 	}
-	if (sort_param->calc_checksum)
-	  param->glob_crc+= info->checksum;
-	DBUG_RETURN(0);
+        goto finish;
       }
       if (!searching)
         mi_check_print_info(param,"Key %d - Found wrong stored record at %s",
@@ -3593,6 +3604,7 @@ static int sort_get_next_record(MI_SORT_PARAM *sort_param)
 	param->error_printed=1;
         param->retry_repair=1;
         param->testflag|=T_RETRY_WITHOUT_QUICK;
+        my_errno= HA_ERR_WRONG_IN_RECORD;
 	DBUG_RETURN(1);		/* Something wrong with data */
       }
       sort_param->start_recpos=sort_param->pos;
@@ -3639,11 +3651,8 @@ static int sort_get_next_record(MI_SORT_PARAM *sort_param)
 			 block_info.rec_len);
       info->packed_length=block_info.rec_len;
       if (sort_param->calc_checksum)
-	param->glob_crc+= (info->checksum=
-                           (*info->s->calc_check_checksum)(info,
-                                                           sort_param->
-                                                           record));
-      DBUG_RETURN(0);
+	info->checksum= (*info->s->calc_check_checksum)(info, sort_param->record);
+      goto finish;
     }
     default:
       DBUG_ASSERT(0);                           /* Impossible */
@@ -3651,6 +3660,14 @@ static int sort_get_next_record(MI_SORT_PARAM *sort_param)
   }
   DBUG_ASSERT(0);                               /* Impossible */
   DBUG_RETURN(1);                               /* Impossible */
+finish:
+  if (sort_param->calc_checksum)
+    param->glob_crc+= info->checksum;
+  if (param->fix_record)
+    param->fix_record(info, sort_param->record,
+                      param->testflag & T_REP_BY_SORT ? (int)sort_param->key
+                                                      : -1);
+  DBUG_RETURN(0);
 }
 
 
@@ -3939,7 +3956,7 @@ static int sort_ft_key_write(MI_SORT_PARAM *sort_param, const void *a)
 
   if (ha_compare_text(sort_param->seg->charset,
                       ((uchar *)a)+1,a_len-1,
-                      (uchar*) ft_buf->lastkey+1,val_off-1, 0, 0)==0)
+                      (uchar*) ft_buf->lastkey+1,val_off-1, 0)==0)
   {
     if (!ft_buf->buf) /* store in second-level tree */
     {
@@ -3961,7 +3978,7 @@ static int sort_ft_key_write(MI_SORT_PARAM *sort_param, const void *a)
       key_block++;
     sort_info->key_block=key_block;
     sort_param->keyinfo=& sort_info->info->s->ft2_keyinfo;
-    ft_buf->count=((uchar*) ft_buf->buf - p)/val_len;
+    ft_buf->count=(int)((uchar*) ft_buf->buf - p)/val_len;
 
     /* flushing buffer to second-level tree */
     for (error=0; !error && p < (uchar*) ft_buf->buf; p+= val_len)
@@ -4468,6 +4485,10 @@ int update_state_info(HA_CHECK *param, MI_INFO *info,uint update)
     int error;
     uint r_locks=share->r_locks,w_locks=share->w_locks;
     share->r_locks= share->w_locks= share->tot_locks= 0;
+
+    DBUG_EXECUTE_IF("simulate_incorrect_share_wlock_value",
+                    DEBUG_SYNC_C("after_share_wlock_set_to_0"););
+
     error=_mi_writeinfo(info,WRITEINFO_NO_UNLOCK);
     share->r_locks=r_locks;
     share->w_locks=w_locks;
@@ -4509,7 +4530,7 @@ void update_auto_increment_key(HA_CHECK *param, MI_INFO *info,
     DBUG_VOID_RETURN;
   }
   if (!(param->testflag & T_SILENT) &&
-      !(param->testflag & T_REP))
+      !(param->testflag & T_REP_ANY))
     printf("Updating MyISAM file: %s\n", param->isam_file_name);
   /*
     We have to use an allocated buffer instead of info->rec_buff as 
@@ -4585,7 +4606,7 @@ void update_auto_increment_key(HA_CHECK *param, MI_INFO *info,
          keypart_k=c_k for arbitrary constants c_1 ... c_k) 
      
      = {assuming that values have uniform distribution and index contains all
-        tuples from the domain (or that {c_1, ..., c_k} tuple is choosen from
+        tuples from the domain (or that {c_1, ..., c_k} tuple is chosen from
         index tuples}
      
      = #tuples-in-the-index / #distinct-tuples-in-the-index.
@@ -4757,8 +4778,7 @@ int mi_make_backup_of_index(MI_INFO *info, time_t backup_time, myf flags)
 }
 
 
-static int replace_data_file(HA_CHECK *param, MI_INFO *info,
-                             const char *name, File new_file)
+static int replace_data_file(HA_CHECK *param, MI_INFO *info, File new_file)
 {
   MYISAM_SHARE *share=info->s;
 
@@ -4785,8 +4805,7 @@ static int replace_data_file(HA_CHECK *param, MI_INFO *info,
   */
   if (info->s->file_map)
   {
-    (void) my_munmap((char*) info->s->file_map,
-                     (size_t) info->s->mmaped_length);
+    (void) my_munmap((char*) info->s->file_map, info->s->mmaped_length);
     info->s->file_map= NULL;
   }
 
@@ -4794,7 +4813,7 @@ static int replace_data_file(HA_CHECK *param, MI_INFO *info,
                         DATA_TMP_EXT, param->backup_time,
                         (param->testflag & T_BACKUP_DATA ?
                          MYF(MY_REDEL_MAKE_BACKUP): MYF(0))) ||
-      mi_open_datafile(info, share, name, -1))
+      mi_open_datafile(info, share))
     return 1;
   return 0;
 }

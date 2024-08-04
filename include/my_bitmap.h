@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA */
 
 #ifndef _my_bitmap_h_
 #define _my_bitmap_h_
@@ -58,6 +58,7 @@ extern my_bool bitmap_is_overlapping(const MY_BITMAP *map1,
 extern my_bool bitmap_test_and_set(MY_BITMAP *map, uint bitmap_bit);
 extern my_bool bitmap_test_and_clear(MY_BITMAP *map, uint bitmap_bit);
 extern my_bool bitmap_fast_test_and_set(MY_BITMAP *map, uint bitmap_bit);
+extern my_bool bitmap_fast_test_and_clear(MY_BITMAP *map, uint bitmap_bit);
 extern my_bool bitmap_union_is_set_all(const MY_BITMAP *map1,
                                        const MY_BITMAP *map2);
 extern my_bool bitmap_exists_intersection(const MY_BITMAP **bitmap_array,

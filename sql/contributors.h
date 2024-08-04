@@ -15,7 +15,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335  USA */
 
 /* Structure of the name list */
 
@@ -36,20 +36,23 @@ struct show_table_contributors_st {
 */
 
 struct show_table_contributors_st show_table_contributors[]= {
-  /* MariaDB foundation members, in contribution, size , time order */
-  {"Booking.com", "http://www.booking.com", "Founding member of the MariaDB Foundation"},
-  {"MariaDB Corporation", "https://mariadb.com", "Founding member of the MariaDB Foundation"},
-  {"Auttomattic", "http://automattic.com", "Member of the MariaDB Foundation"},  
-  {"Parallels", "http://www.parallels.com/products/plesk", "Founding member of the MariaDB Foundation"},
-  {"Acronis", "http://www.acronis.com", "Member of the MariaDB Foundation"},
-
-  /* Smaller sponsors, newer per year */
-  {"Verkkokauppa.com", "Finland", "Sponsor of the MariaDB Foundation"},
-  {"Webyog", "Bangalore", "Sponsor of the MariaDB Foundation"},
-  {"Wikimedia Foundation", "USA", "Sponsor of the MariaDB Foundation"},
+  /* MariaDB foundation sponsors, in contribution, size , time order */
+  {"Alibaba Cloud", "https://www.alibabacloud.com/", "Platinum Sponsor of the MariaDB Foundation"},
+  {"Tencent Cloud", "https://cloud.tencent.com", "Platinum Sponsor of the MariaDB Foundation"},
+  {"Microsoft", "https://microsoft.com/", "Platinum Sponsor of the MariaDB Foundation"},
+  {"MariaDB Corporation", "https://mariadb.com", "Founding member, Platinum Sponsor of the MariaDB Foundation"},
+  {"ServiceNow", "https://servicenow.com", "Platinum Sponsor of the MariaDB Foundation"},
+  {"Intel", "https://www.intel.com", "Platinum Sponsor of the MariaDB Foundation"},
+  {"SIT", "https://sit.org", "Platinum Sponsor of the MariaDB Foundation"},
+  {"Visma", "https://visma.com", "Gold Sponsor of the MariaDB Foundation"},
+  {"DBS", "https://dbs.com", "Gold Sponsor of the MariaDB Foundation"},
+  {"IBM", "https://www.ibm.com", "Gold Sponsor of the MariaDB Foundation"},
+  {"Automattic", "https://automattic.com", "Silver Sponsor of the MariaDB Foundation"},
+  {"Percona", "https://www.percona.com/", "Sponsor of the MariaDB Foundation"},
+  {"Galera Cluster", "https://galeracluster.com", "Sponsor of the MariaDB Foundation"},
 
   /* Sponsors of important features */
-  {"Google", "USA", "Sponsoring parallel replication and GTID" },
+  {"Google", "USA", "Sponsoring encryption, parallel replication and GTID"},
   {"Facebook", "USA", "Sponsoring non-blocking API, LIMIT ROWS EXAMINED etc"},
 
   /* Individual contributors, names in historical order, newer first */

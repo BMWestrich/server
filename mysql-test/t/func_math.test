@@ -2,6 +2,8 @@
 # Test of math functions
 #
 
+--source include/default_charset.inc
+
 --disable_warnings                                                              
 drop table if exists t1;                                                        
 --enable_warnings                                                               
@@ -193,7 +195,7 @@ insert into t2 values (16777216,16787215,1),(33554432,33564431,2);
 select format(t2.f2-t2.f1+1,0) from t1,t2
 where t1.f2 = t2.f3 order by t1.f1;
 drop table t1, t2;
-set names default;
+set names latin1;
 
 # Bug 24912 -- misc functions have trouble with unsigned
 
@@ -486,6 +488,14 @@ SELECT -a FROM t1;
 --error ER_DATA_OUT_OF_RANGE
 SELECT -b FROM t1;
 
+# try with two rows now
+INSERT INTO t1 VALUES(0,0);
+
+--error ER_DATA_OUT_OF_RANGE
+SELECT -a FROM t1;
+--error ER_DATA_OUT_OF_RANGE
+SELECT -b FROM t1;
+
 DROP TABLE t1;
 
 # Decimal overflows
@@ -521,7 +531,7 @@ as foo;
 --echo #            my_gcvt: Assertion `width > 0 && to != ((void *)0)' failed
 --echo #
 CREATE TABLE t1(a char(0));
-INSERT INTO t1 (SELECT -pi());
+INSERT IGNORE INTO t1 (SELECT -pi());
 DROP TABLE t1;
 
 --echo #
@@ -572,11 +582,78 @@ select 5 div 2.0;
 select 5.9 div 2, 1.23456789e3 DIV 2, 1.23456789e9 DIV 2, 1.23456789e19 DIV 2;
 
 --echo #
---echo # End of 5.5 tests
+--echo # MDEV-10467 Assertion `nr >= 0.0' failed in Item_sum_std::val_real()
 --echo #
+CREATE TABLE t1 (i INT);
+INSERT INTO t1 VALUES (1),(2);
+SELECT STDDEV_SAMP(ROUND('0', 309)) FROM t1;
+DROP TABLE t1;
+
 
 --echo #
---echo # Start of 10.0 tests
+--echo # MDEV-20495 Assertion `precision > 0' failed in decimal_bin_size upon CREATE .. SELECT with zerofilled decimal
+--echo #
+
+--echo # Testing that dyadic arithmetic operations are symmetric
+--echo # for (+1) and (-1) and produce the same length in CONCAT(),
+--echo # because (+1) and (-1) have the same data type: signed int.
+
+CREATE TABLE t1 AS SELECT
+  CONCAT(+1%2.0),
+  CONCAT(-1%2.0),
+  CONCAT(+1/2.0),
+  CONCAT(-1/2.0),
+  CONCAT(+1*2.0),
+  CONCAT(-1*2.0),
+  CONCAT(+1+2.0),
+  CONCAT(-1+2.0),
+  CONCAT(+1-2.0),
+  CONCAT(-1-2.0);
+SHOW CREATE TABLE t1;
+DROP TABLE t1;
+
+CREATE TABLE t1 AS SELECT
+  CONCAT(+1%2),
+  CONCAT(-1%2),
+  CONCAT(+1/2),
+  CONCAT(-1/2),
+  CONCAT(+1*2),
+  CONCAT(-1*2),
+  CONCAT(+1+2),
+  CONCAT(-1+2),
+  CONCAT(+1-2),
+  CONCAT(-1-2);
+SHOW CREATE TABLE t1;
+DROP TABLE t1;
+
+
+--echo #
+--echo # Bug #29723340: MYSQL SERVER CRASH AFTER SQL QUERY WITH DATA ?AST
+--echo #
+
+create table t1(a int);
+insert ignore t1 values("1e-214748364");
+insert ignore t1 values("1e-2147483648");
+insert ignore t1 values("1e-21474836480");
+insert ignore t1 values("1e+214748364");
+insert ignore t1 values("1e+2147483647");
+insert ignore t1 values("1e+21474836470");
+
+# if max max_allowed_packet will ever be increased beyond 2GB, this could
+# break again:
+set global max_allowed_packet= cast(2*1024*1024*1024+1024 as unsigned);
+connect foo,localhost,root;
+set @a=2147483647;
+insert ignore t1 values (concat('1', repeat('0', @a+18), 'e-', @a-1, '0'));
+disconnect foo;
+connection default;
+set global max_allowed_packet=default;
+
+select * from t1;
+drop table t1;
+
+--echo #
+--echo # End of 5.5 tests
 --echo #
 
 --echo #
@@ -584,7 +661,134 @@ select 5.9 div 2, 1.23456789e3 DIV 2, 1.23456789e9 DIV 2, 1.23456789e19 DIV 2;
 --echo #
 SELECT STDDEV_POP(ROUND(0,@A:=2009)) FROM (SELECT 1 UNION SELECT 2) fake_table;
 
+--echo #
+--echo # Start of 10.1 tests
+--echo #
 
 --echo #
---echo # End of 10.0 tests
+--echo # MDEV-17643 Assertion `nr >= 0.0' failed in Item_sum_std::val_real()
 --echo #
+
+CREATE TABLE t1 ( pk int NOT NULL, i1 int NOT NULL, d1 date NOT NULL, t1 time);
+INSERT INTO t1 VALUES (7,9,'2007-08-15','03:55:02'),(8,7,'1993-06-05','04:17:51'),(9,7,'2034-07-01','17:31:12'),(10,0,'1998-08-24','08:09:27');
+SELECT DISTINCT  STDDEV_SAMP(EXPORT_SET(t1, -1379790335835635712, (i1 + 'o'), (MD5(d1)))) FROM t1;
+DROP TABLE t1;
+
+CREATE TABLE t1 (a VARCHAR(128));
+INSERT INTO t1 VALUES ('1e310');
+INSERT INTO t1 VALUES ('-1e310');
+INSERT INTO t1 VALUES ('0');
+SELECT STDDEV_SAMP(a) FROM t1;
+DROP TABLE t1;
+
+CREATE OR REPLACE TABLE t1 (a DOUBLE);
+INSERT INTO t1 VALUES (1.7e+308);
+INSERT INTO t1 VALUES (-1.7e+308);
+INSERT INTO t1 VALUES (0);
+SELECT STDDEV_SAMP(a) FROM t1;
+DROP TABLE t1;
+
+--echo #
+--echo # MDEV-21977 main.func_math fails due to undefined behaviour
+--echo #
+
+SELECT  9223372036854775808 DIV  1;
+--error ER_DATA_OUT_OF_RANGE
+SELECT  9223372036854775808 DIV -1;
+--error ER_DATA_OUT_OF_RANGE
+SELECT -9223372036854775808 DIV  1;
+--error ER_DATA_OUT_OF_RANGE
+SELECT -9223372036854775808 DIV -1;
+
+SELECT  9223372036854775808 MOD  1;
+SELECT  9223372036854775808 MOD -1;
+SELECT -9223372036854775808 MOD  1;
+SELECT -9223372036854775808 MOD -1;
+
+SELECT  1 MOD  9223372036854775808;
+SELECT -1 MOD  9223372036854775808;
+SELECT  1 MOD -9223372036854775808;
+SELECT -1 MOD -9223372036854775808;
+
+SELECT  9223372036854775808 MOD  9223372036854775808;
+SELECT  9223372036854775808 MOD -9223372036854775808;
+SELECT -9223372036854775808 MOD  9223372036854775808;
+SELECT -9223372036854775808 MOD -9223372036854775808;
+
+--echo #
+--echo # MDEV-22502 MDB crashes in CREATE TABLE AS SELECT when the precision of returning type = 0
+--echo #
+
+CREATE TABLE t1 (d decimal(5,5));
+INSERT INTO t1 VALUES (0.55555);
+SELECT TRUNCATE(d,0) FROM t1;
+CREATE TABLE t2 AS SELECT TRUNCATE(d,0) FROM t1;
+SELECT * FROM t2;
+SHOW CREATE TABLE t2;
+DROP TABLE t1, t2;
+
+
+--echo #
+--echo # MDEV-22503 MDB limits DECIMAL column precision to 16 doing CTAS with floor/ceil over DECIMAL(X,Y) where X > 16
+--echo #
+
+CREATE TABLE t44 (d1 decimal(38,0) DEFAULT NULL);
+INSERT INTO t44 VALUES (12345678901234567890123456789012345678);
+SELECT FLOOR(d1) FROM t44;
+CREATE TABLE t45 AS SELECT FLOOR(d1) FROM t44;
+SELECT * FROM t45;
+SHOW CREATE TABLE t45;
+DROP TABLE t44, t45;
+
+
+DELIMITER $$;
+CREATE PROCEDURE p1(prec INT, scale INT)
+BEGIN
+  DECLARE maxval VARCHAR(128) DEFAULT '';
+  SET @type= CONCAT('DECIMAL(', prec, ',', scale,')');
+  SET @stmt= CONCAT('CREATE TABLE t1 (a ', @type, ',b ', @type, 'unsigned)');
+  PREPARE stmt FROM @stmt;
+  EXECUTE stmt;
+  DEALLOCATE PREPARE stmt;
+  SET maxval= CONCAT(REPEAT('9', prec-scale), '.', REPEAT('9',scale));
+  INSERT INTO t1 VALUES (maxval, maxval);
+  CREATE TABLE t2 AS SELECT a, b, FLOOR(a) AS fa, FLOOR(b) AS fb FROM t1;
+  SHOW CREATE TABLE t2;
+  SELECT * FROM t2;
+  DROP TABLE t1, t2;
+END;
+$$
+CREATE PROCEDURE p2(prec INT)
+BEGIN
+  DECLARE scale INT DEFAULT 0;
+  WHILE scale < prec AND scale <= 30 DO
+    CALL p1(prec, scale);
+    SET scale= scale + 1;
+  END WHILE;
+END;
+$$
+DELIMITER ;$$
+--vertical_results
+CALL p2(38);
+CALL p2(30);
+--horizontal_results
+DROP PROCEDURE p2;
+DROP PROCEDURE p1;
+
+
+--echo #
+--echo # End of 10.1 tests
+--echo #
+
+--echo #
+--echo # Start of 10.2 tests
+--echo #
+
+--echo # Test zero
+select 0=0, 0=-0, 0.0= -0.0, 0.0 = -(0.0), 0.0E1=-0.0E1, 0.0E1=-(0.0E1);
+
+--echo #
+--echo # CRC32 tests
+--echo #
+
+select CRC32(NULL), CRC32(''), CRC32('MySQL'), CRC32('mysql'), CRC32('01234567'), CRC32('012345678');

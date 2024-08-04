@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA */
 
 /* Functions to handle typelib */
 
@@ -40,18 +40,6 @@ int find_type_with_warning(const char *x, TYPELIB *typelib, const char *option)
     while (*++ptr)
       fprintf(stderr, ",'%s'", *ptr);
     fprintf(stderr, "\n");
-  }
-  return res;
-}
-
-
-int find_type_or_exit(const char *x, TYPELIB *typelib, const char *option)
-{
-  int res;
-  if ((res= find_type_with_warning(x, typelib, option)) <= 0)
-  {
-    sf_leaking_memory= 1; /* no memory leak reports here */
-    exit(1);
   }
   return res;
 }
@@ -88,7 +76,7 @@ static int find_type_eol(const char **x, const TYPELIB *typelib, uint flags,
   const char *j;
   CHARSET_INFO *cs= &my_charset_latin1;
   DBUG_ENTER("find_type_eol");
-  DBUG_PRINT("enter",("x: '%s'  lib: 0x%lx", *x, (long) typelib));
+  DBUG_PRINT("enter",("x: '%s'  lib: %p", *x, typelib));
 
   DBUG_ASSERT(!(flags & ~(FIND_TYPE_NO_PREFIX | FIND_TYPE_COMMA_TERM)));
 
@@ -182,7 +170,7 @@ const char *get_type(TYPELIB *typelib, uint nr)
 
 
 /**
-  Create an integer value to represent the supplied comma-seperated
+  Create an integer value to represent the supplied comma-separated
   string where each string in the TYPELIB denotes a bit position.
 
   @param x      string to decompose
@@ -200,7 +188,7 @@ my_ulonglong find_typeset(char *x, TYPELIB *lib, int *err)
   int find;
   char *i;
   DBUG_ENTER("find_set");
-  DBUG_PRINT("enter",("x: '%s'  lib: 0x%lx", x, (long) lib));
+  DBUG_PRINT("enter",("x: '%s'  lib: %p", x, lib));
 
   if (!lib->count)
   {
@@ -399,7 +387,7 @@ my_ulonglong find_set_from_flags(const TYPELIB *lib, uint default_name,
       continue;
    err:
       *err_pos= (char*)start;
-      *err_len= end - start;
+      *err_len= (uint)(end - start);
       break;
     }
   }

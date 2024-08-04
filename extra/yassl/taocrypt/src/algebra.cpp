@@ -13,7 +13,7 @@
    You should have received a copy of the GNU General Public License
    along with this program; see the file COPYING. If not, write to the
    Free Software Foundation, Inc., 51 Franklin St, Fifth Floor, Boston,
-   MA  02110-1301  USA.
+   MA  02110-1335  USA.
 */
 
 /* based on Wei Dai's algebra.cpp from CryptoPP */
@@ -218,7 +218,7 @@ struct WindowSlider
 
         exp >>= skipCount;
         windowBegin += skipCount;
-        expWindow = exp % (1 << windowSize);
+        expWindow = (unsigned int)(exp % (1LL << windowSize));
 
         if (fastNegate && exp.GetBit(windowSize))
         {
@@ -248,7 +248,7 @@ void AbstractGroup::SimultaneousMultiply(Integer *results, const Integer &base,
     {
         exponents.push_back(WindowSlider(*expBegin++, InversionIsFast(), 0));
         exponents[i].FindNextWindow();
-        buckets[i].resize(1<<(exponents[i].windowSize-1), Identity());
+        buckets[i].resize(size_t(1)<<(exponents[i].windowSize-1), Identity());
     }
 
     unsigned int expBitPosition = 0;

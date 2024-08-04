@@ -11,7 +11,7 @@
 # 
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335  USA
 #
 
 INCLUDE (CheckCSourceCompiles)
@@ -56,7 +56,7 @@ IF(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   # MySQL "canonical" GCC flags. At least -fno-rtti flag affects
   # ABI and cannot be simply removed. 
   SET(CMAKE_CXX_FLAGS 
-    "${CMAKE_CXX_FLAGS} -fno-exceptions -fno-rtti")
+    "${CMAKE_CXX_FLAGS} -fno-rtti")
 
   IF (CMAKE_EXE_LINKER_FLAGS MATCHES " -static " 
      OR CMAKE_EXE_LINKER_FLAGS MATCHES " -static$")
@@ -161,6 +161,7 @@ IF(UNIX)
       SET(LIBWRAP "wrap")
     ENDIF()
   ENDIF()
+  ADD_FEATURE_INFO(LIBWRAP HAVE_LIBWRAP "Support for tcp wrappers")
 ENDIF()
 
 #
@@ -225,7 +226,6 @@ CHECK_INCLUDE_FILES (sys/socket.h HAVE_SYS_SOCKET_H)
 CHECK_INCLUDE_FILES (sys/stat.h HAVE_SYS_STAT_H)
 CHECK_INCLUDE_FILES (sys/stream.h HAVE_SYS_STREAM_H)
 CHECK_INCLUDE_FILES (sys/syscall.h HAVE_SYS_SYSCALL_H)
-CHECK_INCLUDE_FILES ("curses.h;term.h" HAVE_TERM_H)
 CHECK_INCLUDE_FILES (asm/termbits.h HAVE_ASM_TERMBITS_H)
 CHECK_INCLUDE_FILES (termbits.h HAVE_TERMBITS_H)
 CHECK_INCLUDE_FILES (termios.h HAVE_TERMIOS_H)
@@ -252,7 +252,7 @@ SET(CMAKE_REQUIRED_DEFINITIONS ${CMAKE_REQUIRED_DEFINITIONS} -DPACKAGE=test) # b
 CHECK_INCLUDE_FILES (bfd.h BFD_H_EXISTS)
 IF(BFD_H_EXISTS)
   IF(NOT_FOR_DISTRIBUTION)
-    SET(NON_DISTRIBUTABLE_WARNING 1)
+    SET(NON_DISTRIBUTABLE_WARNING "GPLv3")
     SET(HAVE_BFD_H 1)
   ENDIF()
 ENDIF()
@@ -330,6 +330,7 @@ CHECK_FUNCTION_EXISTS (cuserid HAVE_CUSERID)
 CHECK_FUNCTION_EXISTS (ftruncate HAVE_FTRUNCATE)
 CHECK_FUNCTION_EXISTS (compress HAVE_COMPRESS)
 CHECK_FUNCTION_EXISTS (crypt HAVE_CRYPT)
+CHECK_FUNCTION_EXISTS (dladdr HAVE_DLADDR)
 CHECK_FUNCTION_EXISTS (dlerror HAVE_DLERROR)
 CHECK_FUNCTION_EXISTS (dlopen HAVE_DLOPEN)
 CHECK_FUNCTION_EXISTS (fchmod HAVE_FCHMOD)
@@ -358,6 +359,7 @@ CHECK_FUNCTION_EXISTS (localtime_r HAVE_LOCALTIME_R)
 CHECK_FUNCTION_EXISTS (lstat HAVE_LSTAT)
 CHECK_FUNCTION_EXISTS (madvise HAVE_MADVISE)
 CHECK_FUNCTION_EXISTS (mallinfo HAVE_MALLINFO)
+CHECK_FUNCTION_EXISTS (mallinfo2 HAVE_MALLINFO2)
 CHECK_FUNCTION_EXISTS (memcpy HAVE_MEMCPY)
 CHECK_FUNCTION_EXISTS (memmove HAVE_MEMMOVE)
 CHECK_FUNCTION_EXISTS (mkstemp HAVE_MKSTEMP)
@@ -375,12 +377,12 @@ CHECK_FUNCTION_EXISTS (pthread_attr_setscope HAVE_PTHREAD_ATTR_SETSCOPE)
 CHECK_FUNCTION_EXISTS (pthread_attr_getguardsize HAVE_PTHREAD_ATTR_GETGUARDSIZE)
 CHECK_FUNCTION_EXISTS (pthread_attr_setstacksize HAVE_PTHREAD_ATTR_SETSTACKSIZE)
 CHECK_FUNCTION_EXISTS (pthread_condattr_create HAVE_PTHREAD_CONDATTR_CREATE)
+CHECK_FUNCTION_EXISTS (pthread_getaffinity_np HAVE_PTHREAD_GETAFFINITY_NP)
 CHECK_FUNCTION_EXISTS (pthread_key_delete HAVE_PTHREAD_KEY_DELETE)
 CHECK_FUNCTION_EXISTS (pthread_rwlock_rdlock HAVE_PTHREAD_RWLOCK_RDLOCK)
 CHECK_FUNCTION_EXISTS (pthread_sigmask HAVE_PTHREAD_SIGMASK)
 CHECK_FUNCTION_EXISTS (pthread_yield_np HAVE_PTHREAD_YIELD_NP)
 CHECK_FUNCTION_EXISTS (putenv HAVE_PUTENV)
-CHECK_FUNCTION_EXISTS (readdir_r HAVE_READDIR_R)
 CHECK_FUNCTION_EXISTS (readlink HAVE_READLINK)
 CHECK_FUNCTION_EXISTS (realpath HAVE_REALPATH)
 CHECK_FUNCTION_EXISTS (rename HAVE_RENAME)
@@ -416,6 +418,16 @@ CHECK_FUNCTION_EXISTS (nl_langinfo HAVE_NL_LANGINFO)
 IF(HAVE_SYS_EVENT_H)
 CHECK_FUNCTION_EXISTS (kqueue HAVE_KQUEUE)
 ENDIF()
+
+# readdir_r might exist, but be marked deprecated
+SET(CMAKE_REQUIRED_FLAGS -Werror)
+CHECK_CXX_SOURCE_COMPILES(
+"#include  <dirent.h>
+int main() {
+  readdir_r(0,0,0);
+  return 0;
+  }" HAVE_READDIR_R)
+SET(CMAKE_REQUIRED_FLAGS)
 
 #--------------------------------------------------------------------
 # Support for WL#2373 (Use cycle counter for timing)
@@ -466,18 +478,7 @@ ELSE()
   CHECK_SYMBOL_EXISTS(finite  "ieeefp.h" HAVE_FINITE)
 ENDIF()
 CHECK_SYMBOL_EXISTS(log2  math.h HAVE_LOG2)
-CHECK_SYMBOL_EXISTS(isnan math.h HAVE_ISNAN)
 CHECK_SYMBOL_EXISTS(rint  math.h HAVE_RINT)
-
-# isinf() prototype not found on Solaris
-CHECK_CXX_SOURCE_COMPILES(
-"#include  <math.h>
-int main() { 
-  isinf(0.0); 
-  return 0;
-}" HAVE_ISINF)
-
-
 
 #
 # Test for endianess
@@ -784,6 +785,17 @@ IF(NOT CMAKE_CROSSCOMPILING AND NOT MSVC)
     }
    " HAVE_FAKE_PAUSE_INSTRUCTION)
   ENDIF()
+  IF (NOT HAVE_PAUSE_INSTRUCTION)
+    CHECK_C_SOURCE_COMPILES("
+    #include <sys/platform/ppc.h>
+    int main()
+    {
+     __ppc_set_ppr_low();
+     __ppc_set_ppr_med();
+     return 0;
+    }
+    " HAVE_HMT_PRIORITY_INSTRUCTION)
+  ENDIF()
 ENDIF()
   
 CHECK_SYMBOL_EXISTS(tcgetattr "termios.h" HAVE_TCGETATTR 1)
@@ -828,14 +840,6 @@ CHECK_CXX_SOURCE_COMPILES("
   }"
   HAVE_ABI_CXA_DEMANGLE)
 ENDIF()
-
-CHECK_C_SOURCE_COMPILES("
-  int main(int argc, char **argv) 
-  {
-    extern char *__bss_start;
-    return __bss_start ? 1 : 0;
-  }"
-HAVE_BSS_START)
 
 CHECK_C_SOURCE_COMPILES("
     int main()
@@ -998,16 +1002,22 @@ CHECK_STRUCT_HAS_MEMBER("struct sockaddr_in6" sin6_len
 
 SET(CMAKE_EXTRA_INCLUDE_FILES) 
 
-CHECK_INCLUDE_FILE(ucontext.h HAVE_UCONTEXT_H)
-IF(NOT HAVE_UCONTEXT_H)
-  CHECK_INCLUDE_FILE(sys/ucontext.h HAVE_UCONTEXT_H)
+CHECK_STRUCT_HAS_MEMBER("struct dirent" d_ino "dirent.h"  STRUCT_DIRENT_HAS_D_INO)
+CHECK_STRUCT_HAS_MEMBER("struct dirent" d_namlen "dirent.h"  STRUCT_DIRENT_HAS_D_NAMLEN)
+SET(SPRINTF_RETURNS_INT 1)
+CHECK_INCLUDE_FILE(ucontext.h HAVE_FILE_UCONTEXT_H)
+IF(NOT HAVE_FILE_UCONTEXT_H)
+  CHECK_INCLUDE_FILE(sys/ucontext.h HAVE_FILE_UCONTEXT_H)
+ENDIF()
+IF(HAVE_FILE_UCONTEXT_H)
+  CHECK_FUNCTION_EXISTS(makecontext HAVE_UCONTEXT_H)
 ENDIF()
 
 CHECK_STRUCT_HAS_MEMBER("struct timespec" tv_sec "time.h" STRUCT_TIMESPEC_HAS_TV_SEC)
 CHECK_STRUCT_HAS_MEMBER("struct timespec" tv_nsec "time.h" STRUCT_TIMESPEC_HAS_TV_NSEC)
 
 IF(NOT MSVC)
-  CHECK_C_SOURCE_RUNS(
+  CHECK_C_SOURCE_COMPILES(
   "
   #define _GNU_SOURCE
   #include <fcntl.h>
@@ -1022,4 +1032,20 @@ IF(NOT MSVC)
   }"
   HAVE_FALLOC_PUNCH_HOLE_AND_KEEP_SIZE
   )
+ENDIF()
+
+MY_CHECK_C_COMPILER_FLAG("-Werror")
+IF(have_C__Werror)
+  SET(SAVE_CMAKE_REQUIRED_FLAGS ${CMAKE_REQUIRED_FLAGS})
+  SET(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -Werror")
+  CHECK_C_SOURCE_COMPILES("
+    #include <unistd.h>
+    int main()
+    {
+      pid_t pid=vfork();
+      return (int)pid;
+    }"
+    HAVE_VFORK
+  )
+  SET(CMAKE_REQUIRED_FLAGS ${SAVE_CMAKE_REQUIRED_FLAGS})
 ENDIF()

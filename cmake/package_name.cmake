@@ -11,7 +11,7 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335  USA
 
 # Produce meaningful package name for the binary package
 # The logic is rather involved with special cases for  different OSes
@@ -28,6 +28,10 @@ IF(NOT VERSION)
     SET(DEFAULT_MACHINE  ${CMAKE_SYSTEM_PROCESSOR})
     IF(SIZEOF_VOIDP EQUAL 8)
       SET(64BIT 1)
+    ENDIF()
+
+    IF(NOT 64BIT AND CMAKE_SYSTEM_PROCESSOR MATCHES "^mips64")
+      SET(DEFAULT_MACHINE "mips")
     ENDIF()
 
     IF(CMAKE_SYSTEM_NAME MATCHES "Windows")
@@ -73,6 +77,9 @@ IF(NOT VERSION)
           SET(DEFAULT_MACHINE "i386")
         ENDIF()
       ENDIF()
+    ELSEIF(CMAKE_SYSTEM_NAME MATCHES "GNU")
+      SET(DEFAULT_PLATFORM "GNU")
+      SET(DEFAULT_MACHINE "i386")
     ELSEIF(CMAKE_SYSTEM_NAME MATCHES "Darwin")
       IF(CMAKE_OSX_DEPLOYMENT_TARGET)
         SET(DEFAULT_PLATFORM "osx${CMAKE_OSX_DEPLOYMENT_TARGET}")
@@ -103,7 +110,11 @@ IF(NOT VERSION)
         SET(DEFAULT_MACHINE "x86")
       ENDIF()
     ENDIF()
-   
+
+    IF(NOT DEFAULT_MACHINE MATCHES "64" AND 64BIT)
+      SET(DEFAULT_MACHINE "${DEFAULT_MACHINE}-64bit")
+    ENDIF()
+
     IF(NOT PLATFORM)
       SET(PLATFORM ${DEFAULT_PLATFORM})
     ENDIF()

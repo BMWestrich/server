@@ -2,6 +2,8 @@
 # Testing ORDER BY
 #
 
+call mtr.add_suppression("Sort aborted.*");
+
 --disable_warnings
 drop table if exists t1,t2,t3;
 --enable_warnings
@@ -11,6 +13,8 @@ call mtr.add_suppression("Out of sort memory; increase server sort buffer size")
 #
 # Test old ORDER BY bug
 #
+
+--source include/have_sequence.inc
 
 CREATE TABLE t1 (
   id int(6) DEFAULT '0' NOT NULL,
@@ -269,6 +273,7 @@ select * from t1 where a = 1 order by b desc;
 # Test things when we don't have NULL keys
 #
 
+SET STATEMENT sql_mode = 'NO_ENGINE_SUBSTITUTION' FOR
 alter table t1 modify b int not null, modify c varchar(10) not null;
 explain select * from t1 order by a, b, c;
 select * from t1 order by a, b, c;
@@ -526,11 +531,11 @@ drop table t1, t2;
 # Bug #5428: a problem with small max_sort_length value
 #
 
-create table t1 (a char(25));
+create table t1 (a char(70));
 insert into t1 set a = repeat('x', 20);
-insert into t1 set a = concat(repeat('x', 19), 'z');
-insert into t1 set a = concat(repeat('x', 19), 'ab');
-insert into t1 set a = concat(repeat('x', 19), 'aa');
+insert into t1 set a = concat(repeat('x', 63), 'z');
+insert into t1 set a = concat(repeat('x', 63), 'ab');
+insert into t1 set a = concat(repeat('x', 63), 'aa');
 set max_sort_length=20;
 select a from t1 order by a;
 drop table t1;
@@ -1945,6 +1950,54 @@ order by A.col2, B.col2 limit 10, 1000000;
 
 drop table t1,t2,t3;
 
+--echo #
+--echo # mdev-10705 : long order by list that can be skipped
+--echo #
+
+SELECT 1 
+UNION 
+( SELECT 2 
+    ORDER BY NULL, @a0 := 3, @a1 := 3, @a2 := 3, @a3 := 3, @a4 := 3,
+             @a5 := 3, @a6 := 3, @a7 := 3, @a8 := 3, @a9 := 3, @a10 := 3 );
+
+
+--echo #
+--echo # mdev-6706: semi-join with duplicate weedout + ORDER BY
+--echo #
+
+CREATE TABLE t1 (f1 VARCHAR(3)) ENGINE=MyISAM;
+INSERT INTO t1 VALUES ('foo');
+
+CREATE TABLE t2 (f2 VARCHAR(3)) ENGINE=MyISAM;
+INSERT INTO t2 VALUES ('bar'),('baz');
+
+CREATE TABLE t3
+(i3_key INT, f3_key VARCHAR(3), f3 VARCHAR(3), KEY(f3_key,i3_key))
+ ENGINE=MyISAM;
+INSERT INTO t3 VALUES (0,'qux','qux'),(8,'bar','bar');
+
+let $q1=
+SELECT CONCAT( f1, f2 ) AS field FROM t1, t2
+WHERE f1 = ANY ( SELECT f1
+                 FROM t1
+                 LEFT JOIN ( t3 AS t3a, t3 AS t3b )
+                 ON ( t3b.f3_key = t3a.f3 )
+                 WHERE t3a.f3 < f1 OR t3b.f3 != f1 );
+let $q2=
+SELECT CONCAT( f1, f2 ) AS field FROM t1, t2
+WHERE f1 = ANY ( SELECT f1
+                 FROM t1
+                 LEFT JOIN ( t3 AS t3a, t3 AS t3b )
+                 ON ( t3b.f3_key = t3a.f3 )
+                 WHERE t3a.f3 < f1 OR t3b.f3 != f1 )
+ORDER BY field;
+
+eval $q1;
+eval $q2;
+eval EXPLAIN EXTENDED $q2;
+
+DROP TABLE t1,t2,t3;
+
 --echo End of 5.5 tests
 
 --echo #
@@ -1997,3 +2050,311 @@ EXPLAIN SELECT id1 FROM t2 WHERE id2=1 AND id3=1 ORDER BY date DESC LIMIT 0,4;
 
 drop table t1,t2;
 
+--echo #
+--echo # MDEV-8989: ORDER BY optimizer ignores equality propagation
+--echo #
+set @tmp_8989=@@optimizer_switch;
+set optimizer_switch='orderby_uses_equalities=on';
+create table t0(a int);
+insert into t0 values (0),(1),(2),(3),(4),(5),(6),(7),(8),(9);
+
+create table t1(a int);
+insert into t1 select A.a + B.a* 10 + C.a * 100 from t0 A, t0 B, t0 C;
+
+create table t2 (
+  pk int primary key, 
+  a int, b int, 
+  filler char(200), 
+  key(a)
+);
+insert into t2 select a, 1000-a, 1000-a, repeat('abc-',50) from t1 where a<200 limit 200;
+
+create table t3 (
+  pk int primary key, 
+  a int, b int, 
+  filler char(200), 
+  key(a)
+);
+insert into t3 select a,      1000-a, 1000-a, repeat('abc-',50) from t1;
+insert into t3 select a+1000, 1000+a, 1000+a, repeat('abc-',50) from t1;
+
+--echo # The optimizer produces an order of 't2,t3' for this join
+--echo #
+--echo # Case #1 (from the bug report): 
+--echo #  Q1 can take advantage of t2.a to resolve ORDER BY limit w/o sorting
+explain
+select t2.pk,t2.a,t2.b,t3.pk,t3.a,t3.b 
+from t2, t3 where t2.a=t3.a order by t2.a limit 5;
+
+--echo # 
+--echo # This is Q2 which used to have "Using temporary; using filesort" but
+--echo #   has the same query plan as Q1:
+--echo # 
+explain
+select t2.pk,t2.a,t2.b,t3.pk,t3.a,t3.b 
+from t2, t3 where t2.a=t3.a order by t3.a limit 5; 
+
+select t2.pk,t2.a,t2.b,t3.pk,t3.a,t3.b 
+from t2, t3 where t2.a=t3.a order by t2.a limit 5;
+
+select t2.pk,t2.a,t2.b,t3.pk,t3.a,t3.b 
+from t2, t3 where t2.a=t3.a order by t3.a limit 5;
+
+
+--echo # 
+--echo # Case #2: here, only "Using temporary" is removed. "Using filesort" remains.
+--echo # 
+explain
+select t2.pk,t2.a,t2.b,t3.pk,t3.a,t3.b 
+from t2, t3 where t2.a=t3.a order by t2.a limit 25;
+
+explain
+select t2.pk,t2.a,t2.b,t3.pk,t3.a,t3.b 
+from t2, t3 where t2.a=t3.a order by t3.a limit 25; 
+
+
+select t2.pk,t2.a,t2.b,t3.pk,t3.a,t3.b 
+from t2, t3 where t2.a=t3.a order by t2.a limit 25;
+
+
+select t2.pk,t2.a,t2.b,t3.pk,t3.a,t3.b 
+from t2, t3 where t2.a=t3.a order by t3.a limit 25; 
+
+--echo #
+--echo # Case #3: single table access (the code that decides whether we need
+--echo #          "Using temporary" is not invoked)
+--echo #
+explain select * from t3 where b=a order by a limit 10;
+
+--echo # This must not use filesort. The query plan should be like the query above:
+explain select * from t3 where b=a order by b limit 10;
+drop table t0,t1,t2,t3;
+
+set @@optimizer_switch=@tmp_8989;
+
+set optimizer_switch='orderby_uses_equalities=on';
+
+
+--echo #
+--echo # MDEV-10880: Assertions `keypart_map' or
+--echo # `prebuilt->search_tuple->n_fields > 0' fail on DISTINCT and
+--echo # GROUP BY constant
+--echo #
+
+CREATE TABLE t1 (pk INT PRIMARY KEY);
+INSERT INTO t1 VALUES (1),(2),(3);
+SELECT DISTINCT pk FROM t1 GROUP BY 'foo';
+SELECT DISTINCT pk FROM t1;
+DROP TABLE t1;
+
+--echo #
+--echo # MDEV-21044: Wrong result when using a smaller size for sort buffer
+--echo #
+
+create table t1(a varchar(765),b int);
+insert into t1 values ("a",1),("b",2),("c",3),("e",4);
+insert into t1 values ("d",5),("f",6),("g",7),("h",8);
+insert into t1 values ("k",11),("l",12),("i",9),("j",10);
+insert into t1 values ("m",13),("n",14),("o",15),("p",16);
+set @save_sort_buffer_size= @@sort_buffer_size;
+set sort_buffer_size=1024;
+select * from t1 order  by b;
+set @@sort_buffer_size= @save_sort_buffer_size;
+drop table t1;
+
+--echo #
+--echo # MDEV-22715: SIGSEGV in radixsort_for_str_ptr and in native_compare/my_qsort2 (optimized builds)
+--echo #
+
+SET @save_sort_buffer_size= @@sort_buffer_size;
+SET @save_max_sort_length= @@max_sort_length;
+SET max_sort_length=8;
+SET sort_buffer_size=1024;
+CREATE TABLE t1(a INT, b DECIMAL(65), c BLOB);
+INSERT INTO t1 SELECT seq, seq, seq from seq_1_to_25;
+INSERT INTO t1 SELECT seq, seq, seq from seq_1_to_25;
+SELECT * FROM t1 ORDER BY a,b;
+SET @@sort_buffer_size= @save_sort_buffer_size;
+SET @@max_sort_length= @save_max_sort_length;
+DROP TABLE t1;
+
+--echo #
+--echo # MDEV-22390: Assertion `m_next_rec_ptr >= m_rawmem' failed in Filesort_buffer::spaceleft |
+--echo # SIGSEGV in __memmove_avx_unaligned_erms from my_b_write (on optimized)
+--echo #
+
+SET @save_max_sort_length= @@max_sort_length;
+SET @save_sort_buffer_size= @@sort_buffer_size;
+SET @save_max_length_for_sort_data= @@max_length_for_sort_data;
+SET max_sort_length=8;
+SET sort_buffer_size=1024;
+# needed to make sure we use addon fields
+SET max_length_for_sort_data=7000;
+CREATE TABLE t1(a VARCHAR(64), b VARCHAR(2048))DEFAULT CHARSET=utf8;
+INSERT INTO t1 SELECT seq,seq from seq_1_to_100;
+--source include/analyze-format.inc
+ANALYZE FORMAT=JSON SELECT * FROM t1 ORDER BY a LIMIT 5;
+SELECT * FROM t1 ORDER BY a LIMIT 5;
+SET max_sort_length= @save_max_sort_length;
+SET sort_buffer_size= @save_sort_buffer_size;
+SET max_length_for_sort_data= @save_max_length_for_sort_data;
+DROP TABLE t1;
+
+--echo #
+--echo # MDEV-23596: Assertion `tab->ref.use_count' failed in join_read_key_unlock_row
+--echo #
+
+CREATE TABLE t1 (a INT PRIMARY KEY, b INT, KEY(b));
+INSERT INTO t1 VALUES (0, 1),(1, 2);
+CREATE TABLE t2 SELECT * FROM t1;
+
+EXPLAIN SELECT (SELECT 1 FROM t1 WHERE t1.a=t2.b ORDER BY t1.b LIMIT 1) AS c FROM t2;
+SELECT (SELECT 1 FROM t1 WHERE t1.a=t2.b ORDER BY t1.b LIMIT 1) AS c FROM t2;
+
+DROP TABLE t1,t2;
+
+--echo # end of 10.1 tests
+
+--echo #
+--echo # MDEV-13994: Bad join results with orderby_uses_equalities=on
+--echo #
+
+CREATE TABLE books (
+  id int(16) NOT NULL AUTO_INCREMENT,
+  library_id int(16) NOT NULL DEFAULT 0,
+  wings_id int(12) NOT NULL DEFAULT 0,
+  scheduled_for_removal int(1) DEFAULT 0,
+  PRIMARY KEY (id),
+  KEY library_idx (library_id)
+) ENGINE=MyISAM AUTO_INCREMENT=1 DEFAULT CHARSET=utf8;
+
+INSERT INTO books VALUES (32625,8663,707,0),(32624,8663,505,1);
+
+CREATE TABLE wings (
+  id int(11) NOT NULL AUTO_INCREMENT,
+  department_id int(11) DEFAULT NULL,
+  PRIMARY KEY (id)
+) ENGINE=MyISAM AUTO_INCREMENT=1 DEFAULT CHARSET=utf8;
+
+INSERT INTO wings VALUES (505,11745),(707,11768);
+
+let $q=
+SELECT wings.id as wing_id, wings.department_id FROM wings
+  WHERE wings.id IN ( SELECT books.wings_id FROM books
+                        WHERE books.library_id = 8663 AND
+                              books.scheduled_for_removal=0 )
+ORDER BY wings.id;
+
+SET @save_optimizer_switch=@@optimizer_switch;
+
+SET optimizer_switch='orderby_uses_equalities=off';
+eval $q;
+
+SET optimizer_switch='orderby_uses_equalities=on';
+eval $q;
+eval explain extended $q;
+
+set optimizer_switch= @save_optimizer_switch;
+
+DROP TABLE books, wings;
+
+--echo #
+--echo # MDEV-17796: query with DISTINCT, GROUP BY and ORDER BY
+--echo #
+
+CREATE TABLE t1 (id int, gr int, v1 varchar(10));
+INSERT INTO t1 VALUES (1,1,'A'), (2,2,'B'), (3,3,NULL), (4,4,'C');
+
+SELECT DISTINCT NULLIF(GROUP_CONCAT(v1), null) FROM t1
+  WHERE gr in (4,2)
+GROUP BY id
+ORDER BY id+1 DESC;
+
+DROP TABLE t1;
+
+--echo #
+--echo # MDEV-24033: SIGSEGV in __memcmp_avx2_movbe from queue_insert | SIGSEGV in __memcmp_avx2_movbe from native_compare
+--echo #
+
+SET @save_max_length_for_sort_data=@@max_length_for_sort_data;
+SET @save_max_sort_length= @@max_sort_length;
+SET @save_sql_select_limit= @@sql_select_limit;
+
+CREATE TABLE t1 (a DECIMAL(64,0), b INT);
+INSERT INTO t1 VALUES (1,1), (2,2), (3,3), (4,4);
+
+SET max_length_for_sort_data= 30;
+SET sql_select_limit = 3;
+SET max_sort_length=8;
+SELECT * FROM t1 ORDER BY a+1;
+
+SET max_length_for_sort_data=@save_max_length_for_sort_data;
+SET max_sort_length= @save_max_sort_length;
+SET sql_select_limit= @save_sql_select_limit;
+DROP TABLE t1;
+
+--echo #
+--echo # MDEV-25682: EXPLAIN for SELECT with ORDER BY after [ORDER BY] LIMIT
+--echo #
+
+create table t1 (a int);
+insert into t1 values (3), (7), (1);
+explain (select a from t1 limit 2) order by a desc;
+(select a from t1 limit 2) order by a desc;
+
+create table t2 (a int, b int);
+insert into t2 values (3,70), (7,10), (1,40), (4,30);
+explain (select b,a from t2 order by a limit 3) order by b desc;
+(select b,a from t2 order by a limit 3) order by b desc;
+
+drop table t1,t2;
+
+--echo #
+--echo # MDEV-22256 Assertion `length == pack_length()' failed in Field_timestamp_with_dec::sort_string
+--echo #
+
+SET sql_mode='';
+SET @@SESSION.max_sort_length=4;
+CREATE TABLE t1 (c TIMESTAMP(1));
+INSERT INTO t1 VALUES(0);
+DELETE FROM t1 ORDER BY c;
+DROP TABLE t1;
+SET @@SESSION.max_sort_length=DEFAULT;
+SET sql_mode=DEFAULT;
+
+SET sql_mode='';
+SET @@SESSION.max_sort_length=1;
+CREATE TEMPORARY TABLE t1 (c DATETIME);
+INSERT INTO t1 VALUES(0);
+DELETE FROM t1 ORDER BY c;
+DROP TABLE t1;
+SET @@SESSION.max_sort_length=DEFAULT;
+SET sql_mode=DEFAULT;
+
+--echo #
+--echo # MDEV-25994 Crash with union of my_decimal type in ORDER BY clause
+--echo #
+
+CREATE TABLE t1 (v1 INTEGER) ;
+INSERT INTO t1 (v1) VALUES (8);
+--error ER_SUBQUERY_NO_1_ROW
+UPDATE t1 SET v1 = 1 ORDER BY (SELECT 1.1 UNION SELECT -1);
+--echo # This one must be successful
+UPDATE t1 SET v1 = 2 ORDER BY (SELECT 1 UNION SELECT 1);
+--error ER_SUBQUERY_NO_1_ROW
+UPDATE t1 SET v1 = 3 ORDER BY (SELECT 'a' UNION SELECT 'b');
+
+-- echo # Insert some more data
+INSERT INTO t1 (v1) VALUES (8),(9),(100),(-234),(46584),(0);
+--error ER_SUBQUERY_NO_1_ROW
+UPDATE t1 SET v1 = v1+1 ORDER BY (SELECT 100.122 UNION SELECT -189.2);
+--echo # This one must be successful
+UPDATE t1 SET v1 = v1-200 ORDER BY (SELECT 1 UNION SELECT 1);
+--error ER_SUBQUERY_NO_1_ROW
+UPDATE t1 SET v1 = v1 ORDER BY (SELECT 'abc' UNION SELECT 'bbb');
+
+
+DROP TABLE t1;
+
+
+--echo # End of 10.2 tests

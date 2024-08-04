@@ -1,4 +1,5 @@
 /* Copyright (C) 2006 MySQL AB & MySQL Finland AB & TCX DataKonsult AB
+   Copyright (c) 2009, 2019, MariaDB Corporation.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -11,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 /* open an Aria table */
 
@@ -19,6 +20,8 @@
 #include "ma_sp_defs.h"
 #include "ma_rt_index.h"
 #include "ma_blockrec.h"
+#include "trnman.h"
+#include "ma_trnman.h"
 #include <m_ctype.h>
 #include "ma_crypt.h"
 
@@ -87,7 +90,7 @@ MARIA_HA *_ma_test_if_reopen(const char *filename)
 */
 
 
-static MARIA_HA *maria_clone_internal(MARIA_SHARE *share, const char *name,
+static MARIA_HA *maria_clone_internal(MARIA_SHARE *share,
                                       int mode, File data_file,
                                       uint internal_table)
 {
@@ -107,7 +110,7 @@ static MARIA_HA *maria_clone_internal(MARIA_SHARE *share, const char *name,
   }
   if (data_file >= 0)
     info.dfile.file= data_file;
-  else if (_ma_open_datafile(&info, share, name, -1))
+  else if (_ma_open_datafile(&info, share))
     goto err;
   errpos= 5;
 
@@ -184,7 +187,7 @@ static MARIA_HA *maria_clone_internal(MARIA_SHARE *share, const char *name,
   if (!share->base.born_transactional)   /* For transactional ones ... */
   {
     /* ... force crash if no trn given */
-    _ma_set_trn_for_table(&info, &dummy_transaction_object);
+    _ma_set_tmp_trn_for_table(&info, &dummy_transaction_object);
     info.state= &share->state.state;	/* Change global values by default */
   }
   else
@@ -247,20 +250,6 @@ err:
 } /* maria_clone_internal */
 
 
-/* Make a clone of a maria table */
-
-MARIA_HA *maria_clone(MARIA_SHARE *share, int mode)
-{
-  MARIA_HA *new_info;
-  mysql_mutex_lock(&THR_LOCK_maria);
-  new_info= maria_clone_internal(share, NullS, mode,
-                                 share->data_file_type == BLOCK_RECORD ?
-                                 share->bitmap.file.file : -1, 0);
-  mysql_mutex_unlock(&THR_LOCK_maria);
-  return new_info;
-}
-
-
 /******************************************************************************
   open a MARIA table
 
@@ -276,10 +265,11 @@ MARIA_HA *maria_open(const char *name, int mode, uint open_flags)
   uint i,j,len,errpos,head_length,base_pos,keys, realpath_err,
     key_parts,unique_key_parts,fulltext_keys,uniques;
   uint internal_table= MY_TEST(open_flags & HA_OPEN_INTERNAL_TABLE);
+  uint file_version;
   size_t info_length;
   char name_buff[FN_REFLEN], org_name[FN_REFLEN], index_name[FN_REFLEN],
        data_name[FN_REFLEN];
-  uchar *disk_cache, *disk_pos, *end_pos;
+  uchar *UNINIT_VAR(disk_cache), *disk_pos, *end_pos;
   MARIA_HA info, *UNINIT_VAR(m_info), *old_info;
   MARIA_SHARE share_buff,*share;
   double *rec_per_key_part;
@@ -298,8 +288,13 @@ MARIA_HA *maria_open(const char *name, int mode, uint open_flags)
   realpath_err= my_realpath(name_buff, fn_format(org_name, name, "",
                                                  MARIA_NAME_IEXT,
                                                  MY_UNPACK_FILENAME),MYF(0));
+  if (realpath_err > 0) /* File not found, no point in looking further. */
+  {
+    DBUG_RETURN(NULL);
+  }
+
   if (my_is_symlink(org_name) &&
-      (realpath_err || (*maria_test_invalid_symlink)(name_buff)))
+      (realpath_err || mysys_test_invalid_symlink(name_buff)))
   {
     my_errno= HA_WRONG_CREATE_OPTION;
     DBUG_RETURN(0);
@@ -324,19 +319,22 @@ MARIA_HA *maria_open(const char *name, int mode, uint open_flags)
                       my_errno= HA_ERR_CRASHED;
                       goto err;
                     });
+    DEBUG_SYNC_C("mi_open_kfile");
     if ((kfile=mysql_file_open(key_file_kfile, name_buff,
-                               (open_mode=O_RDWR) | O_SHARE,MYF(0))) < 0)
+                               (open_mode=O_RDWR) | O_SHARE | O_NOFOLLOW | O_CLOEXEC,
+                               MYF(MY_NOSYMLINKS))) < 0)
     {
       if ((errno != EROFS && errno != EACCES) ||
 	  mode != O_RDONLY ||
 	  (kfile=mysql_file_open(key_file_kfile, name_buff,
-                                 (open_mode=O_RDONLY) | O_SHARE,MYF(0))) < 0)
+                                 (open_mode=O_RDONLY) | O_SHARE | O_NOFOLLOW | O_CLOEXEC,
+                                 MYF(MY_NOSYMLINKS))) < 0)
 	goto err;
     }
     share->mode=open_mode;
     errpos= 1;
-    if (mysql_file_pread(kfile,share->state.header.file_version, head_length, 0,
-                 MYF(MY_NABP)))
+    if (mysql_file_pread(kfile,share->state.header.file_version, head_length,
+                         0, MYF(MY_NABP)))
     {
       my_errno= HA_ERR_NOT_A_TABLE;
       goto err;
@@ -375,7 +373,18 @@ MARIA_HA *maria_open(const char *name, int mode, uint open_flags)
       (void) strmov(index_name, org_name);
     *strrchr(org_name, FN_EXTCHAR)= '\0';
     (void) fn_format(data_name,org_name,"",MARIA_NAME_DEXT,
-                     MY_APPEND_EXT|MY_UNPACK_FILENAME|MY_RESOLVE_SYMLINKS);
+                     MY_APPEND_EXT|MY_UNPACK_FILENAME);
+    if (my_is_symlink(data_name))
+    {
+      if (my_realpath(data_name, data_name, MYF(0)))
+        goto err;
+      if (mysys_test_invalid_symlink(data_name))
+      {
+        my_errno= HA_WRONG_CREATE_OPTION;
+        goto err;
+      }
+      share->mode|= O_NOFOLLOW; /* all symlinks are resolved by realpath() */
+    }
 
     info_length=mi_uint2korr(share->state.header.header_length);
     base_pos= mi_uint2korr(share->state.header.base_pos);
@@ -429,6 +438,14 @@ MARIA_HA *maria_open(const char *name, int mode, uint open_flags)
 			    len,MARIA_BASE_INFO_SIZE));
     }
     disk_pos= _ma_base_info_read(disk_cache + base_pos, &share->base);
+    /*
+      Check if old version of Aria file. Version 0 has language
+      stored in header.not_used
+    */
+    file_version= (share->state.header.not_used == 0);
+    if (file_version == 0)
+      share->base.language= share->state.header.not_used;
+    
     share->state.state_length=base_pos;
     /* For newly opened tables we reset the error-has-been-printed flag */
     share->state.changed&= ~STATE_CRASHED_PRINTED;
@@ -537,7 +554,10 @@ MARIA_HA *maria_open(const char *name, int mode, uint open_flags)
     set_if_smaller(max_data_file_length, INT_MAX32);
     set_if_smaller(max_key_file_length, INT_MAX32);
 #endif
-    share->base.max_data_file_length=(my_off_t) max_data_file_length;
+    /* For internal temporary tables, max_data_file_length is already set */
+    if (!internal_table || !share->base.max_data_file_length)
+      share->base.max_data_file_length=(my_off_t) max_data_file_length;
+    DBUG_ASSERT(share->base.max_data_file_length);
     share->base.max_key_file_length=(my_off_t) max_key_file_length;
 
     if (share->options & HA_OPTION_COMPRESS_RECORD)
@@ -844,7 +864,7 @@ MARIA_HA *maria_open(const char *name, int mode, uint open_flags)
     if ((share->data_file_type == BLOCK_RECORD ||
          share->data_file_type == COMPRESSED_RECORD))
     {
-      if (_ma_open_datafile(&info, share, name, -1))
+      if (_ma_open_datafile(&info, share))
         goto err;
       data_file= info.dfile.file;
     }
@@ -881,8 +901,12 @@ MARIA_HA *maria_open(const char *name, int mode, uint open_flags)
 					 share->block_size * keys : 0));
     my_free(disk_cache);
     _ma_setup_functions(share);
+    max_data_file_length= share->base.max_data_file_length;
     if ((*share->once_init)(share, info.dfile.file))
       goto err;
+    if (internal_table)
+      set_if_smaller(share->base.max_data_file_length,
+                     max_data_file_length);
     if (share->now_transactional)
     {
       /* Setup initial state that is visible for all */
@@ -1016,7 +1040,7 @@ MARIA_HA *maria_open(const char *name, int mode, uint open_flags)
       data_file= share->bitmap.file.file;       /* Only opened once */
   }
 
-  if (!(m_info= maria_clone_internal(share, name, mode, data_file,
+  if (!(m_info= maria_clone_internal(share, mode, data_file,
                                      internal_table)))
     goto err;
 
@@ -1337,7 +1361,7 @@ uint _ma_state_info_write(MARIA_SHARE *share, uint pWrite)
 
   if (pWrite & MA_STATE_INFO_WRITE_LOCK)
     mysql_mutex_lock(&share->intern_lock);
-  else if (maria_multi_threaded)
+  else if (maria_multi_threaded && !share->temporary)
     mysql_mutex_assert_owner(&share->intern_lock);
   if (share->base.born_transactional && translog_status == TRANSLOG_OK &&
       !maria_in_recovery)
@@ -1348,7 +1372,7 @@ uint _ma_state_info_write(MARIA_SHARE *share, uint pWrite)
       is too new). Recovery does it by itself.
     */
     share->state.is_of_horizon= translog_get_horizon();
-    DBUG_PRINT("info", ("is_of_horizon set to LSN (%lu,0x%lx)",
+    DBUG_PRINT("info", ("is_of_horizon set to LSN " LSN_FMT "",
                         LSN_IN_PARTS(share->state.is_of_horizon)));
   }
   res= _ma_state_info_write_sub(share->kfile.file, &share->state, pWrite);
@@ -1581,7 +1605,7 @@ uint _ma_base_info_write(File file, MARIA_BASE_INFO *base)
   mi_int2store(ptr,base->null_bytes);                   ptr+= 2;
   mi_int2store(ptr,base->original_null_bytes);	        ptr+= 2;
   mi_int2store(ptr,base->field_offsets);	        ptr+= 2;
-  mi_int2store(ptr,0);				        ptr+= 2; /* reserved */
+  mi_int2store(ptr,base->language);		        ptr+= 2;
   mi_int2store(ptr,base->block_size);	        	ptr+= 2;
   *ptr++= base->rec_reflength;
   *ptr++= base->key_reflength;
@@ -1624,7 +1648,7 @@ static uchar *_ma_base_info_read(uchar *ptr, MARIA_BASE_INFO *base)
   base->null_bytes= mi_uint2korr(ptr);			ptr+= 2;
   base->original_null_bytes= mi_uint2korr(ptr);		ptr+= 2;
   base->field_offsets= mi_uint2korr(ptr);		ptr+= 2;
-                                                        ptr+= 2;
+  base->language= mi_uint2korr(ptr);		        ptr+= 2;
   base->block_size= mi_uint2korr(ptr);			ptr+= 2;
 
   base->rec_reflength= *ptr++;
@@ -1689,10 +1713,10 @@ my_bool _ma_keyseg_write(File file, const HA_KEYSEG *keyseg)
   ulong pos;
 
   *ptr++= keyseg->type;
-  *ptr++= keyseg->language;
+  *ptr++= keyseg->language & 0xFF; /* Collation ID, low byte */
   *ptr++= keyseg->null_bit;
   *ptr++= keyseg->bit_start;
-  *ptr++= keyseg->bit_end;
+  *ptr++= keyseg->language >> 8; /* Collation ID, high byte */
   *ptr++= keyseg->bit_length;
   mi_int2store(ptr,keyseg->flag);	ptr+= 2;
   mi_int2store(ptr,keyseg->length);	ptr+= 2;
@@ -1711,7 +1735,7 @@ uchar *_ma_keyseg_read(uchar *ptr, HA_KEYSEG *keyseg)
    keyseg->language	= *ptr++;
    keyseg->null_bit	= *ptr++;
    keyseg->bit_start	= *ptr++;
-   keyseg->bit_end	= *ptr++;
+   keyseg->language	+= ((uint16) (*ptr++)) << 8;
    keyseg->bit_length   = *ptr++;
    keyseg->flag		= mi_uint2korr(ptr);  ptr+= 2;
    keyseg->length	= mi_uint2korr(ptr);  ptr+= 2;
@@ -1904,35 +1928,15 @@ void _ma_set_index_pagecache_callbacks(PAGECACHE_FILE *file,
  Open data file
   We can't use dup() here as the data file descriptors need to have different
   active seek-positions.
-
-  The argument file_to_dup is here for the future if there would on some OS
-  exist a dup()-like call that would give us two different file descriptors.
 *************************************************************************/
 
-int _ma_open_datafile(MARIA_HA *info, MARIA_SHARE *share, const char *org_name,
-                      File file_to_dup __attribute__((unused)))
+int _ma_open_datafile(MARIA_HA *info, MARIA_SHARE *share)
 {
-  char *data_name= share->data_file_name.str;
-  char real_data_name[FN_REFLEN];
-
-  if (org_name)
-  {
-    fn_format(real_data_name, org_name, "", MARIA_NAME_DEXT, 4);
-    if (my_is_symlink(real_data_name))
-    {
-      if (my_realpath(real_data_name, real_data_name, MYF(0)) ||
-          (*maria_test_invalid_symlink)(real_data_name))
-      {
-        my_errno= HA_WRONG_CREATE_OPTION;
-        return 1;
-      }
-      data_name= real_data_name;
-    }
-  }
-
+  myf flags= MY_WME | (share->mode & O_NOFOLLOW ? MY_NOSYMLINKS : 0);
+  DEBUG_SYNC_C("mi_open_datafile");
   info->dfile.file= share->bitmap.file.file=
-    mysql_file_open(key_file_dfile, data_name,
-                    share->mode | O_SHARE, MYF(MY_WME));
+    mysql_file_open(key_file_dfile, share->data_file_name.str,
+                    share->mode | O_SHARE | O_CLOEXEC, MYF(flags));
   return info->dfile.file >= 0 ? 0 : 1;
 }
 
@@ -1946,8 +1950,8 @@ int _ma_open_keyfile(MARIA_SHARE *share)
   mysql_mutex_lock(&share->intern_lock);
   share->kfile.file= mysql_file_open(key_file_kfile,
                                      share->unique_file_name.str,
-                                     share->mode | O_SHARE,
-                             MYF(MY_WME));
+                                     share->mode | O_SHARE | O_NOFOLLOW | O_CLOEXEC,
+                             MYF(MY_WME | MY_NOSYMLINKS));
   mysql_mutex_unlock(&share->intern_lock);
   return (share->kfile.file < 0);
 }

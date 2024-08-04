@@ -11,13 +11,13 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA 
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335  USA 
 
 #
 # Global constants, only to be changed between major releases.
 #
 
-SET(SHARED_LIB_MAJOR_VERSION "18")
+SET(SHARED_LIB_MAJOR_VERSION "19")
 SET(PROTOCOL_VERSION "10")
 SET(DOT_FRM_VERSION "6")
 
@@ -69,29 +69,28 @@ ENDMACRO()
 # Get mysql version and other interesting variables
 GET_MYSQL_VERSION()
 
-SET(MYSQL_TCP_PORT_DEFAULT "3306")
+SET(MYSQL_TCP_PORT_DEFAULT 0)
+SET_IF_UNSET(MYSQL_TCP_PORT 3306)
 
-IF(NOT MYSQL_TCP_PORT)
-  SET(MYSQL_TCP_PORT ${MYSQL_TCP_PORT_DEFAULT})
-  SET(MYSQL_TCP_PORT_DEFAULT "0")
-ELSEIF(MYSQL_TCP_PORT EQUAL MYSQL_TCP_PORT_DEFAULT)
-  SET(MYSQL_TCP_PORT_DEFAULT "0")
-ENDIF()
-
-IF(NOT COMPILATION_COMMENT)
-  SET(COMPILATION_COMMENT "Source distribution")
-ENDIF()
+SET_IF_UNSET(COMPILATION_COMMENT "Source distribution")
 
 INCLUDE(package_name)
 IF(NOT CPACK_PACKAGE_FILE_NAME)
   GET_PACKAGE_FILE_NAME(CPACK_PACKAGE_FILE_NAME)
 ENDIF()
 
-IF(NOT CPACK_SOURCE_PACKAGE_FILE_NAME)
-  SET(CPACK_SOURCE_PACKAGE_FILE_NAME "mariadb-${VERSION}")
-ENDIF()
-SET(CPACK_PACKAGE_CONTACT "MariaDB team <info@montyprogram.com>")
-SET(CPACK_PACKAGE_VENDOR "Monty Program AB")
+SET_IF_UNSET(CPACK_SOURCE_PACKAGE_FILE_NAME "mariadb-${VERSION}")
+SET_IF_UNSET(CPACK_PACKAGE_CONTACT "MariaDB Developers <maria-developers@lists.launchpad.net>")
+SET_IF_UNSET(CPACK_PACKAGE_VENDOR "MariaDB Foundation")
+SET_IF_UNSET(CPACK_PACKAGE_DESCRIPTION "${CPACK_PACKAGE_DESCRIPTION_SUMMARY}
+
+It is GPL v2 licensed, which means you can use the it free of charge under the
+conditions of the GNU General Public License Version 2 (http://www.gnu.org/licenses/).
+
+MariaDB documentation can be found at https://mariadb.com/kb
+MariaDB bug reports should be submitted through https://jira.mariadb.org
+
+")
 SET(CPACK_SOURCE_GENERATOR "TGZ")
 
 # Defintions for windows version resources

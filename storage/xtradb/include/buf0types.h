@@ -12,7 +12,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -56,17 +56,6 @@ enum buf_flush_t {
 	BUF_FLUSH_SINGLE_PAGE,		/*!< flush via the LRU list
 					but only a single page */
 	BUF_FLUSH_N_TYPES		/*!< index of last element + 1  */
-};
-
-/** Algorithm to remove the pages for a tablespace from the buffer pool.
-See buf_LRU_flush_or_remove_pages(). */
-enum buf_remove_t {
-	BUF_REMOVE_ALL_NO_WRITE,	/*!< Remove all pages from the buffer
-					pool, don't write or sync to disk */
-	BUF_REMOVE_FLUSH_NO_WRITE,	/*!< Remove only, from the flush list,
-					don't write or sync to disk */
-	BUF_REMOVE_FLUSH_WRITE		/*!< Flush dirty pages to disk only
-					don't remove from the buffer pool */
 };
 
 /** Flags for io_fix types */

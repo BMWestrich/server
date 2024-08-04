@@ -5,7 +5,7 @@
 /*                                                                          */
 /* COPYRIGHT:                                                               */
 /* ----------                                                               */
-/*  (C) Copyright to the author Olivier BERTRAND          2005-2015         */
+/*  (C) Copyright to the author Olivier BERTRAND          2005-2017         */
 /*                                                                          */
 /* WHAT THIS PROGRAM DOES:                                                  */
 /* -----------------------                                                  */
@@ -22,12 +22,12 @@
 /*  Include relevant sections of the System header files.              */
 /***********************************************************************/
 #include "my_global.h"
-#if defined(__WIN__)
+#if defined(_WIN32)
 #include <io.h>
 #include <fcntl.h>
 //#include <errno.h>
 //#include <windows.h>
-#else   // !__WIN__
+#else   // !_WIN32
 #if defined(UNIX)
 #include <errno.h>
 #include <unistd.h>
@@ -35,7 +35,7 @@
 //#include <io.h>
 #endif  // !UNIX
 //#include <fcntl.h>
-#endif  // !__WIN__
+#endif  // !_WIN32
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
@@ -49,6 +49,7 @@
 #include "global.h"
 #include "plgdbsem.h"
 #include "filamdbf.h"
+#include "filamzip.h"
 #include "tabdos.h"
 #include "valblk.h"
 #define  NO_FUNC
@@ -128,7 +129,7 @@ typedef struct _descriptor {
 /*      Moves file pointer to byte 32; fills buffer at buf with             */
 /*  first 32 bytes of file.                                                 */
 /****************************************************************************/
-static int dbfhead(PGLOBAL g, FILE *file, PSZ fn, DBFHEADER *buf)
+static int dbfhead(PGLOBAL g, FILE *file, PCSZ fn, DBFHEADER *buf)
   {
   char endmark[2];
   int  dbc = 2, rc = RC_OK;
@@ -139,7 +140,7 @@ static int dbfhead(PGLOBAL g, FILE *file, PSZ fn, DBFHEADER *buf)
   if (fread(buf, HEADLEN, 1, file) != 1) {
     strcpy(g->Message, MSG(NO_READ_32));
     return RC_NF;
-    } // endif fread
+  } // endif fread
 
   // Check first byte to be sure of .dbf type
   if ((buf->Version & 0x03) != DBFTYPE) {
@@ -149,7 +150,7 @@ static int dbfhead(PGLOBAL g, FILE *file, PSZ fn, DBFHEADER *buf)
     if ((buf->Version & 0x30) == 0x30) {
       strcpy(g->Message, MSG(FOXPRO_FILE));
       dbc = 264;             // FoxPro database container
-      } // endif Version
+    } // endif Version
 
   } else
     strcpy(g->Message, MSG(DBASE_FILE));
@@ -158,12 +159,12 @@ static int dbfhead(PGLOBAL g, FILE *file, PSZ fn, DBFHEADER *buf)
   if (fseek(file, buf->Headlen() - dbc, SEEK_SET) != 0) {
     sprintf(g->Message, MSG(BAD_HEADER), fn);
     return RC_FX;
-    } // endif fseek
+  } // endif fseek
 
   if (fread(&endmark, 2, 1, file) != 1) {
     strcpy(g->Message, MSG(BAD_HEAD_END));
     return RC_FX;
-    } // endif fread
+  } // endif fread
 
   // Some files have just 1D others have 1D00 following fields
   if (endmark[0] != EOH && endmark[1] != EOH) {
@@ -172,7 +173,7 @@ static int dbfhead(PGLOBAL g, FILE *file, PSZ fn, DBFHEADER *buf)
     if (rc == RC_OK)
       return RC_FX;
 
-    } // endif endmark
+  } // endif endmark
 
   // Calculate here the number of fields while we have the dbc info
   buf->SetFields((buf->Headlen() - dbc - 1) / 32);
@@ -180,13 +181,58 @@ static int dbfhead(PGLOBAL g, FILE *file, PSZ fn, DBFHEADER *buf)
   return rc;
   } // end of dbfhead
 
+/****************************************************************************/
+/*  dbfields: Analyze a DBF header and set the table fields number.         */
+/*  Parameters:                                                             */
+/*      PGLOBAL g       -- pointer to the CONNECT Global structure          */
+/*      DBFHEADER *hdrp -- pointer to _dbfheader structure                  */
+/*  Returns:                                                                */
+/*      RC_OK, RC_INFO, or RC_FX if error.                                  */
+/****************************************************************************/
+static int dbfields(PGLOBAL g, DBFHEADER* hdrp)
+{
+	char* endmark;
+	int   dbc = 2, rc = RC_OK;
+
+	*g->Message = '\0';
+
+	// Check first byte to be sure of .dbf type
+	if ((hdrp->Version & 0x03) != DBFTYPE) {
+		strcpy(g->Message, MSG(NOT_A_DBF_FILE));
+		rc = RC_INFO;
+
+		if ((hdrp->Version & 0x30) == 0x30) {
+			strcpy(g->Message, MSG(FOXPRO_FILE));
+			dbc = 264;             // FoxPro database container
+		} // endif Version
+
+	} else
+		strcpy(g->Message, MSG(DBASE_FILE));
+
+	// Check last byte(s) of header
+	endmark = (char*)hdrp + hdrp->Headlen() - dbc;
+
+	// Some headers just have 1D others have 1D00 following fields
+	if (endmark[0] != EOH && endmark[1] != EOH) {
+		sprintf(g->Message, MSG(NO_0DH_HEAD), dbc);
+
+		if (rc == RC_OK)
+			return RC_FX;
+
+	} // endif endmark
+
+	// Calculate here the number of fields while we have the dbc info
+	hdrp->SetFields((hdrp->Headlen() - dbc - 1) / 32);
+	return rc;
+} // end of dbfields
+
 /* -------------------------- Function DBFColumns ------------------------- */
 
 /****************************************************************************/
 /*  DBFColumns: constructs the result blocks containing the description     */
 /*  of all the columns of a DBF file that will be retrieved by #GetData.    */
 /****************************************************************************/
-PQRYRES DBFColumns(PGLOBAL g, char *dp, const char *fn, bool info)
+PQRYRES DBFColumns(PGLOBAL g, PCSZ dp, PCSZ fn, PTOS topt, bool info)
   {
   int  buftyp[] = {TYPE_STRING, TYPE_SHORT, TYPE_STRING,
                    TYPE_INT,    TYPE_INT,   TYPE_SHORT};
@@ -196,14 +242,16 @@ PQRYRES DBFColumns(PGLOBAL g, char *dp, const char *fn, bool info)
   char       buf[2], filename[_MAX_PATH];
   int        ncol = sizeof(buftyp) / sizeof(int);
   int        rc, type, len, field, fields;
-  bool       bad;
-  DBFHEADER  mainhead;
-  DESCRIPTOR thisfield;
-  FILE      *infile = NULL;
+  bool       bad, mul;
+	PCSZ       target, pwd;
+  DBFHEADER  mainhead, *hp;
+	DESCRIPTOR thisfield, *tfp;
+	FILE      *infile = NULL;
+	UNZIPUTL  *zutp = NULL;
   PQRYRES    qrp;
   PCOLRES    crp;
 
-  if (trace)
+  if (trace(1))
     htrc("DBFColumns: File %s\n", SVP(fn));
 
   if (!info) {
@@ -217,21 +265,55 @@ PQRYRES DBFColumns(PGLOBAL g, char *dp, const char *fn, bool info)
     /************************************************************************/
     PlugSetPath(filename, fn, dp);
 
-    if (!(infile= global_fopen(g, MSGID_CANNOT_OPEN, filename, "rb")))
-      return NULL;
+		if (topt->zipped) {
+			target = GetStringTableOption(g, topt, "Entry", NULL);
+			mul = (target && *target) ? strchr(target, '*') || strchr(target, '?')
+				                        : false;
+			mul = GetBooleanTableOption(g, topt, "Mulentries", mul);
 
-    /************************************************************************/
-    /*  Get the first 32 bytes of the header.                               */
-    /************************************************************************/
-    if ((rc = dbfhead(g, infile, filename, &mainhead)) == RC_FX) {
-      fclose(infile);
-      return NULL;
-      } // endif dbfhead
+			if (mul) {
+				strcpy(g->Message, "Cannot find column definition for multiple entries");
+				return NULL;
+			} // endif Multiple
 
-    /************************************************************************/
-    /*  Allocate the structures used to refer to the result set.            */
-    /************************************************************************/
-    fields = mainhead.Fields();
+			pwd = GetStringTableOption(g, topt, "Password", NULL);
+			zutp = new(g) UNZIPUTL(target, pwd, mul);
+
+			if (!zutp->OpenTable(g, MODE_READ, filename))
+				hp = (DBFHEADER*)zutp->memory;
+			else
+				return NULL;
+
+			/**********************************************************************/
+			/*  Set the table fields number.                                      */
+			/**********************************************************************/
+			if ((rc = dbfields(g, hp)) == RC_FX) {
+				zutp->close();
+				return NULL;
+			} // endif dbfields
+
+			tfp = (DESCRIPTOR*)hp;
+		} else {
+			if (!(infile = global_fopen(g, MSGID_CANNOT_OPEN, filename, "rb")))
+				return NULL;
+		  else
+			  hp = &mainhead;
+
+			/**********************************************************************/
+			/*  Get the first 32 bytes of the header.                             */
+			/**********************************************************************/
+			if ((rc = dbfhead(g, infile, filename, hp)) == RC_FX) {
+				fclose(infile);
+				return NULL;
+			} // endif dbfhead
+
+			tfp = &thisfield;
+		} // endif zipped
+
+		/************************************************************************/
+		/*  Get the number of the table fields.                                 */
+		/************************************************************************/
+		fields = hp->Fields();
   } else
     fields = 0;
 
@@ -241,19 +323,21 @@ PQRYRES DBFColumns(PGLOBAL g, char *dp, const char *fn, bool info)
   if (info || !qrp) {
   	if (infile)
       fclose(infile);
+		else if (zutp)
+			zutp->close();
       
     return qrp;
-    } // endif info
+  } // endif info
 
-  if (trace) {
+  if (trace(1)) {
     htrc("Structure of %s\n", filename);
     htrc("headlen=%hd reclen=%hd degree=%d\n",
-          mainhead.Headlen(), mainhead.Reclen(), fields);
-    htrc("flags(iem)=%d,%d,%d cp=%d\n", mainhead.Incompleteflag,
-          mainhead.Encryptflag, mainhead.Mdxflag, mainhead.Language);
+          hp->Headlen(), hp->Reclen(), fields);
+    htrc("flags(iem)=%d,%d,%d cp=%d\n", hp->Incompleteflag,
+          hp->Encryptflag, hp->Mdxflag, hp->Language);
     htrc("%hd records, last changed %02d/%02d/%d\n",
-          mainhead.Records(), mainhead.Filedate[1], mainhead.Filedate[2],
-          mainhead.Filedate[0] + (mainhead.Filedate[0] <= 30) ? 2000 : 1900);
+          hp->Records(), hp->Filedate[1], hp->Filedate[2],
+          hp->Filedate[0] + (hp->Filedate[0] <= 30) ? 2000 : 1900);
     htrc("Field    Type  Offset  Len  Dec  Set  Mdx\n");
     } // endif trace
 
@@ -265,39 +349,52 @@ PQRYRES DBFColumns(PGLOBAL g, char *dp, const char *fn, bool info)
   for (field = 0; field < fields; field++) {
     bad = FALSE;
 
-    if (fread(&thisfield, HEADLEN, 1, infile) != 1) {
+		if (topt->zipped) {
+			tfp = (DESCRIPTOR*)((char*)tfp + HEADLEN);
+		} else if (fread(tfp, HEADLEN, 1, infile) != 1) {
       sprintf(g->Message, MSG(ERR_READING_REC), field+1, fn);
       goto err;
-    } else
-      len = thisfield.Length;
+    } // endif fread
 
-    if (trace)
+    len = tfp->Length;
+
+    if (trace(1))
       htrc("%-11s %c  %6ld  %3d   %2d  %3d  %3d\n",
-           thisfield.Name, thisfield.Type, thisfield.Offset, len,
-           thisfield.Decimals, thisfield.Setfield, thisfield.Mdxfield);
+           tfp->Name, tfp->Type, tfp->Offset, len,
+           tfp->Decimals, tfp->Setfield, tfp->Mdxfield);
 
     /************************************************************************/
     /*  Now get the results into blocks.                                    */
     /************************************************************************/
-    switch (thisfield.Type) {
+    switch (tfp->Type) {
       case 'C':                      // Characters
-      case 'L':                      // Logical 'T' or 'F'
-        type = TYPE_STRING;
+      case 'L':                      // Logical 'T' or 'F' or space
+				type = TYPE_STRING;
+				break;
+			case 'M':                      // Memo		a .DBT block number
+			case 'B':                      // Binary	a .DBT block number
+			case 'G':                      // Ole			a .DBT block number
+				type = TYPE_STRING;
         break;
+			//case 'I':											 // Long
+			//case '+':											 // Autoincrement
+			//	type = TYPE_INT;
+			//	break;
       case 'N':
-        type = (thisfield.Decimals) ? TYPE_DOUBLE
+        type = (tfp->Decimals) ? TYPE_DOUBLE
              : (len > 10) ? TYPE_BIGINT : TYPE_INT;
         break;
-      case 'F':
-        type = TYPE_DOUBLE;
+      case 'F':											 // Float
+			//case 'O':											 // Double
+				type = TYPE_DOUBLE;
         break;
       case 'D':
         type = TYPE_DATE;            // Is this correct ???
         break;
       default:
         if (!info) {
-          sprintf(g->Message, MSG(BAD_DBF_TYPE), thisfield.Type
-                                               , thisfield.Name);
+          sprintf(g->Message, MSG(BAD_DBF_TYPE), tfp->Type
+                                               , tfp->Name);
           goto err;
           } // endif info
 
@@ -306,27 +403,31 @@ PQRYRES DBFColumns(PGLOBAL g, char *dp, const char *fn, bool info)
       } // endswitch Type
 
     crp = qrp->Colresp;                    // Column Name
-    crp->Kdata->SetValue(thisfield.Name, field);
+    crp->Kdata->SetValue(tfp->Name, field);
     crp = crp->Next;                       // Data Type
     crp->Kdata->SetValue((int)type, field);
     crp = crp->Next;                       // Type Name
 
     if (bad) {
-      buf[0] = thisfield.Type;
+      buf[0] = tfp->Type;
       crp->Kdata->SetValue(buf, field);
     } else
       crp->Kdata->SetValue(GetTypeName(type), field);
 
     crp = crp->Next;                       // Precision
-    crp->Kdata->SetValue((int)thisfield.Length, field);
+    crp->Kdata->SetValue((int)tfp->Length, field);
     crp = crp->Next;                       // Length
-    crp->Kdata->SetValue((int)thisfield.Length, field);
+    crp->Kdata->SetValue((int)tfp->Length, field);
     crp = crp->Next;                       // Scale (precision)
-    crp->Kdata->SetValue((int)thisfield.Decimals, field);
+    crp->Kdata->SetValue((int)tfp->Decimals, field);
     } // endfor field
 
   qrp->Nblin = field;
-  fclose(infile);
+
+	if (infile)
+		fclose(infile);
+	else if (zutp)
+		zutp->close();
 
 #if 0
   if (info) {
@@ -337,9 +438,9 @@ PQRYRES DBFColumns(PGLOBAL g, char *dp, const char *fn, bool info)
 
     sprintf(buf,
       "Ver=%02x ncol=%hu nlin=%u lrecl=%hu headlen=%hu date=%02d/%02d/%02d",
-      mainhead.Version, fields, mainhead.Records, mainhead.Reclen,
-      mainhead.Headlen, mainhead.Filedate[0], mainhead.Filedate[1],
-      mainhead.Filedate[2]);
+      hp->Version, fields, hp->Records, hp->Reclen,
+      hp->Headlen, hp->Filedate[0], hp->Filedate[1],
+      hp->Filedate[2]);
 
     strcat(g->Message, buf);
     } // endif info
@@ -350,9 +451,13 @@ PQRYRES DBFColumns(PGLOBAL g, char *dp, const char *fn, bool info)
   /**************************************************************************/
   return qrp;
 
- err:
-  fclose(infile);
-  return NULL;
+err:
+	if (infile)
+		fclose(infile);
+	else if (zutp)
+		zutp->close();
+
+	return NULL;
   } // end of DBFColumns
 
 /* ---------------------------- Class DBFBASE ----------------------------- */
@@ -383,7 +488,7 @@ DBFBASE::DBFBASE(DBFBASE *txfp)
 /*  and header length. Set Records, check that Reclen is equal to lrecl and */
 /*  return the header length or 0 in case of error.                         */
 /****************************************************************************/
-int DBFBASE::ScanHeader(PGLOBAL g, PSZ fname, int lrecl, char *defpath)
+int DBFBASE::ScanHeader(PGLOBAL g, PCSZ fn, int lrecl, int *rln, PCSZ defpath)
   {
   int       rc;
   char      filename[_MAX_PATH];
@@ -393,7 +498,7 @@ int DBFBASE::ScanHeader(PGLOBAL g, PSZ fname, int lrecl, char *defpath)
   /************************************************************************/
   /*  Open the input file.                                                */
   /************************************************************************/
-  PlugSetPath(filename, fname, defpath);
+  PlugSetPath(filename, fn, defpath);
 
   if (!(infile= global_fopen(g, MSGID_CANNOT_OPEN, filename, "rb")))
     return 0;              // Assume file does not exist
@@ -410,11 +515,7 @@ int DBFBASE::ScanHeader(PGLOBAL g, PSZ fname, int lrecl, char *defpath)
   } else if (rc == RC_FX)
     return -1;
 
-  if ((int)header.Reclen() != lrecl) {
-    sprintf(g->Message, MSG(BAD_LRECL), lrecl, header.Reclen());
-    return -1;
-    } // endif Lrecl
-
+	*rln = (int)header.Reclen();
   Records = (int)header.Records();
   return (int)header.Headlen();
   } // end of ScanHeader
@@ -431,9 +532,28 @@ int DBFFAM::Cardinality(PGLOBAL g)
   if (!g)
     return 1;
 
-  if (!Headlen)
-    if ((Headlen = ScanHeader(g, To_File, Lrecl, Tdbp->GetPath())) < 0)
-      return -1;                // Error in ScanHeader
+	if (!Headlen) {
+		int rln = 0;								// Record length in the file header
+
+		Headlen = ScanHeader(g, To_File, Lrecl, &rln, Tdbp->GetPath());
+
+		if (Headlen < 0)
+			return -1;                // Error in ScanHeader
+
+		if (rln && Lrecl != rln) {
+			// This happens always on some Linux platforms
+			sprintf(g->Message, MSG(BAD_LRECL), Lrecl, (ushort)rln);
+
+			if (Accept) {
+				Lrecl = rln;
+				Blksize = Nrec * rln;
+				PushWarning(g, Tdbp);
+			} else
+				return -1;
+
+		} // endif rln
+
+	}	// endif Headlen
 
   // Set number of blocks for later use
   Block = (Records > 0) ? (Records + Nrec - 1) / Nrec : 0;
@@ -478,7 +598,8 @@ bool DBFFAM::OpenTableFile(PGLOBAL g)
         break;
         } // endif
 
-      // Selective delete, pass thru
+      // Selective delete
+      /* fall through */
     case MODE_UPDATE:
       UseTemp = Tdbp->IsUsingTemp(g);
       strcpy(opmode, (UseTemp) ? "rb" : "r+b");
@@ -496,14 +617,14 @@ bool DBFFAM::OpenTableFile(PGLOBAL g)
   PlugSetPath(filename, To_File, Tdbp->GetPath());
 
   if (!(Stream = PlugOpenFile(g, filename, opmode))) {
-    if (trace)
+    if (trace(1))
       htrc("%s\n", g->Message);
     
     return (mode == MODE_READ && errno == ENOENT)
             ? PushWarning(g, Tdbp) : true;
     } // endif Stream
 
-  if (trace)
+  if (trace(1))
     htrc("File %s is open in mode %s\n", filename, opmode);
 
   To_Fb = dbuserp->Openlist;     // Keep track of File block
@@ -528,7 +649,7 @@ bool DBFFAM::AllocateBuffer(PGLOBAL g)
   To_Buf = (char*)PlugSubAlloc(g, NULL, Buflen);
 
   if (mode == MODE_INSERT) {
-#if defined(__WIN__)
+#if defined(_WIN32)
     /************************************************************************/
     /*  Now we can revert to binary mode in particular because the eventual */
     /*  writing of a new header must be done in binary mode to avoid        */
@@ -538,7 +659,7 @@ bool DBFFAM::AllocateBuffer(PGLOBAL g)
       sprintf(g->Message, MSG(BIN_MODE_FAIL), strerror(errno));
       return true;
       } // endif setmode
-#endif   // __WIN__
+#endif   // _WIN32
 
     /************************************************************************/
     /*  If this is a new file, the header must be generated.                */
@@ -565,7 +686,14 @@ bool DBFFAM::AllocateBuffer(PGLOBAL g)
 
       if (Lrecl != reclen) {
         sprintf(g->Message, MSG(BAD_LRECL), Lrecl, reclen);
-        return true;
+
+				if (Accept) {
+					Lrecl = reclen;
+					Blksize = Nrec * Lrecl;
+					PushWarning(g, Tdbp);
+				}	else
+					return true;
+
         } // endif Lrecl
 
       hlen = HEADLEN * (n + 1) + 2;
@@ -578,7 +706,7 @@ bool DBFFAM::AllocateBuffer(PGLOBAL g)
       header->Filedate[1] = datm->tm_mon + 1;
       header->Filedate[2] = datm->tm_mday;
       header->SetHeadlen((ushort)hlen);
-      header->SetReclen((ushort)reclen);
+      header->SetReclen(reclen);
       descp = (DESCRIPTOR*)header;
 
       // Currently only standard Xbase types are supported
@@ -591,6 +719,7 @@ bool DBFFAM::AllocateBuffer(PGLOBAL g)
             case 'L':           // Large (big) integer
             case 'T':           // Tiny integer
               c = 'N';          // Numeric
+              /* fall through */
             case 'N':           // Numeric (integer)
             case 'F':           // Float (double)
               descp->Decimals = (uchar)cdp->F.Prec;
@@ -641,8 +770,15 @@ bool DBFFAM::AllocateBuffer(PGLOBAL g)
     if ((rc = dbfhead(g, Stream, Tdbp->GetFile(g), &header)) == RC_OK) {
       if (Lrecl != (int)header.Reclen()) {
         sprintf(g->Message, MSG(BAD_LRECL), Lrecl, header.Reclen());
-        return true;
-        } // endif Lrecl
+
+				if (Accept) {
+					Lrecl = header.Reclen();
+					Blksize = Nrec * Lrecl;
+					PushWarning(g, Tdbp);
+				} else
+					return true;
+
+			} // endif Lrecl
 
       Records = (int)header.Records();
       Headlen = (int)header.Headlen();
@@ -897,7 +1033,7 @@ void DBFFAM::CloseTableFile(PGLOBAL g, bool abort)
     rc = PlugCloseFile(g, To_Fb);
 
  fin:
-  if (trace)
+  if (trace(1))
     htrc("DBF CloseTableFile: closing %s mode=%d wrc=%d rc=%d\n",
          To_File, mode, wrc, rc);
 
@@ -916,9 +1052,28 @@ int DBMFAM::Cardinality(PGLOBAL g)
   if (!g)
     return 1;
 
-  if (!Headlen)
-    if ((Headlen = ScanHeader(g, To_File, Lrecl, Tdbp->GetPath())) < 0)
-      return -1;                // Error in ScanHeader
+	if (!Headlen) {
+		int rln = 0;								// Record length in the file header
+
+		Headlen = ScanHeader(g, To_File, Lrecl, &rln, Tdbp->GetPath());
+
+		if (Headlen < 0)
+			return -1;                // Error in ScanHeader
+
+		if (rln && Lrecl != rln) {
+			// This happens always on some Linux platforms
+			sprintf(g->Message, MSG(BAD_LRECL), Lrecl, (ushort)rln);
+
+			if (Accept) {
+				Lrecl = rln;
+				Blksize = Nrec * Lrecl;
+				PushWarning(g, Tdbp);
+			} else
+				return -1;
+
+		} // endif rln
+
+	}	// endif Headlen
 
   // Set number of blocks for later use
   Block = (Records > 0) ? (Records + Nrec - 1) / Nrec : 0;
@@ -961,8 +1116,15 @@ bool DBMFAM::AllocateBuffer(PGLOBAL g)
 
     if (Lrecl != (int)hp->Reclen()) {
       sprintf(g->Message, MSG(BAD_LRECL), Lrecl, hp->Reclen());
-      return true;
-      } // endif Lrecl
+
+			if (Accept) {
+				Lrecl = hp->Reclen();
+				Blksize = Nrec * Lrecl;
+				PushWarning(g, Tdbp);
+			} else
+				return true;
+
+		} // endif Lrecl
 
     Records = (int)hp->Records();
     Headlen = (int)hp->Headlen();

@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License along
    with this program; if not, write to the Free Software Foundation, Inc.,
-   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA. */
+   51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA. */
 
 #include "wsrep_priv.h"
 #include "wsrep_binlog.h" // wsrep_dump_rbr_buf()
@@ -39,15 +39,9 @@ static Log_event* wsrep_read_log_event(
   const char *error= 0;
   Log_event *res=  0;
 
-  if (data_len > wsrep_max_ws_size)
-  {
-    error = "Event too big";
-    goto err;
-  }
+  res= Log_event::read_log_event(buf, data_len, &error, description_event,
+                                 true);
 
-  res= Log_event::read_log_event(buf, data_len, &error, description_event, true);
-
-err:
   if (!res)
   {
     DBUG_ASSERT(error != 0);
@@ -62,7 +56,6 @@ err:
 
 #include "transaction.h" // trans_commit(), trans_rollback()
 #include "rpl_rli.h"     // class Relay_log_info;
-#include "sql_base.h"    // close_temporary_table()
 
 void wsrep_set_apply_format(THD* thd, Format_description_log_event* ev)
 {
@@ -79,6 +72,9 @@ Format_description_log_event* wsrep_get_apply_format(THD* thd)
   {
     return (Format_description_log_event*) thd->wsrep_apply_format;
   }
+
+  DBUG_ASSERT(thd->wsrep_rgi);
+
   return thd->wsrep_rgi->rli->relay_log.description_event_for_exec;
 }
 
@@ -101,11 +97,11 @@ static wsrep_cb_status_t wsrep_apply_events(THD*        thd,
     DBUG_RETURN(WSREP_CB_FAILURE);
   }
 
-  mysql_mutex_lock(&thd->LOCK_wsrep_thd);
-  thd->wsrep_query_state= QUERY_EXEC;
+  mysql_mutex_lock(&thd->LOCK_thd_data);
+  wsrep_thd_set_query_state(thd, QUERY_EXEC);
   if (thd->wsrep_conflict_state!= REPLAYING)
     thd->wsrep_conflict_state= NO_CONFLICT;
-  mysql_mutex_unlock(&thd->LOCK_wsrep_thd);
+  mysql_mutex_unlock(&thd->LOCK_thd_data);
 
   if (!buf_len) WSREP_DEBUG("empty rbr buffer to apply: %lld",
                             (long long) wsrep_thd_trx_seqno(thd));
@@ -191,7 +187,7 @@ static wsrep_cb_status_t wsrep_apply_events(THD*        thd,
       trans_rollback(thd);
       thd->locked_tables_list.unlock_locked_tables(thd);
       /* Release transactional metadata locks. */
-      thd->mdl_context.release_transactional_locks();
+      thd->release_transactional_locks();
       thd->wsrep_conflict_state= NO_CONFLICT;
       DBUG_RETURN(WSREP_CB_FAILURE);
     }
@@ -200,9 +196,9 @@ static wsrep_cb_status_t wsrep_apply_events(THD*        thd,
   }
 
  error:
-  mysql_mutex_lock(&thd->LOCK_wsrep_thd);
-  thd->wsrep_query_state= QUERY_IDLE;
-  mysql_mutex_unlock(&thd->LOCK_wsrep_thd);
+  mysql_mutex_lock(&thd->LOCK_thd_data);
+  wsrep_thd_set_query_state(thd, QUERY_IDLE);
+  mysql_mutex_unlock(&thd->LOCK_thd_data);
 
   assert(thd->wsrep_exec_mode== REPL_RECV);
 
@@ -221,12 +217,15 @@ wsrep_cb_status_t wsrep_apply_cb(void* const             ctx,
 {
   THD* const thd((THD*)ctx);
 
+  assert(thd->wsrep_apply_toi == false);
+
   // Allow tests to block the applier thread using the DBUG facilities.
   DBUG_EXECUTE_IF("sync.wsrep_apply_cb",
                  {
                    const char act[]=
                      "now "
-                     "wait_for signal.wsrep_apply_cb";
+                     "SIGNAL sync.wsrep_apply_cb_reached "
+                     "WAIT_FOR signal.wsrep_apply_cb";
                    DBUG_ASSERT(!debug_sync_set_action(thd,
                                                       STRING_WITH_LEN(act)));
                  };);
@@ -253,6 +252,9 @@ wsrep_cb_status_t wsrep_apply_cb(void* const             ctx,
   else
     thd->variables.option_bits&= ~OPTION_NO_FOREIGN_KEY_CHECKS;
 
+  /* With galera we assume that the master has done the constraint checks */
+  thd->variables.option_bits|= OPTION_NO_CHECK_CONSTRAINT_CHECKS;
+
   if (flags & WSREP_FLAG_ISOLATION)
   {
     thd->wsrep_apply_toi= true;
@@ -277,14 +279,11 @@ wsrep_cb_status_t wsrep_apply_cb(void* const             ctx,
     wsrep_dump_rbr_buf_with_header(thd, buf, buf_len);
   }
 
-  TABLE *tmp;
-  while ((tmp = thd->temporary_tables))
+  if (thd->has_thd_temporary_tables())
   {
-    WSREP_DEBUG("Applier %lld, has temporary tables: %s.%s",
-		(longlong) thd->thread_id,
-		(tmp->s) ? tmp->s->db.str : "void",
-		(tmp->s) ? tmp->s->table_name.str : "void");
-    close_temporary_table(thd, tmp, 1, 1);
+    WSREP_DEBUG("Applier %lld has temporary tables. Closing them now..",
+                thd->thread_id);
+    thd->close_temporary_tables();
   }
 
   return rcode;
@@ -368,8 +367,10 @@ wsrep_cb_status_t wsrep_commit_cb(void*         const     ctx,
   else
     rcode = wsrep_rollback(thd);
 
+  /* Cleanup */
   wsrep_set_apply_format(thd, NULL);
-  thd->mdl_context.release_transactional_locks();
+  thd->release_transactional_locks();
+  thd->reset_query();                           /* Mutex protected */
   free_root(thd->mem_root,MYF(MY_KEEP_PREALLOC));
   thd->tx_isolation= (enum_tx_isolation) thd->variables.tx_isolation;
 
@@ -384,7 +385,7 @@ wsrep_cb_status_t wsrep_commit_cb(void*         const     ctx,
     mysql_mutex_unlock(&LOCK_wsrep_slave_threads);
   }
 
-  if (*exit == false && thd->wsrep_applier)
+  if (thd->wsrep_applier)
   {
     /* From trans_begin() */
     thd->variables.option_bits|= OPTION_BEGIN;

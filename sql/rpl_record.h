@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #ifndef RPL_RECORD_H
 #define RPL_RECORD_H
@@ -38,6 +38,7 @@ int unpack_row(rpl_group_info *rgi,
 
 // Fill table's record[0] with default values.
 int prepare_record(TABLE *const table, const uint skip, const bool check);
+int fill_extra_persistent_columns(TABLE *table, int master_cols);
 #endif
 
 #endif

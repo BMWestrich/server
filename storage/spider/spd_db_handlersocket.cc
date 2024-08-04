@@ -11,7 +11,7 @@
 
   You should have received a copy of the GNU General Public License
   along with this program; if not, write to the Free Software
-  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
+  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 #define MYSQL_SERVER 1
 #include "mysql_version.h"
@@ -4990,6 +4990,15 @@ int spider_handlersocket_handler::append_explain_select_part(
 ) {
   DBUG_ENTER("spider_handlersocket_handler::append_explain_select_part");
   DBUG_PRINT("info",("spider this=%p", this));
+  DBUG_ASSERT(0);
+  DBUG_RETURN(0);
+}
+
+int spider_handlersocket_handler::is_sole_projection_field(
+  uint16 field_index
+) {
+  DBUG_ENTER("spider_handlersocket_handler::is_sole_projection_field");
+  DBUG_PRINT("info", ("spider this=%p", this));
   DBUG_ASSERT(0);
   DBUG_RETURN(0);
 }

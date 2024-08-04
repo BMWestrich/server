@@ -1,5 +1,5 @@
-/* Copyright (c) 2005, 2012, Oracle and/or its affiliates.
-   Copyright (c) 2009, 2012, Monty Program Ab
+/* Copyright (c) 2005, 2016, Oracle and/or its affiliates.
+   Copyright (c) 2009, 2020, MariaDB Corporation.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335  USA */
 
 #ifndef LOG_H
 #define LOG_H
@@ -26,6 +26,7 @@ class Relay_log_info;
 
 class Format_description_log_event;
 
+void setup_log_handling();
 bool trans_has_updated_trans_table(const THD* thd);
 bool stmt_has_updated_trans_table(const THD *thd);
 bool use_trans_cache(const THD* thd, bool is_transactional);
@@ -286,9 +287,9 @@ typedef struct st_log_info
 #define MAX_LOG_HANDLERS_NUM 3
 
 /* log event handler flags */
-#define LOG_NONE       1
-#define LOG_FILE       2
-#define LOG_TABLE      4
+#define LOG_NONE       1U
+#define LOG_FILE       2U
+#define LOG_TABLE      4U
 
 class Log_event;
 class Rows_log_event;
@@ -354,7 +355,7 @@ public:
   MYSQL_QUERY_LOG() : last_time(0) {}
   void reopen_file();
   bool write(time_t event_time, const char *user_host,
-             uint user_host_len, int thread_id,
+             uint user_host_len, my_thread_id thread_id,
              const char *command_type, uint command_type_len,
              const char *sql_text, uint sql_text_len);
   bool write(THD *thd, time_t current_time,
@@ -559,7 +560,13 @@ class MYSQL_BIN_LOG: public TC_LOG, private MYSQL_LOG
   bool write_transaction_to_binlog_events(group_commit_entry *entry);
   void trx_group_commit_leader(group_commit_entry *leader);
   bool is_xidlist_idle_nolock();
-
+#ifdef WITH_WSREP
+  /*
+   When this mariadb node is slave and galera enabled. So in this case
+   we write the gtid in wsrep_run_commit itself.
+  */
+  inline bool is_gtid_cached(THD *thd);
+#endif
 public:
   /*
     A list of struct xid_count_per_binlog is used to keep track of how many
@@ -579,14 +586,28 @@ public:
     ulong binlog_id;
     /* Total prepared XIDs and pending checkpoint requests in this binlog. */
     long xid_count;
+    long notify_count;
     /* For linking in requests to the binlog background thread. */
     xid_count_per_binlog *next_in_queue;
-    xid_count_per_binlog();   /* Give link error if constructor used. */
+    xid_count_per_binlog(char *log_file_name, uint log_file_name_len)
+      :binlog_id(0), xid_count(0), notify_count(0)
+    {
+      binlog_name_len= log_file_name_len;
+      binlog_name= (char *) my_malloc(binlog_name_len, MYF(MY_ZEROFILL));
+      if (binlog_name)
+        memcpy(binlog_name, log_file_name, binlog_name_len);
+    }
+    ~xid_count_per_binlog()
+    {
+      my_free(binlog_name);
+    }
   };
   I_List<xid_count_per_binlog> binlog_xid_count_list;
   mysql_mutex_t LOCK_binlog_background_thread;
   mysql_cond_t COND_binlog_background_thread;
   mysql_cond_t COND_binlog_background_thread_end;
+
+  void stop_background_thread();
 
   using MYSQL_LOG::generate_name;
   using MYSQL_LOG::is_open;
@@ -695,7 +716,9 @@ public:
     char buf1[22],buf2[22];
 #endif
     DBUG_ENTER("harvest_bytes_written");
-    (*counter)+=bytes_written;
+
+    my_atomic_add64_explicit((volatile int64*)(counter), bytes_written,
+                             MY_MEMORY_ORDER_RELAXED);
     DBUG_PRINT("info",("counter: %s  bytes_written: %s", llstr(*counter,buf1),
 		       llstr(bytes_written,buf2)));
     bytes_written=0;
@@ -755,7 +778,7 @@ public:
   int update_log_index(LOG_INFO* linfo, bool need_update_threads);
   int rotate(bool force_rotate, bool* check_purge);
   void checkpoint_and_purge(ulong binlog_id);
-  int rotate_and_purge(bool force_rotate);
+  int rotate_and_purge(bool force_rotate, DYNAMIC_ARRAY* drop_gtid_domain= NULL);
   /**
      Flush binlog cache and synchronize to disk.
 
@@ -788,6 +811,7 @@ public:
   bool reset_logs(THD* thd, bool create_new_log,
                   rpl_gtid *init_state, uint32 init_state_len,
                   ulong next_log_number);
+  void wait_for_last_checkpoint_event();
   void close(uint exiting);
   void clear_inuse_flag_when_closing(File file);
 
@@ -872,6 +896,20 @@ public:
   void unlock_binlog_end_pos() { mysql_mutex_unlock(&LOCK_binlog_end_pos); }
   mysql_mutex_t* get_binlog_end_pos_lock() { return &LOCK_binlog_end_pos; }
 
+  /*
+    Ensures the log's state is either LOG_OPEN or LOG_CLOSED. If something
+    failed along the desired path and left the log in invalid state, i.e.
+    LOG_TO_BE_OPENED, forces the state to be LOG_CLOSED.
+  */
+  void try_fix_log_state()
+  {
+    mysql_mutex_lock(get_log_lock());
+    /* Only change the log state if it is LOG_TO_BE_OPENED */
+    if (log_state == LOG_TO_BE_OPENED)
+      log_state= LOG_CLOSED;
+    mysql_mutex_unlock(get_log_lock());
+  }
+
   int wait_for_update_binlog_end_pos(THD* thd, struct timespec * timeout);
 
   /*
@@ -903,7 +941,7 @@ public:
   virtual bool log_error(enum loglevel level, const char *format,
                          va_list args)= 0;
   virtual bool log_general(THD *thd, my_hrtime_t event_time, const char *user_host,
-                           uint user_host_len, int thread_id,
+                           uint user_host_len, my_thread_id thread_id,
                            const char *command_type, uint command_type_len,
                            const char *sql_text, uint sql_text_len,
                            CHARSET_INFO *client_cs)= 0;
@@ -932,7 +970,7 @@ public:
   virtual bool log_error(enum loglevel level, const char *format,
                          va_list args);
   virtual bool log_general(THD *thd, my_hrtime_t event_time, const char *user_host,
-                           uint user_host_len, int thread_id,
+                           uint user_host_len, my_thread_id thread_id,
                            const char *command_type, uint command_type_len,
                            const char *sql_text, uint sql_text_len,
                            CHARSET_INFO *client_cs);
@@ -964,7 +1002,7 @@ public:
   virtual bool log_error(enum loglevel level, const char *format,
                          va_list args);
   virtual bool log_general(THD *thd, my_hrtime_t event_time, const char *user_host,
-                           uint user_host_len, int thread_id,
+                           uint user_host_len, my_thread_id thread_id,
                            const char *command_type, uint command_type_len,
                            const char *sql_text, uint sql_text_len,
                            CHARSET_INFO *client_cs);
@@ -1012,7 +1050,6 @@ public:
   */
   void init_base();
   void init_log_tables();
-  bool flush_logs(THD *thd);
   bool flush_slow_log();
   bool flush_general_log();
   /* Perform basic logger cleanup. this will leave e.g. error log open. */
@@ -1065,6 +1102,7 @@ int vprint_msg_to_log(enum loglevel level, const char *format, va_list args);
 void sql_print_error(const char *format, ...);
 void sql_print_warning(const char *format, ...);
 void sql_print_information(const char *format, ...);
+void sql_print_information_v(const char *format, va_list ap);
 typedef void (*sql_print_message_func)(const char *format, ...);
 extern sql_print_message_func sql_print_message_handlers[];
 
@@ -1091,6 +1129,7 @@ void make_default_log_name(char **out, const char* log_ext, bool once);
 void binlog_reset_cache(THD *thd);
 
 extern MYSQL_PLUGIN_IMPORT MYSQL_BIN_LOG mysql_bin_log;
+extern handlerton *binlog_hton;
 extern LOGGER logger;
 
 extern const char *log_bin_index;
@@ -1163,5 +1202,10 @@ static inline TC_LOG *get_tc_log_implementation()
     return &mysql_bin_log;
   return &tc_log_mmap;
 }
+
+
+class Gtid_list_log_event;
+const char *
+get_gtid_list_event(IO_CACHE *cache, Gtid_list_log_event **out_gtid_list);
 
 #endif /* LOG_H */

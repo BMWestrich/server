@@ -1,6 +1,6 @@
 /*
-   Copyright (c) 2002, 2013, Oracle and/or its affiliates.
-   Copyright (c) 2011, 2013, Monty Program Ab
+   Copyright (c) 2002, 2016, Oracle and/or its affiliates.
+   Copyright (c) 2011, 2017, MariaDB
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #include <my_global.h>                          /* NO_EMBEDDED_ACCESS_CHECKS */
 #include "sql_priv.h"
@@ -29,6 +29,7 @@
 #include "sql_array.h"         // Dynamic_array
 #include "log_event.h"         // Query_log_event
 #include "sql_derived.h"       // mysql_handle_derived
+#include "sql_cte.h"
 
 #ifdef USE_PRAGMA_IMPLEMENTATION
 #pragma implementation
@@ -44,6 +45,9 @@
 #include "transaction.h"       // trans_commit_stmt
 #include "sql_audit.h"
 #include "debug_sync.h"
+#ifdef WITH_WSREP
+#include "wsrep_thd.h"
+#endif /* WITH_WSREP */
 
 /*
   Sufficient max length of printed destinations and frame offsets (all uints).
@@ -119,7 +123,7 @@ sp_get_item_value(THD *thd, Item *item, String *str)
   case DECIMAL_RESULT:
     if (item->field_type() != MYSQL_TYPE_BIT)
       return item->val_str(str);
-    else {/* Bit type is handled as binary string */}
+    /* fall through */
   case STRING_RESULT:
     {
       String *result= item->val_str(str);
@@ -190,7 +194,7 @@ sp_get_flags_for_command(LEX *lex)
 
   switch (lex->sql_command) {
   case SQLCOM_SELECT:
-    if (lex->result)
+    if (lex->result && !lex->analyze_stmt)
     {
       flags= 0;                      /* This is a SELECT with INTO clause */
       break;
@@ -222,6 +226,7 @@ sp_get_flags_for_command(LEX *lex)
   case SQLCOM_SHOW_EXPLAIN:
   case SQLCOM_SHOW_FIELDS:
   case SQLCOM_SHOW_FUNC_CODE:
+  case SQLCOM_SHOW_GENERIC:
   case SQLCOM_SHOW_GRANTS:
   case SQLCOM_SHOW_ENGINE_STATUS:
   case SQLCOM_SHOW_ENGINE_LOGS:
@@ -253,6 +258,7 @@ sp_get_flags_for_command(LEX *lex)
     statement within an IF condition.
   */
   case SQLCOM_EXECUTE:
+  case SQLCOM_EXECUTE_IMMEDIATE:
     flags= sp_head::MULTI_RESULTS | sp_head::CONTAINS_DYNAMIC_SQL;
     break;
   case SQLCOM_PREPARE:
@@ -514,22 +520,45 @@ sp_name::init_qname(THD *thd)
 bool
 check_routine_name(LEX_STRING *ident)
 {
-  if (!ident || !ident->str || !ident->str[0] ||
-      ident->str[ident->length-1] == ' ')
+  DBUG_ASSERT(ident);
+  DBUG_ASSERT(ident->str);
+
+  if (!ident->str[0] || ident->str[ident->length-1] == ' ')
   {
     my_error(ER_SP_WRONG_NAME, MYF(0), ident->str);
     return TRUE;
   }
-  if (check_string_char_length(ident, 0, NAME_CHAR_LEN,
-                               system_charset_info, 1))
-  {
-    my_error(ER_TOO_LONG_IDENT, MYF(0), ident->str);
+  if (check_ident_length(ident))
     return TRUE;
-  }
 
   return FALSE;
 }
 
+
+sp_head* sp_head::create()
+{
+  MEM_ROOT own_root;
+  init_sql_alloc(&own_root, MEM_ROOT_BLOCK_SIZE, MEM_ROOT_PREALLOC, MYF(0));
+  sp_head *sp;
+  if (!(sp= new (&own_root) sp_head(&own_root)))
+    free_root(&own_root, MYF(0));
+
+  return sp;
+}
+
+
+void sp_head::destroy(sp_head *sp)
+{
+  if (sp)
+  {
+    /* Make a copy of main_mem_root as free_root will free the sp */
+    MEM_ROOT own_root= sp->main_mem_root;
+    DBUG_PRINT("info", ("mem_root %p moved to %p",
+                        &sp->main_mem_root, &own_root));
+    delete sp;
+    free_root(&own_root, MYF(0));
+  }
+}
 
 /*
  *
@@ -537,45 +566,9 @@ check_routine_name(LEX_STRING *ident)
  *
  */
 
-void *
-sp_head::operator new(size_t size) throw()
-{
-  DBUG_ENTER("sp_head::operator new");
-  MEM_ROOT own_root;
-  sp_head *sp;
-
-  init_sql_alloc(&own_root, MEM_ROOT_BLOCK_SIZE, MEM_ROOT_PREALLOC, MYF(0));
-  sp= (sp_head *) alloc_root(&own_root, size);
-  if (sp == NULL)
-    DBUG_RETURN(NULL);
-  sp->main_mem_root= own_root;
-  DBUG_PRINT("info", ("mem_root 0x%lx", (ulong) &sp->mem_root));
-  DBUG_RETURN(sp);
-}
-
-void
-sp_head::operator delete(void *ptr, size_t size) throw()
-{
-  DBUG_ENTER("sp_head::operator delete");
-  MEM_ROOT own_root;
-
-  if (ptr == NULL)
-    DBUG_VOID_RETURN;
-
-  sp_head *sp= (sp_head *) ptr;
-
-  /* Make a copy of main_mem_root as free_root will free the sp */
-  own_root= sp->main_mem_root;
-  DBUG_PRINT("info", ("mem_root 0x%lx moved to 0x%lx",
-                      (ulong) &sp->mem_root, (ulong) &own_root));
-  free_root(&own_root, MYF(0));
-
-  DBUG_VOID_RETURN;
-}
-
-
-sp_head::sp_head()
-  :Query_arena(&main_mem_root, STMT_INITIALIZED_FOR_SP),
+sp_head::sp_head(MEM_ROOT *mem_root_arg)
+  :Query_arena(NULL, STMT_INITIALIZED_FOR_SP),
+   main_mem_root(*mem_root_arg), // todo: std::move operator.
    m_flags(0),
    m_sp_cache_version(0),
    m_creation_ctx(0),
@@ -584,6 +577,8 @@ sp_head::sp_head()
    m_next_cached_sp(0),
    m_cont_level(0)
 {
+  mem_root= &main_mem_root;
+
   m_first_instance= this;
   m_first_free_instance= this;
   m_last_cached_sp= this;
@@ -598,6 +593,7 @@ sp_head::sp_head()
 
   DBUG_ENTER("sp_head::sp_head");
 
+  m_security_ctx.init();
   m_backpatch.empty();
   m_cont_backpatch.empty();
   m_lex.empty();
@@ -704,7 +700,8 @@ void
 sp_head::set_stmt_end(THD *thd)
 {
   Lex_input_stream *lip= & thd->m_parser_state->m_lip; /* shortcut */
-  const char *end_ptr= lip->get_cpp_ptr(); /* shortcut */
+  const char *end_ptr= lip->get_cpp_tok_start(); /* shortcut */
+  uint not_used;
 
   /* Make the string of parameters. */
 
@@ -722,7 +719,7 @@ sp_head::set_stmt_end(THD *thd)
 
   m_body.length= end_ptr - m_body_begin;
   m_body.str= thd->strmake(m_body_begin, m_body.length);
-  trim_whitespace(thd->charset(), & m_body);
+  trim_whitespace(thd->charset(), &m_body, &not_used);
 
   /* Make the string of UTF-body. */
 
@@ -730,7 +727,7 @@ sp_head::set_stmt_end(THD *thd)
 
   m_body_utf8.length= lip->get_body_utf8_length();
   m_body_utf8.str= thd->strmake(lip->get_body_utf8_str(), m_body_utf8.length);
-  trim_whitespace(thd->charset(), & m_body_utf8);
+  trim_whitespace(thd->charset(), &m_body_utf8, &not_used);
 
   /*
     Make the string of whole stored-program-definition query (in the
@@ -739,7 +736,7 @@ sp_head::set_stmt_end(THD *thd)
 
   m_defstr.length= end_ptr - lip->get_cpp_buf();
   m_defstr.str= thd->strmake(lip->get_cpp_buf(), m_defstr.length);
-  trim_whitespace(thd->charset(), & m_defstr);
+  trim_whitespace(thd->charset(), &m_defstr, &not_used);
 }
 
 
@@ -828,7 +825,7 @@ sp_head::~sp_head()
   my_hash_free(&m_sptabs);
   my_hash_free(&m_sroutines);
 
-  delete m_next_cached_sp;
+  sp_head::destroy(m_next_cached_sp);
 
   DBUG_VOID_RETURN;
 }
@@ -1129,12 +1126,14 @@ sp_head::execute(THD *thd, bool merge_da_on_success)
               backup_arena;
   query_id_t old_query_id;
   TABLE *old_derived_tables;
+  TABLE *old_rec_tables;
   LEX *old_lex;
   Item_change_list old_change_list;
   String old_packet;
   uint old_server_status;
   const uint status_backup_mask= SERVER_STATUS_CURSOR_EXISTS |
                                  SERVER_STATUS_LAST_ROW_SENT;
+  MEM_ROOT *user_var_events_alloc_saved= 0;
   Reprepare_observer *save_reprepare_observer= thd->m_reprepare_observer;
   Object_creation_ctx *UNINIT_VAR(saved_creation_ctx);
   Diagnostics_area *da= thd->get_stmt_da();
@@ -1153,9 +1152,9 @@ sp_head::execute(THD *thd, bool merge_da_on_success)
   if (m_next_cached_sp)
   {
     DBUG_PRINT("info",
-               ("first free for 0x%lx ++: 0x%lx->0x%lx  level: %lu  flags %x",
-                (ulong)m_first_instance, (ulong) this,
-                (ulong) m_next_cached_sp,
+               ("first free for %p ++: %p->%p  level: %lu  flags %x",
+               m_first_instance, this,
+                m_next_cached_sp,
                 m_next_cached_sp->m_recursion_level,
                 m_next_cached_sp->m_flags));
   }
@@ -1203,6 +1202,8 @@ sp_head::execute(THD *thd, bool merge_da_on_success)
   old_query_id= thd->query_id;
   old_derived_tables= thd->derived_tables;
   thd->derived_tables= 0;
+  old_rec_tables= thd->rec_tables;
+  thd->rec_tables= 0;
   save_sql_mode= thd->variables.sql_mode;
   thd->variables.sql_mode= m_sql_mode;
   save_abort_on_warning= thd->abort_on_warning;
@@ -1236,7 +1237,7 @@ sp_head::execute(THD *thd, bool merge_da_on_success)
     We should also save Item tree change list to avoid rollback something
     too early in the calling query.
   */
-  thd->change_list.move_elements_to(&old_change_list);
+  thd->Item_change_list::move_elements_to(&old_change_list);
   /*
     Cursors will use thd->packet, so they may corrupt data which was prepared
     for sending by upper level. OTOH cursors in the same routine can share this
@@ -1313,15 +1314,103 @@ sp_head::execute(THD *thd, bool merge_da_on_success)
       Will write this SP statement into binlog separately.
       TODO: consider changing the condition to "not inside event union".
     */
-    MEM_ROOT *user_var_events_alloc_saved= thd->user_var_events_alloc;
     if (thd->locked_tables_mode <= LTM_LOCK_TABLES)
+    {
+      user_var_events_alloc_saved= thd->user_var_events_alloc;
       thd->user_var_events_alloc= thd->mem_root;
+    }
 
     sql_digest_state *parent_digest= thd->m_digest;
     thd->m_digest= NULL;
 
     err_status= i->execute(thd, &ip);
+#ifdef WITH_WSREP
+    if (m_type == TYPE_ENUM_PROCEDURE)
+    {
+      mysql_mutex_lock(&thd->LOCK_thd_data);
+      if (thd->wsrep_conflict_state == MUST_REPLAY)
+      {
+        wsrep_replay_sp_transaction(thd);
+        err_status= thd->get_stmt_da()->is_set();
+        thd->wsrep_conflict_state= NO_CONFLICT;
+      }
+      else if (thd->wsrep_conflict_state == ABORTED ||
+               thd->wsrep_conflict_state == CERT_FAILURE)
+      {
+        /*
+          If the statement execution was BF aborted or was aborted
+          due to certification failure, clean up transaction here
+          and reset conflict state to NO_CONFLICT and thd->killed
+          to THD::NOT_KILLED. Error handling is done based on err_status
+          below. Error must have been raised by wsrep hton code before
+          entering here.
+         */
+        DBUG_ASSERT(err_status);
+        DBUG_ASSERT(thd->get_stmt_da()->is_error());
+        thd->wsrep_conflict_state= NO_CONFLICT;
+        thd->killed= NOT_KILLED;
+      }
+      mysql_mutex_unlock(&thd->LOCK_thd_data);
+    }
+#endif /* WITH_WSREP */
+#ifdef WITH_WSREP_NO
+    if (WSREP(thd))
+    {
+      if (((thd->wsrep_trx().state() == wsrep::transaction::s_executing) &&
+           (thd->is_fatal_error || thd->killed)))
+      {
+        WSREP_DEBUG("SP abort err status %d in sub %d trx state %d",
+                    err_status, thd->in_sub_stmt, thd->wsrep_trx().state());
+        err_status= 1;
+        thd->is_fatal_error= 1;
+        /*
+          SP was killed, and it is not due to a wsrep conflict.
+          We skip after_command hook at this point because
+          otherwise it clears the error, and cleans up the
+          whole transaction. For now we just return and finish
+          our handling once we are back to mysql_parse.
+        */
+        WSREP_DEBUG("Skipping after_command hook for killed SP");
+      }
+      else
+      {
+        const bool must_replay= wsrep_must_replay(thd);
+        if (must_replay)
+        {
+          WSREP_DEBUG("MUST_REPLAY set after SP, err_status %d trx state: %d",
+                      err_status, thd->wsrep_trx().state());
+        }
+        (void) wsrep_after_statement(thd);
 
+        /*
+          Reset the return code to zero if the transaction was
+          replayed succesfully.
+        */
+        if (must_replay && !wsrep_current_error(thd))
+        {
+          err_status= 0;
+          thd->get_stmt_da()->reset_diagnostics_area();
+        }
+        /*
+          Final wsrep error status for statement is known only after
+          wsrep_after_statement() call. If the error is set, override
+          error in thd diagnostics area and reset wsrep client_state error
+          so that the error does not get propagated via client-server protocol.
+        */
+        if (wsrep_current_error(thd))
+        {
+          wsrep_override_error(thd, wsrep_current_error(thd),
+                               wsrep_current_error_status(thd));
+          thd->wsrep_cs().reset_error();
+          /* Reset also thd->killed if it has been set during BF abort. */
+          if (thd->killed == KILL_QUERY)
+            thd->killed= NOT_KILLED;
+          /* if failed transaction was not replayed, must return with error from here */
+          if (!must_replay) err_status = 1;
+        }
+      }
+    }
+#endif /* WITH_WSREP */
     thd->m_digest= parent_digest;
 
     if (i->free_list)
@@ -1376,12 +1465,13 @@ sp_head::execute(THD *thd, bool merge_da_on_success)
   /* Restore all saved */
   thd->server_status= (thd->server_status & ~status_backup_mask) | old_server_status;
   old_packet.swap(thd->packet);
-  DBUG_ASSERT(thd->change_list.is_empty());
-  old_change_list.move_elements_to(&thd->change_list);
+  DBUG_ASSERT(thd->Item_change_list::is_empty());
+  old_change_list.move_elements_to(thd);
   thd->lex= old_lex;
   thd->set_query_id(old_query_id);
   DBUG_ASSERT(!thd->derived_tables);
   thd->derived_tables= old_derived_tables;
+  thd->rec_tables= old_rec_tables;
   thd->variables.sql_mode= save_sql_mode;
   thd->abort_on_warning= save_abort_on_warning;
   thd->m_reprepare_observer= save_reprepare_observer;
@@ -1453,10 +1543,10 @@ sp_head::execute(THD *thd, bool merge_da_on_success)
   }
   m_flags&= ~IS_INVOKED;
   DBUG_PRINT("info",
-             ("first free for 0x%lx --: 0x%lx->0x%lx, level: %lu, flags %x",
-              (ulong) m_first_instance,
-              (ulong) m_first_instance->m_first_free_instance,
-              (ulong) this, m_recursion_level, m_flags));
+             ("first free for %p --: %p->%p, level: %lu, flags %x",
+              m_first_instance,
+              m_first_instance->m_first_free_instance,
+              this, m_recursion_level, m_flags));
   /*
     Check that we have one of following:
 
@@ -2046,6 +2136,8 @@ sp_head::execute_procedure(THD *thd, List<Item> *args)
           break;
         }
       }
+
+      TRANSACT_TRACKER(add_trx_state_from_thd(thd));
     }
 
     /*
@@ -2071,10 +2163,10 @@ sp_head::execute_procedure(THD *thd, List<Item> *args)
       if (thd->transaction_rollback_request)
       {
         trans_rollback_implicit(thd);
-        thd->mdl_context.release_transactional_locks();
+        thd->release_transactional_locks();
       }
       else if (! thd->in_multi_stmt_transaction_mode())
-        thd->mdl_context.release_transactional_locks();
+        thd->release_transactional_locks();
       else
         thd->mdl_context.release_statement_locks();
     }
@@ -2108,7 +2200,6 @@ sp_head::execute_procedure(THD *thd, List<Item> *args)
   if (!err_status)
   {
     err_status= execute(thd, TRUE);
-    DBUG_PRINT("info", ("execute returned %d", (int) err_status));
   }
 
   if (save_log_general)
@@ -2325,8 +2416,8 @@ sp_head::backpatch(sp_label *lab)
   {
     if (bp->lab == lab)
     {
-      DBUG_PRINT("info", ("backpatch: (m_ip %d, label 0x%lx <%s>) to dest %d",
-                          bp->instr->m_ip, (ulong) lab, lab->name.str, dest));
+      DBUG_PRINT("info", ("backpatch: (m_ip %d, label %p <%s>) to dest %d",
+                          bp->instr->m_ip, lab, lab->name.str, dest));
       bp->instr->backpatch(dest, lab->ctx);
     }
   }
@@ -2408,7 +2499,7 @@ sp_head::do_cont_backpatch()
 
 void
 sp_head::set_info(longlong created, longlong modified,
-                  st_sp_chistics *chistics, ulonglong sql_mode)
+                  st_sp_chistics *chistics, sql_mode_t sql_mode)
 {
   m_created= created;
   m_modified= modified;
@@ -2462,8 +2553,8 @@ sp_head::reset_thd_mem_root(THD *thd)
   DBUG_ENTER("sp_head::reset_thd_mem_root");
   m_thd_root= thd->mem_root;
   thd->mem_root= &main_mem_root;
-  DBUG_PRINT("info", ("mem_root 0x%lx moved to thd mem root 0x%lx",
-                      (ulong) &mem_root, (ulong) &thd->mem_root));
+  DBUG_PRINT("info", ("mem_root %p moved to thd mem root %p",
+                      &mem_root, &thd->mem_root));
   free_list= thd->free_list; // Keep the old list
   thd->free_list= NULL; // Start a new one
   m_thd= thd;
@@ -2493,8 +2584,8 @@ sp_head::restore_thd_mem_root(THD *thd)
   set_query_arena(thd);         // Get new free_list and mem_root
   state= STMT_INITIALIZED_FOR_SP;
 
-  DBUG_PRINT("info", ("mem_root 0x%lx returned from thd mem root 0x%lx",
-                      (ulong) &mem_root, (ulong) &thd->mem_root));
+  DBUG_PRINT("info", ("mem_root %p returned from thd mem root %p",
+                      &mem_root, &thd->mem_root));
   thd->free_list= flist;        // Restore the old one
   thd->mem_root= m_thd_root;
   m_thd= NULL;
@@ -2524,10 +2615,18 @@ bool check_show_routine_access(THD *thd, sp_head *sp, bool *full_access)
   *full_access= ((!check_table_access(thd, SELECT_ACL, &tables, FALSE,
                                      1, TRUE) &&
                   (tables.grant.privilege & SELECT_ACL) != 0) ||
+                 /* Check if user owns the routine. */
                  (!strcmp(sp->m_definer_user.str,
                           thd->security_ctx->priv_user) &&
                   !strcmp(sp->m_definer_host.str,
-                          thd->security_ctx->priv_host)));
+                          thd->security_ctx->priv_host)) ||
+                 /* Check if current role or any of the sub-granted roles
+                    own the routine. */
+                 (sp->m_definer_host.length == 0 &&
+                  (!strcmp(sp->m_definer_user.str,
+                           thd->security_ctx->priv_role) ||
+                   check_role_is_granted(thd->security_ctx->priv_role, NULL,
+                                         sp->m_definer_user.str))));
   if (!*full_access)
     return check_some_routine_access(thd, sp->m_db.str, sp->m_name.str,
                                      sp->m_type == TYPE_ENUM_PROCEDURE);
@@ -2882,7 +2981,7 @@ sp_head::show_routine_code(THD *thd)
       const char *format= "Instruction at position %u has m_ip=%u";
       char tmp[sizeof(format) + 2*SP_INSTR_UINT_MAXLEN + 1];
 
-      sprintf(tmp, format, ip, i->m_ip);
+      my_snprintf(tmp, sizeof(tmp), format, ip, i->m_ip);
       /*
         Since this is for debugging purposes only, we don't bother to
         introduce a special error code for it.
@@ -2941,10 +3040,15 @@ sp_lex_keeper::reset_lex_and_exec_core(THD *thd, uint *nextp,
     It's reset further in the common code part.
     It's merged with the saved parent's value at the exit of this func.
   */
-  bool parent_modified_non_trans_table= thd->transaction.stmt.modified_non_trans_table;
+  bool parent_modified_non_trans_table=
+    thd->transaction.stmt.modified_non_trans_table;
+  unsigned int parent_unsafe_rollback_flags=
+    thd->transaction.stmt.m_unsafe_rollback_flags;
   thd->transaction.stmt.modified_non_trans_table= FALSE;
+  thd->transaction.stmt.m_unsafe_rollback_flags= 0;
+
   DBUG_ASSERT(!thd->derived_tables);
-  DBUG_ASSERT(thd->change_list.is_empty());
+  DBUG_ASSERT(thd->Item_change_list::is_empty());
   /*
     Use our own lex.
     We should not save old value since it is saved/restored in
@@ -2974,6 +3078,18 @@ sp_lex_keeper::reset_lex_and_exec_core(THD *thd, uint *nextp,
   }
 
   reinit_stmt_before_use(thd, m_lex);
+
+#ifndef EMBEDDED_LIBRARY
+  /*
+    If there was instruction which changed tracking state,
+    the result of changed tracking state send to client in OK packed.
+    So it changes result sent to client and probably can be different
+    independent on query text. So we can't cache such results.
+  */
+  if ((thd->client_capabilities & CLIENT_SESSION_TRACK) &&
+      (thd->server_status & SERVER_SESSION_STATE_CHANGED))
+    thd->lex->safe_to_cache_query= 0;
+#endif
 
   if (open_tables)
     res= instr->exec_open_and_lock_tables(thd, m_lex->query_tables);
@@ -3007,10 +3123,10 @@ sp_lex_keeper::reset_lex_and_exec_core(THD *thd, uint *nextp,
       if (thd->transaction_rollback_request)
       {
         trans_rollback_implicit(thd);
-        thd->mdl_context.release_transactional_locks();
+        thd->release_transactional_locks();
       }
       else if (! thd->in_multi_stmt_transaction_mode())
-        thd->mdl_context.release_transactional_locks();
+        thd->release_transactional_locks();
       else
         thd->mdl_context.release_statement_locks();
     }
@@ -3051,6 +3167,10 @@ sp_lex_keeper::reset_lex_and_exec_core(THD *thd, uint *nextp,
     what is needed from the substatement gained
   */
   thd->transaction.stmt.modified_non_trans_table |= parent_modified_non_trans_table;
+  thd->transaction.stmt.m_unsafe_rollback_flags |= parent_unsafe_rollback_flags;
+
+  TRANSACT_TRACKER(add_trx_state_from_thd(thd));
+
   /*
     Unlike for PS we should not call Item's destructors for newly created
     items after execution of each instruction in stored routine. This is
@@ -3077,7 +3197,7 @@ int sp_instr::exec_open_and_lock_tables(THD *thd, TABLE_LIST *tables)
     Check whenever we have access to tables for this statement
     and open and lock them before executing instructions core function.
   */
-  if (open_temporary_tables(thd, tables) ||
+  if (thd->open_temporary_tables(tables) ||
       check_table_access(thd, SELECT_ACL, tables, FALSE, UINT_MAX, FALSE)
       || open_and_lock_tables(thd, tables, TRUE, 0))
     result= -1;
@@ -3131,23 +3251,23 @@ sp_instr_stmt::execute(THD *thd, uint *nextp)
                                           thd->query_length()) <= 0)
     {
       res= m_lex_keeper.reset_lex_and_exec_core(thd, nextp, FALSE, this);
+      bool log_slow= !res && thd->enable_slow_log;
 
-      if (thd->get_stmt_da()->is_eof())
-      {
-        /* Finalize server status flags after executing a statement. */
+      /* Finalize server status flags after executing a statement. */
+      if (log_slow || thd->get_stmt_da()->is_eof())
         thd->update_server_status();
 
+      if (thd->get_stmt_da()->is_eof())
         thd->protocol->end_statement();
-      }
 
       query_cache_end_of_result(thd);
 
       mysql_audit_general(thd, MYSQL_AUDIT_GENERAL_STATUS,
-                         thd->get_stmt_da()->is_error() ?
-                                thd->get_stmt_da()->sql_errno() : 0,
-                         command_name[COM_QUERY].str);
+                          thd->get_stmt_da()->is_error() ?
+                                 thd->get_stmt_da()->sql_errno() : 0,
+                          command_name[COM_QUERY].str);
 
-      if (!res && unlikely(thd->enable_slow_log))
+      if (log_slow)
         log_slow_statement(thd);
     }
     else
@@ -3276,7 +3396,8 @@ sp_instr_set::print(String *str)
   }
   str->qs_append(m_offset);
   str->qs_append(' ');
-  m_value->print(str, QT_ORDINARY);
+  m_value->print(str, enum_query_type(QT_ORDINARY |
+                                      QT_ITEM_ORIGINAL_FUNC_NULLIF));
 }
 
 
@@ -3308,9 +3429,11 @@ void
 sp_instr_set_trigger_field::print(String *str)
 {
   str->append(STRING_WITH_LEN("set_trigger_field "));
-  trigger_field->print(str, QT_ORDINARY);
+  trigger_field->print(str, enum_query_type(QT_ORDINARY |
+                                            QT_ITEM_ORIGINAL_FUNC_NULLIF));
   str->append(STRING_WITH_LEN(":="));
-  value->print(str, QT_ORDINARY);
+  value->print(str, enum_query_type(QT_ORDINARY |
+                                    QT_ITEM_ORIGINAL_FUNC_NULLIF));
 }
 
 /*
@@ -3436,7 +3559,8 @@ sp_instr_jump_if_not::print(String *str)
   str->qs_append('(');
   str->qs_append(m_cont_dest);
   str->qs_append(STRING_WITH_LEN(") "));
-  m_expr->print(str, QT_ORDINARY);
+  m_expr->print(str, enum_query_type(QT_ORDINARY |
+                                     QT_ITEM_ORIGINAL_FUNC_NULLIF));
 }
 
 
@@ -3532,7 +3656,8 @@ sp_instr_freturn::print(String *str)
   str->qs_append(STRING_WITH_LEN("freturn "));
   str->qs_append((uint)m_type);
   str->qs_append(' ');
-  m_value->print(str, QT_ORDINARY);
+  m_value->print(str, enum_query_type(QT_ORDINARY |
+                                      QT_ITEM_ORIGINAL_FUNC_NULLIF));
 }
 
 /*
@@ -4004,7 +4129,8 @@ sp_instr_set_case_expr::print(String *str)
   str->qs_append(STRING_WITH_LEN(") "));
   str->qs_append(m_case_expr_id);
   str->qs_append(' ');
-  m_case_expr->print(str, QT_ORDINARY);
+  m_case_expr->print(str, enum_query_type(QT_ORDINARY |
+                                          QT_ITEM_ORIGINAL_FUNC_NULLIF));
 }
 
 uint
@@ -4229,7 +4355,7 @@ sp_head::add_used_tables_to_table_list(THD *thd,
     if (stab->temp)
       continue;
 
-    if (!(tab_buff= (char *)thd->calloc(ALIGN_SIZE(sizeof(TABLE_LIST)) *
+    if (!(tab_buff= (char *)thd->alloc(ALIGN_SIZE(sizeof(TABLE_LIST)) *
                                         stab->lock_count)) ||
         !(key_buff= (char*)thd->memdup(stab->qname.str,
                                        stab->qname.length)))
@@ -4238,32 +4364,11 @@ sp_head::add_used_tables_to_table_list(THD *thd,
     for (uint j= 0; j < stab->lock_count; j++)
     {
       table= (TABLE_LIST *)tab_buff;
-
-      table->db= key_buff;
-      table->db_length= stab->db_length;
-      table->table_name= table->db + table->db_length + 1;
-      table->table_name_length= stab->table_name_length;
-      table->alias= table->table_name + table->table_name_length + 1;
-      table->lock_type= stab->lock_type;
-      table->cacheable_table= 1;
-      table->prelocking_placeholder= 1;
-      table->belong_to_view= belong_to_view;
-      table->trg_event_map= stab->trg_event_map;
-      /*
-        Since we don't allow DDL on base tables in prelocked mode it
-        is safe to infer the type of metadata lock from the type of
-        table lock.
-      */
-      table->mdl_request.init(MDL_key::TABLE, table->db, table->table_name,
-                              table->lock_type >= TL_WRITE_ALLOW_WRITE ?
-                              MDL_SHARED_WRITE : MDL_SHARED_READ,
-                              MDL_TRANSACTION);
-
-      /* Everyting else should be zeroed */
-
-      **query_tables_last_ptr= table;
-      table->prev_global= *query_tables_last_ptr;
-      *query_tables_last_ptr= &table->next_global;
+      table->init_one_table_for_prelocking(key_buff, stab->db_length,
+           key_buff + stab->db_length + 1, stab->table_name_length,
+           key_buff + stab->db_length + stab->table_name_length + 2,
+           stab->lock_type, true, belong_to_view, stab->trg_event_map,
+           query_tables_last_ptr);
 
       tab_buff+= ALIGN_SIZE(sizeof(TABLE_LIST));
       result= TRUE;
@@ -4306,4 +4411,3 @@ sp_add_to_query_tables(THD *thd, LEX *lex,
   lex->add_to_query_tables(table);
   return table;
 }
-

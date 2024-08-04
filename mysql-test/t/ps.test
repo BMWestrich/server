@@ -841,13 +841,13 @@ drop table t1;
 prepare stmt from 'create table t1 (a varchar(10) character set utf8)';
 execute stmt;
 --disable_warnings
-insert into t1 (a) values (repeat('a', 20));
+insert ignore into t1 (a) values (repeat('a', 20));
 --enable_warnings
 select length(a) from t1;
 drop table t1;
 execute stmt;
 --disable_warnings
-insert into t1 (a) values (repeat('a', 20));
+insert ignore into t1 (a) values (repeat('a', 20));
 --enable_warnings
 # Check that the data is truncated to the same length
 select length(a) from t1;
@@ -1813,7 +1813,6 @@ show create database mysqltest_1;
 drop database mysqltest_1;
 deallocate prepare stmt;
 set @@character_set_server= @old_character_set_server;
-
 
 #
 # BUG#24491 "using alias from source table in insert ... on duplicate key"
@@ -3548,9 +3547,6 @@ EXECUTE s1;
 
 DEALLOCATE PREPARE s1;
 
---echo #
---echo # End of 5.5 tests.
-
 ###########################################################################
 #
 # restoring of the Item tree in BETWEEN with dates
@@ -3670,5 +3666,1329 @@ deallocate prepare stmt;
 SET SESSION sql_mode = @save_sql_mode;
 DROP TABLE t1,t2;
 
+--echo #
+--echo # MDEV-8833: Crash of server on prepared statement with
+--echo # conversion to semi-join
+--echo #
 
+CREATE TABLE t1 (column1 INT);
+INSERT INTO t1 VALUES (3),(9);
+
+CREATE TABLE t2 (column2 INT);
+INSERT INTO t2 VALUES (1),(4);
+
+CREATE TABLE t3 (column3 INT);
+INSERT INTO t3 VALUES (6),(8);
+
+CREATE TABLE t4 (column4 INT);
+INSERT INTO t4 VALUES (2),(5);
+
+PREPARE stmt FROM "SELECT ( SELECT MAX( table1.column1 ) AS field1 
+FROM t1 AS table1
+WHERE table3.column3 IN ( SELECT table2.column2 AS field2 FROM t2 AS table2 ) 
+) AS sq
+FROM t3 AS table3, t4 AS table4";
+EXECUTE stmt;
+EXECUTE stmt;
+deallocate prepare stmt;
+drop table t1,t2,t3,t4;
+
+--echo #
+--echo # MDEV-11859: the plans for the first and the second executions
+--echo #             of PS are not the same
+--echo #
+
+create table t1 (id int, c varchar(3), key idx(c))engine=myisam;
+insert into t1 values (3,'bar'), (1,'xxx'), (2,'foo'), (5,'yyy');
+
+prepare stmt1 from
+"explain extended
+ select * from t1 where (1, 2) in ( select 3, 4 ) or c = 'foo'";
+execute stmt1;
+execute stmt1;
+deallocate prepare stmt1;
+
+prepare stmt1 from
+"select * from t1 where (1, 2) in ( select 3, 4 ) or c = 'foo'";
+flush status;
+execute stmt1;
+show status like '%Handler_read%';
+flush status;
+execute stmt1;
+show status like '%Handler_read%';
+deallocate prepare stmt1;
+
+prepare stmt2 from
+"explain extended
+ select * from t1 where (1, 2) in ( select 3, 4 )";
+execute stmt2;
+execute stmt2;
+deallocate prepare stmt2;
+
+drop table t1;
+
+--echo #
+--echo # MDEV-9208: Function->Function->View = Mysqld segfault
+--echo # (Server crashes in Dependency_marker::visit_field on 2nd
+--echo # execution with merged subquery)
+--echo #
+
+CREATE TABLE t1 (i1 INT);
+insert into t1 values(1),(2);
+
+CREATE TABLE t2 (i2 INT);
+insert into t2 values(1),(2);
+
+prepare stmt from "
+  select 1 from (
+    select
+      if (i1<0, 0, 0) as f1,
+      (select f1) as f2
+    from t1, t2
+  ) sq
+";
+
+execute stmt;
+execute stmt;
+
+drop table t1,t2;
+
+--echo #
+--echo # MDEV-9619: Assertion `null_ref_table' failed in virtual
+--echo # table_map Item_direct_view_ref::used_tables() const on 2nd
+--echo # execution of PS
+--echo #
+
+CREATE TABLE t1 (f1 VARCHAR(10)) ENGINE=MyISAM;
+CREATE ALGORITHM=MERGE VIEW v1 AS SELECT * FROM t1;
+INSERT INTO t1 VALUES ('a'),('b');
+
+CREATE TABLE t2 (f2 VARCHAR(10)) ENGINE=MyISAM;
+INSERT INTO t2 VALUES ('c'),('d');
+
+PREPARE stmt FROM "SELECT * FROM v1 WHERE f1 = SOME ( SELECT f2 FROM t2 )";
+EXECUTE stmt;
+EXECUTE stmt;
+insert into t1 values ('c');
+EXECUTE stmt;
+EXECUTE stmt;
+
+deallocate prepare stmt;
+drop view v1;
+drop table t1,t2;
+
+CREATE TABLE t1 (f1 VARCHAR(10)) ENGINE=MyISAM;
+CREATE ALGORITHM=MERGE VIEW v1 AS SELECT * FROM t1;
+INSERT INTO t1 VALUES ('a'),('b');
+
+CREATE TABLE t2 (f2 VARCHAR(10)) ENGINE=MyISAM;
+INSERT INTO t2 VALUES ('c'),('d');
+
+PREPARE stmt FROM "SELECT * FROM v1 WHERE (f1,f1) = SOME ( SELECT f2,f2 FROM t2 )";
+EXECUTE stmt;
+EXECUTE stmt;
+insert into t1 values ('c');
+EXECUTE stmt;
+EXECUTE stmt;
+
+deallocate prepare stmt;
+drop view v1;
+drop table t1,t2;
+
+
+
+CREATE TABLE t1 (column1 INT) ENGINE=MyISAM;
+INSERT INTO t1 VALUES (3),(9);
+
+CREATE TABLE t2 (column2 INT) ENGINE=MyISAM;
+
+INSERT INTO t2 VALUES (1),(4);
+
+CREATE TABLE t3 (column3 INT) ENGINE=MyISAM;
+INSERT INTO t3 VALUES (6),(8);
+
+CREATE TABLE t4 (column4 INT) ENGINE=MyISAM;
+INSERT INTO t4 VALUES (2),(5);
+
+PREPARE stmt FROM "
+SELECT ( 
+  SELECT MAX( table1.column1 ) AS field1 
+  FROM t1 AS table1
+  WHERE (111,table3.column3) IN ( SELECT 111,table2.column2 AS field2 FROM t2 AS table2 ) 
+) AS sq
+FROM t3 AS table3, t4 AS table4 GROUP BY sq
+";
+
+EXECUTE stmt;
+EXECUTE stmt;
+
+deallocate prepare stmt;
+drop table t1,t2,t3,t4;
+
+create table t1 (a int, b int, c int);
+create table t2 (x int, y int, z int);
+create table t3 as select * from t1;
+insert into t1 values (1,2,3),(4,5,6),(100,200,300),(400,500,600);
+insert into t2 values (1,2,3),(7,8,9),(100,200,300),(400,500,600);
+insert into t3 values (1,2,3),(11,12,13),(100,0,0),(400,500,600);
+
+
+set @optimizer_switch_save=@@optimizer_switch;
+set @join_cache_level_save=@@join_cache_level;
+set optimizer_switch='materialization=off';
+set join_cache_level=0;
+select * from t1 where (select a,b from t3 where t3.c=t1.c) in (select x,y from t2 where t1.c= t2.z);
+prepare stmt from "select * from t1 where (select a,b from t3 where t3.c=t1.c) in (select x,y from t2 where t1.c= t2.z)";
+EXECUTE stmt;
+EXECUTE stmt;
+
+create view v1 as select * from t1;
+create view v2 as select * from t2;
+create view v3 as select * from t3;
+select * from v1 where (select a,b from v3 where v3.c=v1.c) in (select x,y from v2 where v1.c= v2.z);
+prepare stmt from "select * from v1 where (select a,b from v3 where v3.c=v1.c) in (select x,y from v2 where v1.c= v2.z)";
+EXECUTE stmt;
+EXECUTE stmt;
+set optimizer_switch=@optimizer_switch_save;
+set join_cache_level=@join_cache_level_save;
+
+deallocate prepare stmt;
+drop view v1,v2,v3;
+drop table t1,t2,t3;
+
+--echo #
+--echo # MDEV-10657: incorrect result returned with binary protocol
+--echo # (prepared statements)
+--echo #
+
+create table  t1 (code varchar(10) primary key);
+INSERT INTO t1(code) VALUES ('LINE1'), ('LINE2'), ('LINE3');
+SELECT X.*
+FROM
+ (SELECT CODE, RN
+   FROM
+     (SELECT A.CODE, @cnt := @cnt + 1 AS RN
+       FROM  t1 A, (SELECT @cnt := 0) C) T
+  ) X;
+drop table t1;
+
+--echo #
+--echo # MDEV-17042: prepared statement does not return error with
+--echo # SQL_MODE STRICT_TRANS_TABLES. (Part 1)
+--echo #
+
+set @save_sql_mode=@@sql_mode;
+set sql_mode='STRICT_ALL_TABLES';
+
+CREATE TABLE t1 (id int, count int);
+insert into t1 values (1,1),(0,2);
+--error ER_TRUNCATED_WRONG_VALUE
+update t1 set count = count + 1 where id = '1bad';
+
+prepare stmt from "update t1 set count = count + 1 where id = '1bad'";
+--error ER_TRUNCATED_WRONG_VALUE
+execute stmt;
+deallocate prepare stmt;
+
+prepare stmt from 'update t1 set count = count + 1 where id = ?';
+set @a = '1bad';
+--error ER_TRUNCATED_WRONG_VALUE
+execute stmt using @a;
+deallocate prepare stmt;
+drop table t1;
+
+CREATE TABLE t1 (id decimal(10,5), count int);
+insert into t1 values (1,1),(0,2);
+--error ER_TRUNCATED_WRONG_VALUE
+update t1 set count = count + 1 where id = '1bad';
+
+prepare stmt from "update t1 set count = count + 1 where id = '1bad'";
+--error ER_TRUNCATED_WRONG_VALUE
+execute stmt;
+deallocate prepare stmt;
+
+prepare stmt from 'update t1 set count = count + 1 where id = ?';
+set @a = '1bad';
+--error ER_TRUNCATED_WRONG_VALUE
+execute stmt using @a;
+deallocate prepare stmt;
+drop table t1;
+
+CREATE TABLE t1 (id double, count int);
+insert into t1 values (1,1),(0,2);
+--error ER_TRUNCATED_WRONG_VALUE
+update t1 set count = count + 1 where id = '1bad';
+
+prepare stmt from "update t1 set count = count + 1 where id = '1bad'";
+--error ER_TRUNCATED_WRONG_VALUE
+execute stmt;
+deallocate prepare stmt;
+
+prepare stmt from 'update t1 set count = count + 1 where id = ?';
+set @a = '1bad';
+--error ER_TRUNCATED_WRONG_VALUE
+execute stmt using @a;
+deallocate prepare stmt;
+drop table t1;
+
+CREATE TABLE t1 (id date, count int);
+insert into t1 values ("2019-06-11",1),("2019-06-12",2);
+--error ER_TRUNCATED_WRONG_VALUE
+update t1 set count = count + 1 where id = '1bad';
+
+prepare stmt from "update t1 set count = count + 1 where id = '1bad'";
+--error ER_TRUNCATED_WRONG_VALUE
+execute stmt;
+deallocate prepare stmt;
+
+prepare stmt from 'update t1 set count = count + 1 where id = ?';
+set @a = '1bad';
+--error ER_TRUNCATED_WRONG_VALUE
+execute stmt using @a;
+deallocate prepare stmt;
+drop table t1;
+set sql_mode=@save_sql_mode;
+--echo # End of 5.5 tests
+
+--echo #
 --echo # End of 10.0 tests
+--echo #
+
+--echo #
+--echo # MDEV-12060 Crash in EXECUTE IMMEDIATE with an expression returning a GRANT command
+--echo # (the 10.1 part)
+--echo #
+
+DELIMITER /;
+CREATE PROCEDURE p2 ()
+BEGIN
+  SET STATEMENT join_cache_level=CAST(CONCAT(_utf8'6',_latin1'') AS INT) FOR PREPARE stmt FROM 'SELECT 1';
+  EXECUTE stmt;
+  DEALLOCATE PREPARE stmt;
+END;
+/
+DELIMITER ;/
+CALL p2();
+DROP PROCEDURE p2;
+
+
+DELIMITER /;
+BEGIN NOT ATOMIC
+  SET STATEMENT join_cache_level=CAST(CONCAT(_utf8'6',_latin1'') AS INT) FOR PREPARE stmt FROM 'SELECT 1';
+  EXECUTE stmt;
+  DEALLOCATE PREPARE stmt;
+END;
+/
+DELIMITER ;/
+
+
+DELIMITER /;
+BEGIN NOT ATOMIC
+  SET STATEMENT join_cache_level=CAST(CONCAT(_utf8'6',_latin1'') AS INT) FOR PREPARE stmt FROM 'SELECT 1';
+  DEALLOCATE PREPARE stmt;
+END;
+/
+DELIMITER ;/
+
+
+DELIMITER /;
+BEGIN NOT ATOMIC
+  PREPARE stmt FROM 'SELECT 1';
+  SET STATEMENT join_cache_level=CAST(CONCAT(_utf8'6',_latin1'') AS INT) FOR EXECUTE stmt;
+  DEALLOCATE PREPARE stmt;
+END;
+/
+DELIMITER ;/
+
+--echo #
+--echo # MDEV-14572: Assertion `! is_set()' failed in
+--echo # Diagnostics_area::set_eof_status upon EXPLAIN UPDATE in PS
+--echo #
+
+CREATE TABLE t1 (a INT);
+CREATE TABLE t2 (b INT);
+
+#EXPLAIN UPDATE t1, t2 SET a = 1;
+PREPARE stmt FROM 'EXPLAIN UPDATE t1, t2 SET a = 1';
+EXECUTE stmt;
+EXECUTE stmt;
+deallocate prepare stmt;
+
+# Cleanup
+DROP TABLE t1, t2;
+
+--echo #
+--echo # End of 10.1 tests
+--echo #
+
+--echo #
+--echo # MDEV-10709 Expressions as parameters to Dynamic SQL
+--echo #
+
+--echo #
+--echo # Using a simple expressions as an EXECUTE parameter
+--echo #
+
+PREPARE stmt FROM 'SELECT ? FROM DUAL';
+EXECUTE stmt USING 10;
+DEALLOCATE PREPARE stmt;
+
+PREPARE stmt FROM 'SELECT ? FROM DUAL';
+EXECUTE stmt USING TO_BASE64('xxx');
+DEALLOCATE PREPARE stmt;
+
+PREPARE stmt FROM 'SELECT ?+? FROM DUAL';
+EXECUTE stmt USING 10, 10 + 10;
+DEALLOCATE PREPARE stmt;
+
+PREPARE stmt FROM 'SELECT CONCAT(?,?) FROM DUAL';
+EXECUTE stmt USING 'xxx', CONCAT('yyy','zzz');
+DEALLOCATE PREPARE stmt;
+
+--echo #
+--echo # Testing disallowed expressions in USING
+--echo #
+
+PREPARE stmt FROM 'SELECT ? FROM DUAL';
+--error ER_PARSE_ERROR
+EXECUTE stmt USING (SELECT 1);
+DEALLOCATE PREPARE stmt;
+
+CREATE FUNCTION f1() RETURNS VARCHAR(10) RETURN 'test';
+PREPARE stmt FROM 'SELECT ? FROM DUAL';
+--error ER_SUBQUERIES_NOT_SUPPORTED
+EXECUTE stmt USING f1();
+DEALLOCATE PREPARE stmt;
+DROP FUNCTION f1;
+
+--echo #
+--echo # Testing erroneous expressions in USING
+--echo #
+
+PREPARE stmt FROM 'SELECT ?';
+--error ER_CANT_AGGREGATE_2COLLATIONS
+EXECUTE stmt USING _latin1'a'=_latin2'a';
+DEALLOCATE PREPARE stmt;
+
+PREPARE stmt FROM 'SELECT ?';
+--error ER_OPERAND_COLUMNS
+EXECUTE stmt USING ROW(1,2);
+DEALLOCATE PREPARE stmt;
+
+--echo #
+--echo # Creating tables from EXECUTE parameters
+--echo #
+
+PREPARE stmt FROM 'CREATE TABLE t1 AS SELECT ? AS c1 FROM DUAL';
+EXECUTE stmt USING 10;
+SHOW CREATE TABLE t1;
+DROP TABLE t1;
+EXECUTE stmt USING 10.123;
+SHOW CREATE TABLE t1;
+DROP TABLE t1;
+EXECUTE stmt USING 10.123e0;
+SHOW CREATE TABLE t1;
+DROP TABLE t1;
+EXECUTE stmt USING CURRENT_DATE;
+SHOW CREATE TABLE t1;
+DROP TABLE t1;
+EXECUTE stmt USING CURRENT_TIMESTAMP;
+SHOW CREATE TABLE t1;
+DROP TABLE t1;
+EXECUTE stmt USING CURRENT_TIMESTAMP(3);
+SHOW CREATE TABLE t1;
+DROP TABLE t1;
+EXECUTE stmt USING CURRENT_TIMESTAMP(6);
+SHOW CREATE TABLE t1;
+DROP TABLE t1;
+EXECUTE stmt USING CURRENT_TIME;
+SHOW CREATE TABLE t1;
+DROP TABLE t1;
+EXECUTE stmt USING CURRENT_TIME(3);
+SHOW CREATE TABLE t1;
+DROP TABLE t1;
+EXECUTE stmt USING CURRENT_TIME(6);
+SHOW CREATE TABLE t1;
+DROP TABLE t1;
+DEALLOCATE PREPARE stmt;
+
+
+--echo #
+--echo # Using a user variable as an EXECUTE..USING out parameter
+--echo #
+
+DELIMITER /;
+CREATE PROCEDURE p1(OUT a INT)
+BEGIN
+  SET a:= 10;
+END;
+/
+DELIMITER ;/
+SET @a=1;
+CALL p1(@a);
+SELECT @a;
+SET @a=2;
+PREPARE stmt FROM 'CALL p1(?)';
+EXECUTE stmt USING @a;
+SELECT @a;
+DROP PROCEDURE p1;
+
+
+--echo #
+--echo # Using an SP variable as an EXECUTE..USING out parameter
+--echo #
+
+DELIMITER /;
+CREATE PROCEDURE p1 (OUT a INT)
+BEGIN
+  SET a=10;
+END;
+/
+CREATE PROCEDURE p2 (OUT a INT)
+BEGIN
+  PREPARE stmt FROM 'CALL p1(?)';
+  EXECUTE stmt USING a;
+END;
+/
+DELIMITER ;/
+SET @a= 1;
+CALL p2(@a);
+SELECT @a;
+DROP PROCEDURE p2;
+DROP PROCEDURE p1;
+
+
+--echo #
+--echo # Testing re-prepare on a table metadata update between PREPARE and EXECUTE
+--echo #
+
+CREATE TABLE t1 (a INT);
+DELIMITER /;
+CREATE PROCEDURE p1(a INT)
+BEGIN
+  INSERT INTO t1 VALUES (a);
+END;
+/
+DELIMITER ;/
+PREPARE stmt FROM 'CALL p1(?)';
+EXECUTE stmt USING 10;
+SELECT * FROM t1;
+CREATE TRIGGER tr1 BEFORE INSERT ON t1 FOR EACH ROW SET NEW.a=NEW.a+1;
+EXECUTE stmt USING 20;
+SELECT * FROM t1;
+DEALLOCATE PREPARE stmt;
+DROP PROCEDURE p1;
+DROP TABLE t1;
+
+--echo #
+--echo # End of MDEV-10709 Expressions as parameters to Dynamic SQL
+--echo #
+
+--echo #
+--echo # MDEV-10585 EXECUTE IMMEDIATE statement
+--echo #
+
+EXECUTE IMMEDIATE 'SELECT 1 AS a';
+SET @a=10;
+EXECUTE IMMEDIATE 'SELECT ? AS a' USING @a;
+EXECUTE IMMEDIATE 'SELECT ? AS a' USING 20;
+
+
+--echo #
+--echo # Erroneous queries
+--echo #
+
+--error ER_PARSE_ERROR
+EXECUTE IMMEDIATE 'xxx';
+
+--error ER_WRONG_ARGUMENTS
+EXECUTE IMMEDIATE 'SELECT 1' USING @a;
+
+--error ER_WRONG_ARGUMENTS
+EXECUTE IMMEDIATE 'SELECT ?';
+
+--error ER_UNSUPPORTED_PS
+EXECUTE IMMEDIATE 'EXECUTE IMMEDIATE "SELECT 1"';
+
+--error ER_UNSUPPORTED_PS
+EXECUTE IMMEDIATE 'PREPARE stmt FROM "SELECT 1"';
+
+--error ER_UNSUPPORTED_PS
+EXECUTE IMMEDIATE 'EXECUTE stmt';
+
+--error ER_UNSUPPORTED_PS
+EXECUTE IMMEDIATE 'DEALLOCATE PREPARE stmt';
+
+--error ER_CANT_AGGREGATE_2COLLATIONS
+EXECUTE IMMEDIATE 'SELECT ?' USING _latin1'a'=_latin2'a';
+
+--error ER_OPERAND_COLUMNS
+EXECUTE IMMEDIATE 'SELECT ?' USING ROW(1,2);
+
+--echo #
+--echo # Testing disallowed expressions in USING
+--echo #
+
+--error ER_PARSE_ERROR
+EXECUTE IMMEDIATE 'SELECT ? FROM DUAL' USING (SELECT 1);
+
+CREATE FUNCTION f1() RETURNS VARCHAR(10) RETURN 'test';
+--error ER_SUBQUERIES_NOT_SUPPORTED
+EXECUTE IMMEDIATE 'SELECT ? FROM DUAL' USING f1();
+DROP FUNCTION f1;
+
+--echo #
+--echo # DDL
+--echo #
+
+EXECUTE IMMEDIATE 'CREATE TABLE t1 (a INT)';
+EXECUTE IMMEDIATE 'SHOW CREATE TABLE t1';
+EXECUTE IMMEDIATE 'DROP TABLE t1';
+
+SET @stmt= 'CREATE TABLE t1 (a INT)';
+EXECUTE IMMEDIATE @stmt;
+SET @stmt= 'SHOW CREATE TABLE t1';
+EXECUTE IMMEDIATE @stmt;
+SET @stmt= 'DROP TABLE t1';
+EXECUTE IMMEDIATE @stmt;
+
+
+--echo #
+--echo # DDL with parameters
+--echo #
+
+SET @a= 10, @b= 10.1, @c= 10e0, @d='str';
+EXECUTE IMMEDIATE
+  'CREATE TABLE t1 AS SELECT ? AS a,? AS b,? AS c,? AS d'
+  USING @a,@b,@c,@d;
+SHOW CREATE TABLE t1;
+DROP TABLE t1;
+
+EXECUTE IMMEDIATE
+  'CREATE TABLE t1 AS SELECT ? AS a,? AS b,? AS c,? AS d'
+  USING 10, 10.1, 10e0, 'str';
+SHOW CREATE TABLE t1;
+DROP TABLE t1;
+
+EXECUTE IMMEDIATE
+  'CREATE TABLE t1 AS SELECT ? AS t1,? AS t2, ? AS d1,? AS dt1, ? AS dt2'
+  USING TIME'10:20:30',
+        TIME'10:20:30.123',
+        DATE'2001-01-01',
+        TIMESTAMP'2001-01-01 10:20:30',
+        TIMESTAMP'2001-01-01 10:20:30.123';
+SHOW CREATE TABLE t1;
+DROP TABLE t1;
+
+
+--echo #
+--echo # Using a user variable as an EXECUTE IMMEDIATE..USING out parameter
+--echo #
+
+DELIMITER /;
+CREATE PROCEDURE p1(OUT a INT)
+BEGIN
+  SET a:= 10;
+END;
+/
+DELIMITER ;/
+SET @a=1;
+CALL p1(@a);
+SELECT @a;
+SET @a=2;
+EXECUTE IMMEDIATE 'CALL p1(?)' USING @a;
+SELECT @a;
+DROP PROCEDURE p1;
+
+
+--echo #
+--echo # Using an SP variable as an EXECUTE IMMEDIATE..USING out parameter
+--echo #
+
+DELIMITER /;
+CREATE PROCEDURE p1 (OUT a INT)
+BEGIN
+  SET a=10;
+END;
+/
+CREATE PROCEDURE p2 (OUT a INT)
+BEGIN
+  EXECUTE IMMEDIATE 'CALL p1(?)' USING a;
+END;
+/
+DELIMITER ;/
+SET @a= 1;
+CALL p2(@a);
+SELECT @a;
+DROP PROCEDURE p2;
+DROP PROCEDURE p1;
+
+
+--echo #
+--echo # Changing user variables
+--echo #
+
+SET @a=10;
+EXECUTE IMMEDIATE 'SET @a=@a+1';
+SELECT @a;
+
+
+--echo #
+--echo # SET STATEMENT
+--echo #
+
+SET @@max_sort_length=1024;
+EXECUTE IMMEDIATE 'SET STATEMENT max_sort_length=1025 FOR SELECT @@max_sort_length';
+SELECT @@max_sort_length;
+SET @@max_sort_length=DEFAULT;
+
+
+--echo #
+--echo # Similar to prepared EXECUTE, IMMEDIATE is not allowed in stored functions
+--echo #
+DELIMITER $$;
+--error ER_STMT_NOT_ALLOWED_IN_SF_OR_TRG
+CREATE FUNCTION f1() RETURNS INT
+BEGIN
+  EXECUTE IMMEDIATE 'DO 1';
+  RETURN 1;
+END;
+$$
+DELIMITER ;$$
+
+
+--echo #
+--echo # Status variables
+--echo #
+CREATE FUNCTION get_status_var(name TEXT) RETURNS INT
+       RETURN (SELECT CAST(VARIABLE_VALUE AS INT)
+           FROM INFORMATION_SCHEMA.SESSION_STATUS
+           WHERE VARIABLE_NAME=name);
+DELIMITER $$;
+CREATE PROCEDURE test_status_var(name TEXT)
+BEGIN
+  SET @cnt0=get_status_var(name);
+  EXECUTE IMMEDIATE 'DO 1';
+  SET @cnt1=get_status_var(name);
+  SELECT @cnt1-@cnt0 AS increment;
+END;
+$$
+DELIMITER ;$$
+--echo # Note, EXECUTE IMMEDIATE does not increment COM_EXECUTE_SQL
+--echo # It increments COM_EXECUTE_IMMEDIATE instead.
+CALL test_status_var('COM_EXECUTE_SQL');
+CALL test_status_var('COM_EXECUTE_IMMEDIATE');
+CALL test_status_var('COM_STMT_PREPARE');
+CALL test_status_var('COM_STMT_EXECUTE');
+CALL test_status_var('COM_STMT_CLOSE');
+
+DROP PROCEDURE test_status_var;
+DROP FUNCTION get_status_var;
+
+--echo #
+--echo # End of MDEV-10585 EXECUTE IMMEDIATE statement
+--echo #
+
+--echo #
+--echo # MDEV-10866 Extend PREPARE and EXECUTE IMMEDIATE to understand expressions
+--echo #
+
+--echo #
+--echo # Testing erroneous and diallowed prepare source
+--echo #
+
+--error ER_CANT_AGGREGATE_2COLLATIONS
+EXECUTE IMMEDIATE CONCAT(_latin1'SELECT 1 AS c FROM ', _latin2 'DUAL');
+--error ER_CANT_AGGREGATE_2COLLATIONS
+PREPARE stmt FROM CONCAT(_latin1'SELECT 1 AS c FROM ', _latin2 'DUAL');
+
+--error ER_PARSE_ERROR
+EXECUTE IMMEDIATE (SELECT 'SELECT 1');
+--error ER_PARSE_ERROR
+PREPARE stmt FROM (SELECT 'SELECT 1');
+
+--error ER_BAD_FIELD_ERROR
+EXECUTE IMMEDIATE a;
+--error ER_BAD_FIELD_ERROR
+PREPARE stmt FROM a;
+
+--error ER_PARSE_ERROR
+EXECUTE IMMEDIATE NULL;
+--error ER_PARSE_ERROR
+PREPARE stmt FROM NULL;
+
+--error ER_PARSE_ERROR
+EXECUTE IMMEDIATE CONCAT(NULL);
+--error ER_PARSE_ERROR
+PREPARE stmt FROM CONCAT(NULL);
+
+--error ER_PARSE_ERROR
+EXECUTE IMMEDIATE ? USING 'SELECT 1';
+
+--error ER_PARSE_ERROR
+EXECUTE IMMEDIATE 10;
+
+--error ER_PARSE_ERROR
+EXECUTE IMMEDIATE TIME'10:20:30';
+
+--error ER_OPERAND_COLUMNS
+EXECUTE IMMEDIATE ROW('SELECT 1','SELECT 2');
+
+--error ER_INVALID_GROUP_FUNC_USE
+EXECUTE IMMEDIATE MAX('SELECT 1 AS c');
+
+--error ER_BAD_FIELD_ERROR
+EXECUTE IMMEDIATE DEFAULT(a);
+
+--error ER_BAD_FIELD_ERROR
+EXECUTE IMMEDIATE VALUES(a);
+
+
+CREATE FUNCTION f1() RETURNS VARCHAR(64) RETURN 't1';
+--error ER_SUBQUERIES_NOT_SUPPORTED
+EXECUTE IMMEDIATE f1();
+--error ER_SUBQUERIES_NOT_SUPPORTED
+PREPARE stmt FROM f1();
+DROP FUNCTION f1;
+
+--error ER_SUBQUERIES_NOT_SUPPORTED
+EXECUTE IMMEDIATE non_existent();
+
+
+--echo #
+--echo # Testing literals in prepare source
+--echo #
+EXECUTE IMMEDIATE N'SELECT 1 AS c';
+EXECUTE IMMEDIATE _latin1'SELECT 1 AS c';
+EXECUTE IMMEDIATE 'SELECT '  '1'  ' AS c'  ' FROM '  'DUAL';
+EXECUTE IMMEDIATE 0x53454C4543542031 /*This is 'SELECT 1'*/;
+
+--echo #
+--echo # Testing user variables in prepare source
+--echo #
+
+SET @stmt='SELECT 1 AS c FROM DUAL';
+EXECUTE IMMEDIATE @stmt;
+PREPARE stmt FROM @stmt;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @table_name='DUAL';
+EXECUTE IMMEDIATE CONCAT('SELECT 1 AS a FROM ', @table_name);
+PREPARE stmt FROM CONCAT('SELECT 1 AS a FROM ', @table_name);
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+--echo #
+--echo # Testing SP parameters and variables in prepare source
+--echo #
+
+DELIMITER $$;
+CREATE PROCEDURE p1(table_name VARCHAR(64))
+BEGIN
+  EXECUTE IMMEDIATE CONCAT('SELECT 1 AS c FROM ', table_name);
+END;
+$$
+DELIMITER ;$$
+CALL p1('DUAL');
+DROP PROCEDURE p1;
+
+DELIMITER $$;
+CREATE PROCEDURE p1()
+BEGIN
+  DECLARE table_name VARCHAR(64) DEFAULT 'DUAL';
+  EXECUTE IMMEDIATE CONCAT('SELECT 1 AS c FROM ', table_name);
+END;
+$$
+DELIMITER ;$$
+CALL p1();
+DROP PROCEDURE p1;
+
+
+--echo #
+--echo # Testing complex expressions
+--echo #
+EXECUTE IMMEDIATE CONVERT('SELECT 1 AS c' USING utf8);
+EXECUTE IMMEDIATE CAST('SELECT 1 AS c' AS CHAR);
+EXECUTE IMMEDIATE _latin1'SELECT 1 AS c' COLLATE latin1_bin;
+EXECUTE IMMEDIATE (((('SELECT 1 AS c'))));
+EXECUTE IMMEDIATE CASE WHEN 1>2 THEN 'SELECT 1 AS c' ELSE 'SELECT 2 AS c' END;
+EXECUTE IMMEDIATE TRIM('SELECT 1 AS c');
+EXECUTE IMMEDIATE SUBSTRING('SELECT 1 AS c' FROM 1);
+EXECUTE IMMEDIATE COALESCE(NULL, 'SELECT 1 AS c');
+
+--echo #
+--echo # Testing SET STATEMENT and system variables
+--echo #
+CREATE TABLE t1 (a INT);
+SET STATEMENT max_sort_length=1025 FOR EXECUTE IMMEDIATE CONCAT('INSERT INTO t1 VALUES (', @@max_sort_length, ')');
+SELECT * FROM t1;
+DROP TABLE t1;
+
+--echo #
+--echo # End of MDEV-10866 Extend PREPARE and EXECUTE IMMEDIATE to understand expressions
+--echo #
+
+
+
+--echo #
+--echo # MDEV-11360 Dynamic SQL: DEFAULT as a bind parameter
+--echo #
+
+# Correct usage
+CREATE TABLE t1 (a INT DEFAULT 10, b INT DEFAULT NULL);
+EXECUTE IMMEDIATE 'INSERT INTO t1 VALUES (?,?)' USING DEFAULT, DEFAULT;
+SELECT * FROM t1;
+UPDATE t1 SET a=20, b=30;
+SELECT * FROM t1;
+EXECUTE IMMEDIATE 'UPDATE t1 SET a=?,b=?' USING DEFAULT, DEFAULT;
+SELECT * FROM t1;
+DROP TABLE t1;
+
+# Incorrect usage in a expression in INSERT..VALUES
+CREATE TABLE t1 (a INT DEFAULT 10);
+--error ER_INVALID_DEFAULT_PARAM
+EXECUTE IMMEDIATE 'INSERT INTO t1 VALUES (?+1)' USING DEFAULT;
+--error ER_INVALID_DEFAULT_PARAM
+EXECUTE IMMEDIATE 'INSERT INTO t1 VALUES (CONCAT(?,?))' USING DEFAULT, 'test';
+DROP TABLE t1;
+
+# Incorrect usage in UPDATE..SET
+CREATE TABLE t1 (a INT DEFAULT 10);
+INSERT INTO t1 VALUES (20);
+--error ER_INVALID_DEFAULT_PARAM
+EXECUTE IMMEDIATE 'UPDATE t1 SET a=?+1' USING DEFAULT;
+--error ER_INVALID_DEFAULT_PARAM
+EXECUTE IMMEDIATE 'UPDATE t1 SET a=CONCAT(?,?)' USING DEFAULT, 'test';
+DROP TABLE t1;
+
+# Incorrect usage in not an UPDATE/INSERT query at all
+--error ER_INVALID_DEFAULT_PARAM
+EXECUTE IMMEDIATE 'SELECT CAST(? AS SIGNED)' USING DEFAULT;
+--error ER_INVALID_DEFAULT_PARAM
+EXECUTE IMMEDIATE 'SELECT CAST(? AS DOUBLE)' USING DEFAULT;
+--error ER_INVALID_DEFAULT_PARAM
+EXECUTE IMMEDIATE 'SELECT CAST(? AS CHAR)' USING DEFAULT;
+--error ER_INVALID_DEFAULT_PARAM
+EXECUTE IMMEDIATE 'SELECT CAST(? AS DECIMAL(10,1))' USING DEFAULT;
+--error ER_INVALID_DEFAULT_PARAM
+EXECUTE IMMEDIATE 'SELECT CAST(? AS TIME)' USING DEFAULT;
+--error ER_INVALID_DEFAULT_PARAM
+EXECUTE IMMEDIATE 'SELECT CAST(? AS DATE)' USING DEFAULT;
+--error ER_INVALID_DEFAULT_PARAM
+EXECUTE IMMEDIATE 'SELECT CAST(? AS DATETIME)' USING DEFAULT;
+
+--error ER_INVALID_DEFAULT_PARAM
+EXECUTE IMMEDIATE 'SELECT ?+1' USING DEFAULT;
+--error ER_INVALID_DEFAULT_PARAM
+EXECUTE IMMEDIATE 'SELECT CONCAT(?,?)' USING DEFAULT,'test';
+
+# Incorrect usage in the LIMIT clause
+--error ER_INVALID_DEFAULT_PARAM
+EXECUTE IMMEDIATE 'SELECT 1 LIMIT ?' USING DEFAULT;
+CREATE TABLE t1 (a INT DEFAULT 10);
+INSERT INTO t1 VALUES (1),(2),(3);
+--error ER_INVALID_DEFAULT_PARAM
+EXECUTE IMMEDIATE 'SELECT * FROM t1 LIMIT ?' USING DEFAULT;
+DROP TABLE t1;
+
+--echo # The output of this query in 'Note' is a syntactically incorrect query.
+--echo # But as it's never logged, it's ok. It should be human readable only.
+EXECUTE IMMEDIATE 'EXPLAIN EXTENDED SELECT ?' USING DEFAULT;
+
+# This tests Item_param::eq() for DEFAULT as a bound value
+CREATE TABLE t1 (a INT);
+INSERT INTO t1 VALUES (1),(2),(3);
+--error ER_INVALID_DEFAULT_PARAM
+EXECUTE IMMEDIATE 'EXPLAIN EXTENDED SELECT * FROM t1 WHERE ?+a<=>?+a' USING DEFAULT,DEFAULT;
+DROP TABLE t1;
+
+--echo #
+--echo # MDEV-11780 Crash with PREPARE + SP out parameter + literal
+--echo #
+
+DELIMITER $$;
+CREATE OR REPLACE PROCEDURE p1(OUT a INT)
+BEGIN
+  SET a=10;
+END;
+$$
+DELIMITER ;$$
+
+PREPARE stmt FROM 'CALL p1(?)';
+--error ER_SP_NOT_VAR_ARG
+EXECUTE stmt USING 10;
+--error ER_SP_NOT_VAR_ARG
+EXECUTE stmt USING DEFAULT;
+--error ER_SP_NOT_VAR_ARG
+EXECUTE stmt USING IGNORE;
+DEALLOCATE PREPARE stmt;
+
+--error ER_SP_NOT_VAR_ARG
+EXECUTE IMMEDIATE 'CALL p1(?)' USING 10;
+--error ER_SP_NOT_VAR_ARG
+EXECUTE IMMEDIATE 'CALL p1(?)' USING DEFAULT;
+--error ER_SP_NOT_VAR_ARG
+EXECUTE IMMEDIATE 'CALL p1(?)' USING IGNORE;
+DROP PROCEDURE p1;
+
+
+--echo #
+--echo # MDEV-14434 Wrong result for CHARSET(CONCAT(?,const))
+--echo #
+
+SET NAMES utf8;
+EXECUTE IMMEDIATE "SELECT CHARSET(CONCAT(5,_latin1'a'))";
+EXECUTE IMMEDIATE "SELECT CHARSET(CONCAT(?,_latin1'a'))" USING 5;
+EXECUTE IMMEDIATE "SELECT CHARSET(CONCAT(?,_latin1'a'))" USING 5.5;
+EXECUTE IMMEDIATE "SELECT CHARSET(CONCAT(?,_latin1'a'))" USING 5.5e0;
+EXECUTE IMMEDIATE "SELECT CHARSET(CONCAT(?,_latin1'a'))" USING TIME'10:20:30';
+EXECUTE IMMEDIATE "SELECT CHARSET(CONCAT(?,_latin1'a'))" USING TIMESTAMP'2001-01-01 10:20:30';
+
+EXECUTE IMMEDIATE "SELECT COERCIBILITY(?)" USING 5;
+EXECUTE IMMEDIATE "SELECT COERCIBILITY(?)" USING 5.5;
+EXECUTE IMMEDIATE "SELECT COERCIBILITY(?)" USING 5.5e0;
+EXECUTE IMMEDIATE "SELECT COERCIBILITY(?)" USING TIME'10:20:30';
+EXECUTE IMMEDIATE "SELECT COERCIBILITY(?)" USING TIMESTAMP'2001-01-01 10:20:30';
+
+--echo #
+--echo # MDEV-14435 Different UNSIGNED flag of out user variable for YEAR parameter for direct vs prepared CALL
+--echo #
+
+CREATE PROCEDURE p1(OUT v INT UNSIGNED) SET v = 2010;
+CALL p1(@a);
+PREPARE stmt FROM 'CALL p1(?)';
+EXECUTE stmt USING @b;
+DEALLOCATE PREPARE stmt;
+CREATE TABLE t1 AS SELECT @a AS a, @b AS b;
+SHOW CREATE TABLE t1;
+DROP TABLE t1;
+DROP PROCEDURE p1;
+
+CREATE PROCEDURE p1(OUT v YEAR) SET v = 2010;
+CALL p1(@a);
+PREPARE stmt FROM 'CALL p1(?)';
+EXECUTE stmt USING @b;
+DEALLOCATE PREPARE stmt;
+CREATE TABLE t1 AS SELECT @a AS a, @b AS b;
+SHOW CREATE TABLE t1;
+DROP TABLE t1;
+DROP PROCEDURE p1;
+
+CREATE PROCEDURE p1(OUT v BIT(16)) SET v = 2010;
+CALL p1(@a);
+PREPARE stmt FROM 'CALL p1(?)';
+EXECUTE stmt USING @b;
+DEALLOCATE PREPARE stmt;
+CREATE TABLE t1 AS SELECT @a AS a, @b AS b;
+SHOW CREATE TABLE t1;
+DROP TABLE t1;
+DROP PROCEDURE p1;
+
+
+--echo #
+--echo # MDEV-14426 Assertion in Diagnostics_area::set_error_status when using a bad datetime with PS and SP
+--echo #
+
+DELIMITER $$;
+CREATE PROCEDURE p1(OUT a VARCHAR(20))
+BEGIN
+  SET a=10;
+END;
+$$
+--error ER_TRUNCATED_WRONG_VALUE
+BEGIN NOT ATOMIC
+  DECLARE a DATETIME;
+  CALL p1(a);
+END;
+$$
+--error ER_TRUNCATED_WRONG_VALUE
+BEGIN NOT ATOMIC
+  DECLARE a DATETIME;
+  EXECUTE IMMEDIATE 'CALL p1(?)' USING a;
+END;
+$$
+--error ER_TRUNCATED_WRONG_VALUE
+BEGIN NOT ATOMIC
+  DECLARE a DATETIME;
+  PREPARE stmt FROM 'CALL p1(?)';
+  EXECUTE stmt  USING a;
+  DEALLOCATE PREPARE stmt;
+END;
+$$
+DELIMITER ;$$
+DROP PROCEDURE p1;
+
+--echo #
+--echo # MDEV-14603 signal 11 with short stacktrace
+--echo #
+
+SET NAMES utf8;
+CREATE TABLE t1(i INT);
+CREATE PROCEDURE p1(tn VARCHAR(32))
+  EXECUTE IMMEDIATE CONCAT('ANALYZE TABLE ',tn);
+CALL p1('t1');
+DROP PROCEDURE p1;
+DROP TABLE t1;
+
+SET NAMES utf8;
+CREATE PROCEDURE p1()
+  EXECUTE IMMEDIATE CONCAT('SELECT ',CONVERT(RAND() USING latin1));
+--disable_result_log
+CALL p1();
+--enable_result_log
+DROP PROCEDURE p1;
+
+SET NAMES utf8;
+DELIMITER $$;
+CREATE PROCEDURE p1()
+BEGIN
+  PREPARE stmt FROM CONCAT('SELECT ',CONVERT(RAND() USING latin1));
+  EXECUTE stmt;
+  DEALLOCATE PREPARE stmt;
+END;
+$$
+DELIMITER ;$$
+--disable_result_log
+CALL p1();
+--enable_result_log
+DROP PROCEDURE p1;
+
+SET NAMES utf8;
+CREATE PROCEDURE p1(a VARCHAR(10) CHARACTER SET utf8)
+  EXECUTE IMMEDIATE 'SELECT ?' USING CONCAT(a, CONVERT(RAND() USING latin1));
+--disable_result_log
+CALL p1('x');
+--enable_result_log
+DROP PROCEDURE p1;
+
+SET NAMES utf8;
+DELIMITER $$;
+CREATE PROCEDURE p1(a VARCHAR(10) CHARACTER SET utf8)
+BEGIN
+  PREPARE stmt FROM 'SELECT ?';
+  EXECUTE stmt USING CONCAT(a, CONVERT(RAND() USING latin1));
+  DEALLOCATE PREPARE stmt;
+END;
+$$
+DELIMITER ;$$
+--disable_result_log
+CALL p1('x');
+DROP PROCEDURE p1;
+
+#
+# MDEV-15746 ASAN heap-use-after-free in Item_change_list::rollback_item_tree_changes on ALTER executed as PS
+#
+create table t1 (b blob default '');
+prepare stmt from "alter table t1 force";
+execute stmt;
+execute stmt;
+execute stmt;
+set names latin1;
+prepare stmt from "alter table t1 modify b text character set utf8 default 'a'";
+execute stmt;
+execute stmt;
+execute stmt;
+drop table t1;
+
+
+--echo #
+--echo # MDEV-12060 Crash in EXECUTE IMMEDIATE with an expression returning a GRANT command
+--echo #
+
+CREATE ROLE testrole;
+DELIMITER /;
+CREATE OR REPLACE PROCEDURE p1() 
+BEGIN
+END;
+/
+DELIMITER ;/
+
+DELIMITER /;
+CREATE PROCEDURE p2 (wgrp VARCHAR(10))
+BEGIN
+  EXECUTE IMMEDIATE concat('GRANT EXECUTE ON PROCEDURE p1 TO ',wgrp);
+END;
+/
+DELIMITER ;/
+CALL p2('testrole');
+DROP PROCEDURE p2;
+
+DELIMITER /;
+CREATE PROCEDURE p2 ()
+BEGIN
+  EXECUTE IMMEDIATE concat(_utf8'GRANT EXECUTE ON PROCEDURE p1 TO ',_latin1'testrole');
+END;
+/
+DELIMITER ;/
+CALL p2();
+DROP PROCEDURE p2;
+
+DELIMITER /;
+CREATE PROCEDURE p2 ()
+BEGIN
+  PREPARE stmt FROM concat(_utf8'GRANT EXECUTE ON PROCEDURE p1 TO ',_latin1' testrole');
+  EXECUTE stmt;
+  DEALLOCATE PREPARE stmt;
+END;
+/
+DELIMITER ;/
+CALL p2();
+DROP PROCEDURE p2;
+
+DROP PROCEDURE p1;
+DROP ROLE testrole;
+
+--echo #
+--echo # MDEV-16992: prepare of CREATE TABLE, CREATE VIEW, DO, SET, CALL
+--echo #             statements with CTE containing materialized derived
+--echo # (the bug is reproducible on 10.4)        
+--echo #
+
+--enable_result_log
+
+prepare stmt from 
+"CREATE TABLE  t1  AS 
+ WITH cte(a) AS (SELECT * FROM (SELECT 1) AS t) SELECT * FROM cte;";
+execute stmt;
+select * from t1;
+
+prepare stmt from
+"CREATE VIEW  v1  AS 
+ WITH cte(a) AS (SELECT * FROM (SELECT 1) AS t) SELECT * FROM cte;";
+execute stmt;
+select * from v1;
+
+prepare stmt from 
+"DO (SELECT 1 
+     FROM (WITH cte AS (SELECT * FROM (SELECT 1) AS t)
+           SELECT * FROM cte) AS tt);";
+execute stmt;
+
+prepare stmt from 
+"SET @a = (SELECT 1
+           FROM (WITH cte AS (SELECT * FROM (SELECT 1) AS t)
+           SELECT * FROM cte) AS t);";
+execute stmt;
+
+create procedure p (i int) insert into t1 values(i);
+
+prepare stmt from 
+"CALL p       
+ ((SELECT 1
+   FROM (WITH cte AS (SELECT * FROM (SELECT 1) AS t)
+         SELECT * FROM cte) AS tt));";
+execute stmt;
+select * from t1;
+
+drop procedure p;
+drop view v1;
+drop table t1;
+
+
+--echo #
+--echo # MDEV-22591 Debug build crashes on EXECUTE IMMEDIATE '... WHERE ?' USING IGNORE
+--echo #
+
+CREATE TABLE t1 (a INT);
+--error ER_INVALID_DEFAULT_PARAM
+EXECUTE IMMEDIATE 'SELECT * FROM t1 WHERE ?' USING IGNORE;
+--error ER_INVALID_DEFAULT_PARAM
+EXECUTE IMMEDIATE 'SELECT * FROM t1 HAVING ?' USING IGNORE;
+EXECUTE IMMEDIATE 'SELECT * FROM t1 WHERE ?' USING 0;
+EXECUTE IMMEDIATE 'SELECT * FROM t1 HAVING ?' USING 0;
+DROP TABLE t1;
+--error ER_INVALID_DEFAULT_PARAM
+EXECUTE IMMEDIATE 'SHOW DATABASES WHERE ?' USING DEFAULT;
+EXECUTE IMMEDIATE 'SHOW DATABASES WHERE ?' USING 0;
+
+--echo #
+--echo # MDEV-24779: main.subselect fails in buildbot with --ps-protocol
+--echo #
+
+CREATE TABLE t1(a INT);
+PREPARE stmt FROM "SELECT EXISTS(SELECT 1 FROM t1 GROUP BY a IN (select a from t1))";
+EXECUTE stmt;
+EXECUTE stmt;
+DROP TABLE t1;
+
+--echo #
+--echo # MDEV-25006: Failed assertion on executing EXPLAIN DELETE statement as a prepared statement
+--echo #
+
+CREATE TABLE t1(c1 CHAR(255) PRIMARY KEY);
+PREPARE stmt FROM 'EXPLAIN DELETE b FROM t1 AS a JOIN t1 AS b';
+EXECUTE stmt;
+DROP TABLE t1;
+CREATE TABLE t1(a INT);
+PREPARE stmt FROM 'EXPLAIN DELETE FROM t1.* USING t1';
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+DROP TABLE t1;
+
+--echo #
+--echo # MDEV-25108: Running of the EXPLAIN EXTENDED statement produces extra warning
+--echo #             in case it is executed in PS (prepared statement) mode
+--echo #
+CREATE TABLE t1 (c int);
+CREATE TABLE t2 (d int);
+
+--echo # EXPLAIN EXTENDED in regular way (not PS mode)
+EXPLAIN EXTENDED SELECT (SELECT 1 FROM t2 WHERE d = c) FROM t1;
+SHOW WARNINGS;
+
+--echo # Now run the same EXPLAIN EXTENDED in PS mode. Number of warnings
+--echo # and their content must be the same as in case running the statement
+--echo # in regular way
+PREPARE stmt FROM "EXPLAIN EXTENDED SELECT (SELECT 1 FROM t2 WHERE d = c) FROM t1";
+EXECUTE stmt;
+SHOW WARNINGS;
+
+DEALLOCATE PREPARE stmt;
+DROP TABLE t1, t2;
+
+--echo #
+--echo # MDEV-25576: The statement EXPLAIN running as regular statement and
+--echo #             as prepared statement produces different results for
+--echo #             UPDATE with subquery
+--echo #
+CREATE TABLE t1 (c1 INT KEY) ENGINE=MyISAM;
+CREATE TABLE t2 (c2 INT) ENGINE=MyISAM;
+CREATE TABLE t3 (c3 INT) ENGINE=MyISAM;
+EXPLAIN EXTENDED UPDATE t3 SET c3 = ( SELECT COUNT(d1.c1) FROM ( SELECT a11.c1 FROM t1 AS a11 STRAIGHT_JOIN t2 AS a21 ON a21.c2 = a11.c1 JOIN t1 AS a12 ON a12.c1 = a11.c1 ) d1 );
+PREPARE stmt FROM "EXPLAIN EXTENDED UPDATE t3 SET c3 = ( SELECT COUNT(d1.c1) FROM ( SELECT a11.c1 FROM t1 AS a11 STRAIGHT_JOIN t2 AS a21 ON a21.c2 = a11.c1 JOIN t1 AS a12 ON a12.c1 = a11.c1 ) d1 )";
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+DROP TABLE t1, t2, t3;
+
+--echo #
+--echo # MDEV-21866: Assertion `!result' failed in convert_const_to_int upon 2nd execution of PS
+--echo #
+
+CREATE TABLE t1 (a BIGINT DEFAULT -1);
+CREATE VIEW v1 AS SELECT DISTINCT a FROM t1;
+PREPARE stmt FROM 'SELECT * FROM v1 WHERE a <=> NULL';
+EXECUTE stmt;
+EXECUTE stmt;
+
+# Cleanup
+DEALLOCATE PREPARE stmt;
+DROP VIEW v1;
+DROP TABLE t1;
+
+--echo #
+--echo # MDEV-19631: Assertion `0' failed in st_select_lex_unit::optimize or
+--echo #             different plan upon 2nd execution of PS with EXPLAIN
+--echo #
+CREATE TABLE t1 (a INT);
+PREPARE stmt FROM 'EXPLAIN SELECT * FROM t1 HAVING 6 IN ( SELECT 6 UNION SELECT 5 )';
+EXECUTE stmt;
+--echo # Without the patch the second execution of the 'stmt' prepared statement
+--echo # would result in server crash.
+EXECUTE stmt;
+# Cleanup
+DEALLOCATE PREPARE stmt;
+DROP TABLE t1;
+
+--echo # End of 10.2 tests
+--echo #

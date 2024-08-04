@@ -14,7 +14,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /**
   @file
@@ -44,6 +44,8 @@ extern void debug_sync_end(void);
 extern void debug_sync_init_thread(THD *thd);
 extern void debug_sync_end_thread(THD *thd);
 extern bool debug_sync_set_action(THD *thd, const char *action_str, size_t len);
+extern bool debug_sync_update(THD *thd, char *val_str, size_t len);
+extern uchar *debug_sync_value_ptr(THD *thd);
 
 #endif /* defined(ENABLED_DEBUG_SYNC) */
 

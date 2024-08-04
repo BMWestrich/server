@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /* my_setwd() and my_getwd() works with intern_filenames !! */
 
@@ -37,7 +37,7 @@
     MyFlags	Flags
 
   NOTES
-    Directory is allways ended with FN_LIBCHAR
+    Directory is always ended with FN_LIBCHAR
 
   RESULT
     0  ok
@@ -48,8 +48,8 @@ int my_getwd(char * buf, size_t size, myf MyFlags)
 {
   char * pos;
   DBUG_ENTER("my_getwd");
-  DBUG_PRINT("my",("buf: 0x%lx  size: %u  MyFlags %lu",
-                   (long) buf, (uint) size, MyFlags));
+  DBUG_PRINT("my",("buf:%p size: %u  MyFlags %lu",
+                   buf, (uint) size, MyFlags));
 
   if (size < 1)
     DBUG_RETURN(-1);

@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2006, 2009, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2006, 2016, Oracle and/or its affiliates. All Rights Reserved.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +12,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -26,16 +26,15 @@ Created September 2006 Marko Makela
 #ifndef row0ext_h
 #define row0ext_h
 
-#include "univ.i"
-#include "row0types.h"
 #include "data0types.h"
 #include "mem0mem.h"
 #include "dict0types.h"
+#include "page0size.h"
+#include "row0types.h"
 
 /********************************************************************//**
 Creates a cache of column prefixes of externally stored columns.
-@return	own: column prefix cache */
-UNIV_INTERN
+@return own: column prefix cache */
 row_ext_t*
 row_ext_create(
 /*===========*/
@@ -92,11 +91,12 @@ struct row_ext_t{
 				REC_ANTELOPE_MAX_INDEX_COL_LEN or
 				REC_VERSION_56_MAX_INDEX_COL_LEN depending
 				on row format */
+	page_size_t	page_size;
+				/*!< page size of the externally stored
+				columns */
 	ulint		len[1];	/*!< prefix lengths; 0 if not cached */
 };
 
-#ifndef UNIV_NONINL
-#include "row0ext.ic"
-#endif
+#include "row0ext.inl"
 
 #endif

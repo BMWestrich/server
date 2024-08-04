@@ -1,5 +1,5 @@
 /* Copyright (c) 2007, 2013, Oracle and/or its affiliates.
-   Copyright (c) 2008, 2014, SkySQL Ab.
+   Copyright (c) 2008, 2019, MariaDB Corporation.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #include <my_global.h>
 #include "sql_priv.h"
@@ -80,7 +80,7 @@ pack_row(TABLE *table, MY_BITMAP const* cols,
   unsigned int null_mask= 1U;
   for ( ; (field= *p_field) ; p_field++)
   {
-    if (bitmap_is_set(cols, p_field - table->field))
+    if (bitmap_is_set(cols, (uint)(p_field - table->field)))
     {
       my_ptrdiff_t offset;
       if (field->is_null(rec_offset))
@@ -105,10 +105,10 @@ pack_row(TABLE *table, MY_BITMAP const* cols,
 #endif
         pack_ptr= field->pack(pack_ptr, field->ptr + offset,
                               field->max_data_length());
-        DBUG_PRINT("debug", ("field: %s; real_type: %d, pack_ptr: 0x%lx;"
-                             " pack_ptr':0x%lx; bytes: %d",
+        DBUG_PRINT("debug", ("field: %s; real_type: %d, pack_ptr: %p;"
+                             " pack_ptr':%p; bytes: %d",
                              field->field_name, field->real_type(),
-                             (ulong) old_pack_ptr, (ulong) pack_ptr,
+                             old_pack_ptr,pack_ptr,
                              (int) (pack_ptr - old_pack_ptr)));
         DBUG_DUMP("packed_data", old_pack_ptr, pack_ptr - old_pack_ptr);
       }
@@ -185,7 +185,7 @@ pack_row(TABLE *table, MY_BITMAP const* cols,
 
    @retval HA_ERR_GENERIC
    A generic, internal, error caused the unpacking to fail.
-   @retval ER_SLAVE_CORRUPT_EVENT
+   @retval HA_ERR_CORRUPT_EVENT
    Found error when trying to unpack fields.
  */
 #if !defined(MYSQL_CLIENT) && defined(HAVE_REPLICATION)
@@ -262,7 +262,7 @@ unpack_row(rpl_group_info *rgi,
       No need to bother about columns that does not exist: they have
       gotten default values when being emptied above.
      */
-    if (bitmap_is_set(cols, field_ptr -  begin_ptr))
+    if (bitmap_is_set(cols, (uint)(field_ptr -  begin_ptr)))
     {
       if ((null_mask & 0xFF) == 0)
       {
@@ -318,13 +318,13 @@ unpack_row(rpl_group_info *rgi,
           normal unpack operation.
         */
         uint16 const metadata= tabledef->field_metadata(i);
-        uchar const *const old_pack_ptr= pack_ptr;
+        IF_DBUG(uchar const *const old_pack_ptr= pack_ptr;,)
 
         pack_ptr= f->unpack(f->ptr, pack_ptr, row_end, metadata);
 	DBUG_PRINT("debug", ("field: %s; metadata: 0x%x;"
-                             " pack_ptr: 0x%lx; pack_ptr': 0x%lx; bytes: %d",
+                             " pack_ptr: %p; pack_ptr': %p; bytes: %d",
                              f->field_name, metadata,
-                             (ulong) old_pack_ptr, (ulong) pack_ptr,
+                             old_pack_ptr, pack_ptr,
                              (int) (pack_ptr - old_pack_ptr)));
         if (!pack_ptr)
         {
@@ -336,11 +336,10 @@ unpack_row(rpl_group_info *rgi,
               Galera Node throws "Could not read field" error and drops out of cluster
             */
             WSREP_WARN("ROW event unpack field: %s  metadata: 0x%x;"
-                       " pack_ptr: 0x%lx; conv_table %p conv_field %p table %s"
-                       " row_end: 0x%lx",
-                       f->field_name, metadata,
-                       (ulong) old_pack_ptr, conv_table, conv_field,
-                       (table_found) ? "found" : "not found", (ulong)row_end
+                       " conv_table %p conv_field %p table %s"
+                       " row_end: %p",
+                       f->field_name, metadata, conv_table, conv_field,
+                       (table_found) ? "found" : "not found", row_end
             );
 	  }
 
@@ -349,7 +348,7 @@ unpack_row(rpl_group_info *rgi,
                       "Could not read field '%s' of table '%s.%s'",
                       f->field_name, table->s->db.str,
                       table->s->table_name.str);
-          DBUG_RETURN(ER_SLAVE_CORRUPT_EVENT);
+          DBUG_RETURN(HA_ERR_CORRUPT_EVENT);
         }
       }
 
@@ -417,6 +416,12 @@ unpack_row(rpl_group_info *rgi,
   }
 
   /*
+    Add Extra slave persistent columns
+  */
+  if (int error= fill_extra_persistent_columns(table, cols->n_bits))
+    DBUG_RETURN(error);
+
+  /*
     We should now have read all the null bytes, otherwise something is
     really wrong.
    */
@@ -428,7 +433,7 @@ unpack_row(rpl_group_info *rgi,
   if (master_reclength)
   {
     if (*field_ptr)
-      *master_reclength = (*field_ptr)->ptr - table->record[0];
+      *master_reclength = (ulong)((*field_ptr)->ptr - table->record[0]);
     else
       *master_reclength = table->s->reclength;
   }
@@ -489,5 +494,30 @@ int prepare_record(TABLE *const table, const uint skip, const bool check)
 
   DBUG_RETURN(0);
 }
+/**
+  Fills @c table->record[0] with computed values of extra  persistent  column which are present on slave but not on master.
+  @param table         Table whose record[0] buffer is prepared.
+  @param master_cols   No of columns on master 
+  @returns 0 on        success
+ */
+int fill_extra_persistent_columns(TABLE *table, int master_cols)
+{
+  int error= 0;
+  Field **vfield_ptr, *vfield;
 
+  if (!table->vfield)
+    return 0;
+  for (vfield_ptr= table->vfield; *vfield_ptr; ++vfield_ptr)
+  {
+    vfield= *vfield_ptr;
+    if (vfield->field_index >= master_cols && vfield->stored_in_db())
+    {
+      /*Set bitmap for writing*/
+      bitmap_set_bit(table->vcol_set, vfield->field_index);
+      error= vfield->vcol_info->expr->save_in_field(vfield,0);
+      bitmap_clear_bit(table->vcol_set, vfield->field_index);
+    }
+  }
+  return error;
+}
 #endif // HAVE_REPLICATION

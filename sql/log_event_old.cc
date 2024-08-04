@@ -1,4 +1,5 @@
-/* Copyright (c) 2007, 2013, Oracle and/or its affiliates.
+/* Copyright (c) 2007, 2019, Oracle and/or its affiliates.
+   Copyright (c) 2009, 2019, MariaDB
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -11,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #include <my_global.h>
 #include "sql_priv.h"
@@ -100,36 +101,44 @@ Old_rows_log_event::do_apply_event(Old_rows_log_event *ev, rpl_group_info *rgi)
 
     if (open_and_lock_tables(ev_thd, rgi->tables_to_lock, FALSE, 0))
     {
-      uint actual_error= ev_thd->get_stmt_da()->sql_errno();
-      if (ev_thd->is_slave_error || ev_thd->is_fatal_error)
+      if (ev_thd->is_error())
       {
         /*
           Error reporting borrowed from Query_log_event with many excessive
-          simplifications (we don't honour --slave-skip-errors)
+          simplifications.
+          We should not honour --slave-skip-errors at this point as we are
+          having severe errors which should not be skipped.
         */
-        rli->report(ERROR_LEVEL, actual_error, NULL,
+        rli->report(ERROR_LEVEL, ev_thd->get_stmt_da()->sql_errno(), NULL,
                     "Error '%s' on opening tables",
-                    (actual_error ? ev_thd->get_stmt_da()->message() :
-                     "unexpected success or fatal error"));
+                    ev_thd->get_stmt_da()->message());
         ev_thd->is_slave_error= 1;
       }
-      rgi->slave_close_thread_tables(thd);
-      DBUG_RETURN(actual_error);
+      DBUG_RETURN(1);
     }
 
     /*
       When the open and locking succeeded, we check all tables to
       ensure that they still have the correct type.
-
-      We can use a down cast here since we know that every table added
-      to the tables_to_lock is a RPL_TABLE_LIST.
     */
 
     {
-      RPL_TABLE_LIST *ptr= rgi->tables_to_lock;
-      for (uint i= 0 ; ptr&& (i< rgi->tables_to_lock_count); 
-           ptr= static_cast<RPL_TABLE_LIST*>(ptr->next_global), i++)
+      TABLE_LIST *table_list_ptr= rgi->tables_to_lock;
+      for (uint i=0 ; table_list_ptr&& (i< rgi->tables_to_lock_count);
+           table_list_ptr= table_list_ptr->next_global, i++)
       {
+        /*
+          Please see comment in log_event.cc-Rows_log_event::do_apply_event()
+          function for the explanation of the below if condition
+        */
+        if (table_list_ptr->parent_l)
+          continue;
+        /*
+          We can use a down cast here since we know that every table added
+          to the tables_to_lock is a RPL_TABLE_LIST(or child table which is
+          skipped above).
+        */
+        RPL_TABLE_LIST *ptr=static_cast<RPL_TABLE_LIST*>(table_list_ptr);
         DBUG_ASSERT(ptr->m_tabledef_valid);
         TABLE *conv_table;
         if (!ptr->m_tabledef.compatible_with(thd, rgi, ptr->table, &conv_table))
@@ -162,7 +171,15 @@ Old_rows_log_event::do_apply_event(Old_rows_log_event *ev, rpl_group_info *rgi)
      */
     TABLE_LIST *ptr= rgi->tables_to_lock;
     for (uint i=0; ptr && (i < rgi->tables_to_lock_count); ptr= ptr->next_global, i++)
+    {
+      /*
+        Please see comment in log_event.cc-Rows_log_event::do_apply_event()
+        function for the explanation of the below if condition
+       */
+      if (ptr->parent_l)
+        continue;
       rgi->m_table_map.set_table(ptr->table_id, ptr->table);
+    }
 #ifdef HAVE_QUERY_CACHE
     query_cache.invalidate_locked_for_write(thd, rgi->tables_to_lock);
 #endif
@@ -203,6 +220,8 @@ Old_rows_log_event::do_apply_event(Old_rows_log_event *ev, rpl_group_info *rgi)
         ev_thd->variables.option_bits&= ~OPTION_RELAXED_UNIQUE_CHECKS;
     /* A small test to verify that objects have consistent types */
     DBUG_ASSERT(sizeof(ev_thd->variables.option_bits) == sizeof(OPTION_RELAXED_UNIQUE_CHECKS));
+
+    table->rpl_write_set= table->write_set;
 
     error= do_before_row_operations(table);
     while (error == 0 && row_start < ev->m_rows_end)
@@ -248,7 +267,7 @@ Old_rows_log_event::do_apply_event(Old_rows_log_event *ev, rpl_group_info *rgi)
   }
 
   if (error)
-  {                     /* error has occured during the transaction */
+  {                     /* error has occurred during the transaction */
     rli->report(ERROR_LEVEL, ev_thd->get_stmt_da()->sql_errno(), NULL,
                 "Error in %s event: error during transaction execution "
                 "on table %s.%s. %s",
@@ -345,10 +364,10 @@ copy_extra_record_fields(TABLE *table,
                          my_ptrdiff_t master_fields)
 {
   DBUG_ENTER("copy_extra_record_fields(table, master_reclen, master_fields)");
-  DBUG_PRINT("info", ("Copying to 0x%lx "
+  DBUG_PRINT("info", ("Copying to %p "
                       "from field %lu at offset %lu "
                       "to field %d at offset %lu",
-                      (long) table->record[0],
+                      table->record[0],
                       (ulong) master_fields, (ulong) master_reclength,
                       table->s->fields, table->s->reclength));
   /*
@@ -606,8 +625,8 @@ replace_record(THD *thd, TABLE *table,
 static int find_and_fetch_row(TABLE *table, uchar *key)
 {
   DBUG_ENTER("find_and_fetch_row(TABLE *table, uchar *key, uchar *record)");
-  DBUG_PRINT("enter", ("table: 0x%lx, key: 0x%lx  record: 0x%lx",
-           (long) table, (long) key, (long) table->record[1]));
+  DBUG_PRINT("enter", ("table: %p, key: %p  record: %p",
+           table, key, table->record[1]));
 
   DBUG_ASSERT(table->in_use != NULL);
 
@@ -829,7 +848,7 @@ int Write_rows_log_event_old::do_after_row_operations(TABLE *table, int error)
   table->file->extra(HA_EXTRA_NO_IGNORE_DUP_KEY);
   table->file->extra(HA_EXTRA_WRITE_CANNOT_REPLACE);
   /*
-    reseting the extra with 
+    resetting the extra with 
     table->file->extra(HA_EXTRA_NO_IGNORE_NO_KEY); 
     fires bug#27077
     todo: explain or fix
@@ -1214,7 +1233,14 @@ Old_rows_log_event::Old_rows_log_event(const char *buf, uint event_len,
   DBUG_PRINT("debug", ("Reading from %p", ptr_after_width));
   m_width = net_field_length(&ptr_after_width);
   DBUG_PRINT("debug", ("m_width=%lu", m_width));
-  /* if my_bitmap_init fails, catched in is_valid() */
+  /* Avoid reading out of buffer */
+  if (ptr_after_width + m_width > (uchar *)buf + event_len)
+  {
+    m_cols.bitmap= NULL;
+    DBUG_VOID_RETURN;
+  }
+
+  /* if my_bitmap_init fails, caught in is_valid() */
   if (likely(!my_bitmap_init(&m_cols,
                           m_width <= sizeof(m_bitbuf)*8 ? m_bitbuf : NULL,
                           m_width,
@@ -1235,8 +1261,8 @@ Old_rows_log_event::Old_rows_log_event(const char *buf, uint event_len,
 
   const uchar* const ptr_rows_data= (const uchar*) ptr_after_width;
   size_t const data_size= event_len - (ptr_rows_data - (const uchar *) buf);
-  DBUG_PRINT("info",("m_table_id: %lu  m_flags: %d  m_width: %lu  data_size: %lu",
-                     m_table_id, m_flags, m_width, (ulong) data_size));
+  DBUG_PRINT("info",("m_table_id: %lu  m_flags: %d  m_width: %lu  data_size: %zu",
+                     m_table_id, m_flags, m_width, data_size));
   DBUG_DUMP("rows_data", (uchar*) ptr_rows_data, data_size);
 
   m_rows_buf= (uchar*) my_malloc(data_size, MYF(MY_WME));
@@ -1271,8 +1297,8 @@ int Old_rows_log_event::get_data_size()
   uchar *end= net_store_length(buf, (m_width + 7) / 8);
 
   DBUG_EXECUTE_IF("old_row_based_repl_4_byte_map_id_master",
-                  return 6 + no_bytes_in_map(&m_cols) + (end - buf) +
-                  (m_rows_cur - m_rows_buf););
+                  return (int)(6 + no_bytes_in_map(&m_cols) + (end - buf) +
+                  m_rows_cur - m_rows_buf););
   int data_size= ROWS_HEADER_LEN;
   data_size+= no_bytes_in_map(&m_cols);
   data_size+= (uint) (end - buf);
@@ -1291,8 +1317,8 @@ int Old_rows_log_event::do_add_row_data(uchar *row_data, size_t length)
     would save binlog space. TODO
   */
   DBUG_ENTER("Old_rows_log_event::do_add_row_data");
-  DBUG_PRINT("enter", ("row_data: 0x%lx  length: %lu", (ulong) row_data,
-                       (ulong) length));
+  DBUG_PRINT("enter", ("row_data: %p  length: %zu",row_data,
+                       length));
   /*
     Don't print debug messages when running valgrind since they can
     trigger false warnings.
@@ -1420,16 +1446,25 @@ int Old_rows_log_event::do_apply_event(rpl_group_info *rgi)
     /*
       When the open and locking succeeded, we check all tables to
       ensure that they still have the correct type.
-
-      We can use a down cast here since we know that every table added
-      to the tables_to_lock is a RPL_TABLE_LIST.
     */
 
     {
-      RPL_TABLE_LIST *ptr= rgi->tables_to_lock;
-      for (uint i= 0 ; ptr&& (i< rgi->tables_to_lock_count);
-           ptr= static_cast<RPL_TABLE_LIST*>(ptr->next_global), i++)
+      TABLE_LIST *table_list_ptr= rgi->tables_to_lock;
+      for (uint i=0; table_list_ptr&& (i< rgi->tables_to_lock_count);
+           table_list_ptr= static_cast<RPL_TABLE_LIST*>(table_list_ptr->next_global), i++)
       {
+        /*
+          Please see comment in log_event.cc-Rows_log_event::do_apply_event()
+          function for the explanation of the below if condition
+        */
+        if (table_list_ptr->parent_l)
+          continue;
+        /*
+          We can use a down cast here since we know that every table added
+          to the tables_to_lock is a RPL_TABLE_LIST (or child table which is
+          skipped above).
+        */
+        RPL_TABLE_LIST *ptr=static_cast<RPL_TABLE_LIST*>(table_list_ptr);
         TABLE *conv_table;
         if (ptr->m_tabledef.compatible_with(thd, rgi, ptr->table, &conv_table))
         {
@@ -1556,11 +1591,10 @@ int Old_rows_log_event::do_apply_event(rpl_group_info *rgi)
         break;
 
       default:
-	rli->report(ERROR_LEVEL, thd->net.last_errno, NULL,
+        rli->report(ERROR_LEVEL, thd->net.last_errno, NULL,
                     "Error in %s event: row application failed. %s",
-                    get_type_str(),
-                    thd->net.last_error ? thd->net.last_error : "");
-       thd->is_slave_error= 1;
+                    get_type_str(), thd->net.last_error);
+        thd->is_slave_error= 1;
 	break;
       }
 
@@ -1572,8 +1606,8 @@ int Old_rows_log_event::do_apply_event(rpl_group_info *rgi)
       */ 
    
       DBUG_PRINT("info", ("error: %d", error));
-      DBUG_PRINT("info", ("curr_row: 0x%lu; curr_row_end: 0x%lu; rows_end: 0x%lu",
-                          (ulong) m_curr_row, (ulong) m_curr_row_end, (ulong) m_rows_end));
+      DBUG_PRINT("info", ("curr_row: %p; curr_row_end:%p; rows_end: %p",
+                          m_curr_row, m_curr_row_end, m_rows_end));
 
       if (!m_curr_row_end && !error)
         unpack_current_row(rgi);
@@ -1593,13 +1627,13 @@ int Old_rows_log_event::do_apply_event(rpl_group_info *rgi)
   } // if (table)
 
   if (error)
-  {                     /* error has occured during the transaction */
+  {                     /* error has occurred during the transaction */
     rli->report(ERROR_LEVEL, thd->net.last_errno, NULL,
                 "Error in %s event: error during transaction execution "
                 "on table %s.%s. %s",
                 get_type_str(), table->s->db.str,
                 table->s->table_name.str,
-                thd->net.last_error ? thd->net.last_error : "");
+                thd->net.last_error);
 
     /*
       If one day we honour --skip-slave-errors in row-based replication, and
@@ -1720,8 +1754,8 @@ int
 Old_rows_log_event::do_update_pos(rpl_group_info *rgi)
 {
   Relay_log_info *rli= rgi->rli;
-  DBUG_ENTER("Old_rows_log_event::do_update_pos");
   int error= 0;
+  DBUG_ENTER("Old_rows_log_event::do_update_pos");
 
   DBUG_PRINT("info", ("flags: %s",
                       get_flags(STMT_END_F) ? "STMT_END_F " : ""));
@@ -1733,7 +1767,7 @@ Old_rows_log_event::do_update_pos(rpl_group_info *rgi)
       Step the group log position if we are not in a transaction,
       otherwise increase the event log position.
      */
-    rli->stmt_done(log_pos, thd, rgi);
+    error= rli->stmt_done(log_pos, thd, rgi);
     /*
       Clear any errors in thd->net.last_err*. It is not known if this is
       needed or not. It is believed that any errors that may exist in
@@ -1818,12 +1852,18 @@ void Old_rows_log_event::pack_info(Protocol *protocol)
 
 
 #ifdef MYSQL_CLIENT
+/* Method duplicates Rows_log_event's one */
 void Old_rows_log_event::print_helper(FILE *file,
                                       PRINT_EVENT_INFO *print_event_info,
                                       char const *const name)
 {
   IO_CACHE *const head= &print_event_info->head_cache;
   IO_CACHE *const body= &print_event_info->body_cache;
+  IO_CACHE *const tail= &print_event_info->tail_cache;
+  bool do_print_encoded=
+    print_event_info->base64_output_mode != BASE64_OUTPUT_DECODE_ROWS &&
+    !print_event_info->short_form;
+
   if (!print_event_info->short_form)
   {
     bool const last_stmt_event= get_flags(STMT_END_F);
@@ -1831,13 +1871,33 @@ void Old_rows_log_event::print_helper(FILE *file,
     my_b_printf(head, "\t%s: table id %lu%s\n",
                 name, m_table_id,
                 last_stmt_event ? " flags: STMT_END_F" : "");
-    print_base64(body, print_event_info, !last_stmt_event);
+    print_base64(body, print_event_info, do_print_encoded);
   }
 
   if (get_flags(STMT_END_F))
   {
-    copy_event_cache_to_file_and_reinit(head, file);
-    copy_event_cache_to_file_and_reinit(body, file);
+    LEX_STRING tmp_str;
+
+    if (copy_event_cache_to_string_and_reinit(head, &tmp_str))
+    {
+      head->error= -1;
+      return;
+    }
+    output_buf.append(&tmp_str);
+    my_free(tmp_str.str);
+
+    copy_cache_to_string_wrapped(body, &tmp_str,  do_print_encoded,
+                                 print_event_info->delimiter,
+                                 print_event_info->verbose);
+    output_buf.append(&tmp_str);
+    my_free(tmp_str.str);
+    if (copy_event_cache_to_string_and_reinit(tail, &tmp_str))
+    {
+      tail->error= -1;
+      return;
+    }
+    output_buf.append(&tmp_str);
+    my_free(tmp_str.str);
   }
 }
 #endif

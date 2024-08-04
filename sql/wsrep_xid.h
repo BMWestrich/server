@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License along
    with this program; if not, write to the Free Software Foundation, Inc.,
-   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA. */
+   51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA. */
 
 #ifndef WSREP_XID_H
 #define WSREP_XID_H
@@ -28,9 +28,11 @@ const wsrep_uuid_t* wsrep_xid_uuid(const XID&);
 wsrep_seqno_t wsrep_xid_seqno(const XID&);
 
 //void wsrep_get_SE_checkpoint(XID&);             /* uncomment if needed */
-void wsrep_get_SE_checkpoint(wsrep_uuid_t&, wsrep_seqno_t&);
+bool wsrep_get_SE_checkpoint(wsrep_uuid_t&, wsrep_seqno_t&);
 //void wsrep_set_SE_checkpoint(XID&);             /* uncomment if needed */
-void wsrep_set_SE_checkpoint(const wsrep_uuid_t&, wsrep_seqno_t);
+bool wsrep_set_SE_checkpoint(const wsrep_uuid_t&, wsrep_seqno_t);
+
+void wsrep_sort_xid_array(XID *array, int len);
 
 #endif /* WITH_WSREP */
 #endif /* WSREP_UTILS_H */

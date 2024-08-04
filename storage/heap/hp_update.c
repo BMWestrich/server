@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA */
 
 /* Update current record in heap-database */
 
@@ -37,7 +37,7 @@ int heap_update(HP_INFO *info, const uchar *old, const uchar *heap_new)
   p_lastinx= share->keydef + info->lastinx;
   for (keydef= share->keydef, end= keydef + share->keys; keydef < end; keydef++)
   {
-    if (hp_rec_key_cmp(keydef, old, heap_new, 0))
+    if (hp_rec_key_cmp(keydef, old, heap_new))
     {
       if ((*keydef->delete_key)(info, keydef, old, pos, keydef == p_lastinx) ||
           (*keydef->write_key)(info, keydef, heap_new, pos))
@@ -76,7 +76,7 @@ int heap_update(HP_INFO *info, const uchar *old, const uchar *heap_new)
     }
     while (keydef >= share->keydef)
     {
-      if (hp_rec_key_cmp(keydef, old, heap_new, 0))
+      if (hp_rec_key_cmp(keydef, old, heap_new))
       {
 	if ((*keydef->delete_key)(info, keydef, heap_new, pos, 0) ||
 	    (*keydef->write_key)(info, keydef, old, pos))

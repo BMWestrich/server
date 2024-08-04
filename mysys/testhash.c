@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /* Test of hash library: big test */
 
@@ -169,7 +169,9 @@ static int do_test()
   for (j=0 ; j < 1000 ; j++)
     if (key1[j] > 1)
       break;
-  if (key1[j] > 1)
+  // j will be 1000 only if we have no keys in the hash. This only happens
+  // when the parameter recant is set to 0 via command line argument.
+  if (j < 1000 && key1[j] > 1)
   {
     HASH_SEARCH_STATE state;
     printf("- Testing identical read\n");

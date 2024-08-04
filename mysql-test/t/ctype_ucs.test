@@ -74,6 +74,7 @@ DROP TABLE t1;
 --echo #
 
 --echo # Problem # 1 (original report): wrong parsing of ucs2 data
+SET character_set_connection=ucs2;
 SELECT '00' UNION SELECT '10' INTO OUTFILE 'tmpp.txt';
 CREATE TABLE t1(a INT);
 LOAD DATA INFILE 'tmpp.txt' INTO TABLE t1 CHARACTER SET ucs2
@@ -413,7 +414,7 @@ SELECT * FROM t1;
 DROP TABLE t1;
 CREATE TABLE t1 (Field1 int(10) unsigned default '0');
 # this should generate a "Data truncated" warning
-INSERT INTO t1 VALUES ('-1');
+INSERT IGNORE INTO t1 VALUES ('-1');
 DROP TABLE t1;
 SET NAMES latin1;
 
@@ -794,6 +795,7 @@ SET NAMES latin1;
 --echo #
 --echo # Bug #13832953 	MY_STRNXFRM_UNICODE: ASSERTION `SRC' FAILED
 --echo #
+SET STATEMENT sql_mode = 'NO_ENGINE_SUBSTITUTION' FOR
 CREATE TABLE t1 (c1 SET('','') CHARACTER SET ucs2);
 INSERT INTO t1 VALUES ('');
 SELECT COALESCE(c1) FROM t1 ORDER BY 1;
@@ -815,6 +817,61 @@ SELECT CHAR_LENGTH(TRIM(BOTH 0x000000 FROM _ucs2 0x0061));
 SELECT CHAR_LENGTH(TRIM(BOTH 0x0001 FROM _ucs2 0x0061));
 SELECT CHAR_LENGTH(TRIM(BOTH 0x61 FROM _ucs2 0x0061));
 SELECT CHAR_LENGTH(TRIM(BOTH 0x00 FROM _ucs2 0x0061));
+
+--echo #
+--echo # MDEV-11685: sql_mode can't be set with non-ascii connection charset
+--echo #
+SET character_set_connection=ucs2;
+SET sql_mode='NO_ENGINE_SUBSTITUTION';
+SELECT @@sql_mode;
+SET sql_mode=DEFAULT;
+SET NAMES utf8;
+
+--echo #
+--echo # MDEV-13972 crash in Item_func_sec_to_time::get_date
+--echo #
+
+SELECT SEC_TO_TIME(CONVERT(900*24*60*60 USING ucs2));
+
+--echo #
+--echo # MDEV-13530 VARBINARY doesn't convert to to BLOB for sizes 65533, 65534 and 65535
+--echo #
+
+set sql_mode="";
+CREATE TABLE t1 (c1 VARCHAR(32766) CHARACTER SET ucs2);
+DESCRIBE t1;
+DROP TABLE t1;
+
+CREATE TABLE t1 (c1 VARCHAR(32767) CHARACTER SET ucs2);
+DESCRIBE t1;
+DROP TABLE t1;
+
+CREATE TABLE t1 (c1 VARCHAR(32768) CHARACTER SET ucs2);
+DESCRIBE t1;
+DROP TABLE t1;
+set sql_mode=default;
+
+
+--echo #
+--echo # MDEV-15624 Changing the default character set to utf8mb4 changes query evaluation in a very surprising way
+--echo #
+
+SET NAMES utf8;
+CREATE TABLE t1 (id INT);
+INSERT INTO t1 VALUES (1),(2),(3);
+
+SELECT COUNT(DISTINCT c) FROM (SELECT id, REPLACE(uuid_short(), '0', CAST('o' AS CHAR CHARACTER SET ucs2)) AS c FROM t1) AS d1;
+--replace_column 1 xxxxxxxxxxxxxxxxx
+SELECT DISTINCT REPLACE(uuid_short(), '0', CAST('o' AS CHAR CHARACTER SET ucs2)) AS c FROM t1;
+
+SELECT COUNT(DISTINCT c) FROM (SELECT id, INSERT(uuid_short(), 1, 1, CAST('0' AS CHAR CHARACTER SET ucs2)) AS c FROM t1) AS d1;
+--replace_column 1 xxxxxxxxxxxxxxxxx
+SELECT DISTINCT INSERT(uuid_short(), 1, 1, CAST('0' AS CHAR CHARACTER SET ucs2)) AS c FROM t1;
+
+SELECT COUNT(DISTINCT c) FROM (SELECT id, CONCAT(uuid_short(), CAST('0' AS CHAR CHARACTER SET ucs2)) AS c FROM t1) AS d1;
+--replace_column 1 xxxxxxxxxxxxxxxxx
+SELECT DISTINCT CONCAT(uuid_short(), CAST('0' AS CHAR CHARACTER SET ucs2)) AS c FROM t1;
+DROP TABLE t1;
 
 
 --echo #
@@ -889,7 +946,7 @@ SET sql_mode='strict_all_tables';
 INSERT INTO t1 VALUES (CONVERT('9e99999999' USING ucs2));
 SET sql_mode=DEFAULT;
 
-INSERT INTO t1 VALUES (CONVERT('aaa' USING ucs2)); 
+INSERT IGNORE INTO t1 VALUES (CONVERT('aaa' USING ucs2)); 
 
 DROP TABLE t1;
 
@@ -918,6 +975,26 @@ SELECT CONCAT(CONVERT('pi=' USING ucs2),PI()) AS PI;
 --echo #
 SET NAMES utf8, character_set_connection=ucs2;
 SELECT 'a','aa';
+
+--echo #
+--echo # MDEV-10306 Wrong results with combination of CONCAT, SUBSTR and CONVERT in subquery
+--echo #
+
+SET NAMES utf8, character_set_connection=ucs2;
+SET @save_optimizer_switch=@@optimizer_switch;
+SET optimizer_switch=_utf8'derived_merge=on';
+CREATE TABLE t1 (t VARCHAR(10) CHARSET latin1);
+INSERT INTO t1 VALUES('abcdefghi');
+SET NAMES utf8, character_set_connection=ucs2;
+SELECT CONCAT(t2,'-',t2) c2 FROM (SELECT HEX(t) t2 FROM t1) sub;
+SELECT CONCAT(t2,'-',t2) c2 FROM (SELECT TO_BASE64(t) t2 FROM t1) sub;
+DROP TABLE t1;
+SET optimizer_switch=@save_optimizer_switch;
+
+
+SET NAMES utf8, character_set_connection=ucs2;
+--source include/ctype_mdev13118.inc
+
 
 --echo #
 --echo # End of 10.0 tests
@@ -956,4 +1033,64 @@ SELECT CAST(CONVERT('1Ĳ3' USING ucs2) AS SIGNED);
 
 --echo #
 --echo # End of 10.1 tests
+--echo #
+
+--echo #
+--echo # Start of 10.2 tests
+--echo #
+
+--echo #
+--echo # MDEV-9711 NO PAD Collatons
+--echo #
+SET character_set_connection=ucs2;
+let $coll='ucs2_general_nopad_ci';
+let $coll_pad='ucs2_general_ci';
+--source include/ctype_pad_all_engines.inc
+
+let $coll='ucs2_nopad_bin';
+let $coll_pad='ucs2_bin';
+--source include/ctype_pad_all_engines.inc
+
+--echo #
+--echo # MDEV-10585 EXECUTE IMMEDIATE statement
+--echo #
+SET character_set_connection=ucs2;
+EXECUTE IMMEDIATE 'SELECT COLLATION("a")';
+
+SET @stmt='SELECT COLLATION("a")';
+EXECUTE IMMEDIATE @stmt;
+
+--echo #
+--echo # MDEV-10866 Extend PREPARE and EXECUTE IMMEDIATE to understand expressions
+--echo #
+SET NAMES utf8, collation_connection=ucs2_bin;
+SET @stmt='SELECT COLLATION(''a'')';
+EXECUTE IMMEDIATE @stmt;
+
+SET NAMES utf8, character_set_connection=ucs2;
+SET @stmt='SELECT COLLATION(''a'')';
+EXECUTE IMMEDIATE @stmt;
+
+EXECUTE IMMEDIATE CONCAT('SELECT ''a'' FROM DUAL');
+
+SELECT HEX('aä') FROM DUAL;
+EXECUTE IMMEDIATE 'SELECT HEX(''aä'') FROM DUAL';
+EXECUTE IMMEDIATE CONCAT('SELECT HEX(''aä'') FROM DUAL');
+EXECUTE IMMEDIATE CONCAT('SELECT HEX(''aä'') FROM ', 'DUAL');
+PREPARE stmt FROM 'SELECT HEX(''aä'') FROM DUAL';
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @table='DUAL';
+SELECT HEX(@table);
+EXECUTE IMMEDIATE CONCAT('SELECT HEX(''aä'') FROM ', @table);
+EXECUTE IMMEDIATE CONCAT('SELECT HEX(''aä'') FROM ', CONVERT(@table USING utf8));
+SET @stmt='SELECT HEX(''aä'') FROM DUAL';
+EXECUTE IMMEDIATE @stmt;
+PREPARE stmt FROM @stmt;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+--echo #
+--echo # End of 10.2 tests
 --echo #

@@ -1,6 +1,6 @@
 /* -*- c-basic-offset: 2 -*- */
 /*
-  Copyright(C) 2014 Brazil
+  Copyright(C) 2014-2017 Brazil
 
   This library is free software; you can redistribute it and/or
   modify it under the terms of the GNU Lesser General Public
@@ -13,7 +13,7 @@
 
   You should have received a copy of the GNU Lesser General Public
   License along with this library; if not, write to the Free Software
-  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA
 */
 
 #include "../grn_ctx_impl.h"
@@ -27,6 +27,23 @@
 
 #include "../grn_mrb.h"
 #include "mrb_logger.h"
+
+static mrb_value
+logger_s_get_default_path(mrb_state *mrb, mrb_value self)
+{
+  return mrb_str_new_cstr(mrb, grn_default_logger_get_path());
+}
+
+static mrb_value
+logger_s_get_default_level(mrb_state *mrb, mrb_value self)
+{
+  mrb_value mrb_level_class;
+  mrb_value mrb_level;
+
+  mrb_level_class = mrb_const_get(mrb, self, mrb_intern_lit(mrb, "Level"));
+  mrb_level = mrb_fixnum_value(grn_default_logger_get_max_level());
+  return mrb_funcall(mrb, mrb_level_class, "find", 1, mrb_level);
+}
 
 static mrb_value
 logger_need_log_p(mrb_state *mrb, mrb_value self)
@@ -52,7 +69,8 @@ logger_log(mrb_state *mrb, mrb_value self)
 
   mrb_get_args(mrb, "izizs",
                &level, &file, &line, &method, &message, &message_size);
-  grn_logger_put(ctx, level, file, line, method, "%.*s", message_size, message);
+  grn_logger_put(ctx, level, file, line, method,
+                 "%.*s", (int)message_size, message);
 
   return self;
 }
@@ -66,6 +84,11 @@ grn_mrb_logger_init(grn_ctx *ctx)
   struct RClass *klass;
 
   klass = mrb_define_class_under(mrb, module, "Logger", mrb->object_class);
+
+  mrb_define_singleton_method(mrb, (struct RObject *)klass, "default_path",
+                              logger_s_get_default_path, MRB_ARGS_NONE());
+  mrb_define_singleton_method(mrb, (struct RObject *)klass, "default_level",
+                              logger_s_get_default_level, MRB_ARGS_NONE());
 
   mrb_define_method(mrb, klass, "need_log?", logger_need_log_p, MRB_ARGS_REQ(1));
   mrb_define_method(mrb, klass, "log", logger_log, MRB_ARGS_REQ(5));

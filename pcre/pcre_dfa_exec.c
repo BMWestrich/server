@@ -7,7 +7,7 @@ and semantics are as close as possible to those of the Perl 5 language (but see
 below for why this module is different).
 
                        Written by Philip Hazel
-           Copyright (c) 1997-2014 University of Cambridge
+           Copyright (c) 1997-2017 University of Cambridge
 
 -----------------------------------------------------------------------------
 Redistribution and use in source and binary forms, with or without
@@ -2198,6 +2198,7 @@ for (;;)
         case 0x2029:
 #endif  /* Not EBCDIC */
         if ((md->moptions & PCRE_BSR_ANYCRLF) != 0) break;
+        /* fall through */
 
         case CHAR_LF:
         ADD_NEW(state_offset + 1, 0);
@@ -2287,12 +2288,14 @@ for (;;)
       case OP_NOTI:
       if (clen > 0)
         {
-        unsigned int otherd;
+        pcre_uint32 otherd;
 #ifdef SUPPORT_UTF
         if (utf && d >= 128)
           {
 #ifdef SUPPORT_UCP
           otherd = UCD_OTHERCASE(d);
+#else
+          otherd = d;
 #endif  /* SUPPORT_UCP */
           }
         else
@@ -2625,7 +2628,7 @@ for (;;)
           if (isinclass)
             {
             int max = (int)GET2(ecode, 1 + IMM2_SIZE);
-            if (*ecode == OP_CRPOSRANGE)
+            if (*ecode == OP_CRPOSRANGE && count >= (int)GET2(ecode, 1))
               {
               active_count--;           /* Remove non-match possibility */
               next_active_state--;

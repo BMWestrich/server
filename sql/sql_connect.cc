@@ -1,6 +1,6 @@
 /*
    Copyright (c) 2007, 2013, Oracle and/or its affiliates.
-   Copyright (c) 2008, 2014, SkySQL Ab.
+   Copyright (c) 2008, 2016, MariaDB
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA
 */
 
 /*
@@ -85,7 +85,6 @@ int get_or_create_user_conn(THD *thd, const char *user,
     uc->host= uc->user + user_len +  1;
     uc->len= temp_len;
     uc->connections= uc->questions= uc->updates= uc->conn_per_hour= 0;
-    uc->user_resources= *mqh;
     uc->reset_utime= thd->thr_create_utime;
     if (my_hash_insert(&hash_user_connections, (uchar*) uc))
     {
@@ -95,6 +94,7 @@ int get_or_create_user_conn(THD *thd, const char *user,
       goto end;
     }
   }
+  uc->user_resources= *mqh;
   thd->user_connect=uc;
   uc->connections++;
 end:
@@ -314,13 +314,9 @@ extern "C" void free_user(struct user_conn *uc)
 void init_max_user_conn(void)
 {
 #ifndef NO_EMBEDDED_ACCESS_CHECKS
-  if (my_hash_init(&hash_user_connections,system_charset_info,max_connections,
-                 0,0, (my_hash_get_key) get_key_conn,
-                 (my_hash_free_key) free_user, 0))
-  {
-    sql_print_error("Initializing hash_user_connections failed.");
-    exit(1);
-  }
+  my_hash_init(&hash_user_connections, system_charset_info, max_connections,
+               0, 0, (my_hash_get_key) get_key_conn,
+               (my_hash_free_key) free_user, 0);
 #endif
 }
 
@@ -479,24 +475,16 @@ void init_user_stats(USER_STATS *user_stats,
 
 void init_global_user_stats(void)
 {
-  if (my_hash_init(&global_user_stats, system_charset_info, max_connections,
-                0, 0, (my_hash_get_key) get_key_user_stats,
-                (my_hash_free_key)free_user_stats, 0))
-  {
-    sql_print_error("Initializing global_user_stats failed.");
-    exit(1);
-  }
+  my_hash_init(&global_user_stats, system_charset_info, max_connections,
+               0, 0, (my_hash_get_key) get_key_user_stats,
+               (my_hash_free_key) free_user_stats, 0);
 }
 
 void init_global_client_stats(void)
 {
-  if (my_hash_init(&global_client_stats, system_charset_info, max_connections,
-                0, 0, (my_hash_get_key) get_key_user_stats,
-                (my_hash_free_key)free_user_stats, 0))
-  {
-    sql_print_error("Initializing global_client_stats failed.");
-    exit(1);
-  }
+  my_hash_init(&global_client_stats, system_charset_info, max_connections,
+               0, 0, (my_hash_get_key) get_key_user_stats,
+               (my_hash_free_key) free_user_stats, 0);
 }
 
 extern "C" uchar *get_key_table_stats(TABLE_STATS *table_stats, size_t *length,
@@ -513,12 +501,9 @@ extern "C" void free_table_stats(TABLE_STATS* table_stats)
 
 void init_global_table_stats(void)
 {
-  if (my_hash_init(&global_table_stats, system_charset_info, max_connections,
-                0, 0, (my_hash_get_key) get_key_table_stats,
-                (my_hash_free_key)free_table_stats, 0)) {
-    sql_print_error("Initializing global_table_stats failed.");
-    exit(1);
-  }
+  my_hash_init(&global_table_stats, system_charset_info, max_connections,
+               0, 0, (my_hash_get_key) get_key_table_stats,
+               (my_hash_free_key) free_table_stats, 0);
 }
 
 extern "C" uchar *get_key_index_stats(INDEX_STATS *index_stats, size_t *length,
@@ -535,13 +520,9 @@ extern "C" void free_index_stats(INDEX_STATS* index_stats)
 
 void init_global_index_stats(void)
 {
-  if (my_hash_init(&global_index_stats, system_charset_info, max_connections,
-                0, 0, (my_hash_get_key) get_key_index_stats,
-                (my_hash_free_key)free_index_stats, 0))
-  {
-    sql_print_error("Initializing global_index_stats failed.");
-    exit(1);
-  }
+  my_hash_init(&global_index_stats, system_charset_info, max_connections,
+               0, 0, (my_hash_get_key) get_key_index_stats,
+               (my_hash_free_key) free_index_stats, 0);
 }
 
 
@@ -799,12 +780,9 @@ bool thd_init_client_charset(THD *thd, uint cs_number)
   if (!opt_character_set_client_handshake ||
       !(cs= get_charset(cs_number, MYF(0))))
   {
-    thd->variables.character_set_client=
-      global_system_variables.character_set_client;
-    thd->variables.collation_connection=
-      global_system_variables.collation_connection;
-    thd->variables.character_set_results=
-      global_system_variables.character_set_results;
+    thd->update_charset(global_system_variables.character_set_client,
+                        global_system_variables.collation_connection,
+                        global_system_variables.character_set_results);
   }
   else
   {
@@ -814,10 +792,9 @@ bool thd_init_client_charset(THD *thd, uint cs_number)
       my_error(ER_WRONG_VALUE_FOR_VAR, MYF(0), "character_set_client",
                cs->csname);
       return true;
-    }    
-    thd->variables.character_set_results=
-      thd->variables.collation_connection= 
-      thd->variables.character_set_client= cs;
+    }
+    thd->org_charset= cs;
+    thd->update_charset(cs,cs,cs);
   }
   return false;
 }
@@ -1113,7 +1090,7 @@ bool login_connection(THD *thd)
   /*  Updates global user connection stats. */
   if (increment_connection_count(thd, TRUE))
   {
-    my_error(ER_OUTOFMEMORY, MYF(0), 2*sizeof(USER_STATS));
+    my_error(ER_OUTOFMEMORY, MYF(0), (int) (2*sizeof(USER_STATS)));
     error= 1;
     goto exit;
   }
@@ -1135,7 +1112,7 @@ void end_connection(THD *thd)
 {
   NET *net= &thd->net;
 #ifdef WITH_WSREP
-  if (WSREP(thd))
+  if (WSREP(thd) && wsrep)
   {
     wsrep_status_t rcode= wsrep->free_connection(wsrep, thd->thread_id);
     if (rcode) {
@@ -1145,7 +1122,6 @@ void end_connection(THD *thd)
   }
   thd->wsrep_client_thread= 0;
 #endif
-  plugin_thdvar_cleanup(thd);
 
   if (thd->user_connect)
   {
@@ -1170,7 +1146,8 @@ void end_connection(THD *thd)
   }
 
   if (!thd->killed && (net->error && net->vio != 0))
-    thd->print_aborted_warning(1, ER_THD(thd, ER_UNKNOWN_ERROR));
+    thd->print_aborted_warning(1, thd->get_stmt_da()->is_error()
+             ? thd->get_stmt_da()->message() : ER_THD(thd, ER_UNKNOWN_ERROR));
 }
 
 
@@ -1192,7 +1169,6 @@ void prepare_new_connection_state(THD* thd)
   */
   thd->proc_info= 0;
   thd->set_command(COM_SLEEP);
-  thd->set_time();
   thd->init_for_queries();
 
   if (opt_init_connect.length && !(sctx->master_access & SUPER_ACL))
@@ -1201,7 +1177,7 @@ void prepare_new_connection_state(THD* thd)
     if (thd->is_error())
     {
       Host_errors errors;
-      thd->killed= KILL_CONNECTION;
+      thd->set_killed(KILL_CONNECTION);
       thd->print_aborted_warning(0, "init_connect command failed");
       sql_print_warning("%s", thd->get_stmt_da()->message());
 
@@ -1234,7 +1210,6 @@ void prepare_new_connection_state(THD* thd)
     }
 
     thd->proc_info=0;
-    thd->set_time();
     thd->init_for_queries();
   }
 }
@@ -1301,7 +1276,7 @@ void do_handle_one_connection(CONNECT *connect)
   ulonglong thr_create_utime= microsecond_interval_timer();
   THD *thd;
   if (connect->scheduler->init_new_connection_thread() ||
-      !(thd= connect->create_thd()))
+      !(thd= connect->create_thd(NULL)))
   {
     scheduler_functions *scheduler= connect->scheduler;
     connect->close_with_error(0, 0, ER_OUT_OF_RESOURCES);
@@ -1356,7 +1331,8 @@ void do_handle_one_connection(CONNECT *connect)
 
     while (thd_is_connection_alive(thd))
     {
-      mysql_audit_release(thd);
+      if (mysql_audit_release_required(thd))
+        mysql_audit_release(thd);
       if (do_command(thd))
 	break;
     }
@@ -1365,9 +1341,9 @@ void do_handle_one_connection(CONNECT *connect)
 #ifdef WITH_WSREP
   if (WSREP(thd))
   {
-    mysql_mutex_lock(&thd->LOCK_wsrep_thd);
-    thd->wsrep_query_state= QUERY_EXITING;
-    mysql_mutex_unlock(&thd->LOCK_wsrep_thd);
+    mysql_mutex_lock(&thd->LOCK_thd_data);
+    wsrep_thd_set_query_state(thd, QUERY_EXITING);
+    mysql_mutex_unlock(&thd->LOCK_thd_data);
   }
 #endif
 end_thread:
@@ -1405,14 +1381,7 @@ void CONNECT::close_and_delete()
   if (vio)
     vio_close(vio);
   if (thread_count_incremented)
-  {
-    /*
-      Normally this is handled by THD::unlink. As we haven't yet created
-      a THD and put it in the thread list, we have to manage counting here.
-    */
-    dec_thread_count();
     dec_connection_count(scheduler);
-  }
   statistic_increment(connection_errors_internal, &LOCK_status);
   statistic_increment(aborted_connects,&LOCK_status);
 
@@ -1428,7 +1397,7 @@ void CONNECT::close_and_delete()
 void CONNECT::close_with_error(uint sql_errno,
                                const char *message, uint close_error)
 {
-  THD *thd= create_thd();
+  THD *thd= create_thd(NULL);
   if (thd)
   {
     if (sql_errno)
@@ -1436,23 +1405,8 @@ void CONNECT::close_with_error(uint sql_errno,
     close_connection(thd, close_error);
     delete thd;
     set_current_thd(0);
-    if (thread_count_incremented)
-    {
-      dec_thread_count();
-      dec_connection_count(scheduler);
-    }
-    delete this;
-    statistic_increment(connection_errors_internal, &LOCK_status);
-    statistic_increment(aborted_connects,&LOCK_status);
   }
-  else
-  {
-    /*
-      Out of memory; We can't generate an error, just close the connection
-      close_and_delete() will increment statistics.
-    */
-    close_and_delete();
-  }
+  close_and_delete();
 }
 
 
@@ -1462,26 +1416,38 @@ CONNECT::~CONNECT()
     vio_delete(vio);
 }
 
-/* Create a THD based on a CONNECT object */
 
-THD *CONNECT::create_thd()
+/* Reuse or create a THD based on a CONNECT object */
+
+THD *CONNECT::create_thd(THD *thd)
 {
-  my_bool res;
-  THD *thd;
+  bool res, thd_reused= thd != 0;
   DBUG_ENTER("create_thd");
 
   DBUG_EXECUTE_IF("simulate_failed_connection_2", DBUG_RETURN(0); );
 
-  if (!(thd= new THD))
+  if (thd)
+  {
+    /* reuse old thd */
+    thd->reset_for_reuse();
+    /*
+      reset tread_id's, but not thread_dbug_id's as the later isn't allowed
+      to change as there is already structures in thd marked with the old
+      value.
+    */
+    thd->thread_id= thd->variables.pseudo_thread_id= thread_id;
+  }
+  else if (!(thd= new THD(thread_id)))
     DBUG_RETURN(0);
 
   set_current_thd(thd);
   res= my_net_init(&thd->net, vio, thd, MYF(MY_THREAD_SPECIFIC));
   vio= 0;                              // Vio now handled by thd
 
-  if (res)
+  if (res || thd->is_error())
   {
-    delete thd;
+    if (!thd_reused)
+      delete thd;
     set_current_thd(0);
     DBUG_RETURN(0);
   }
@@ -1491,7 +1457,6 @@ THD *CONNECT::create_thd()
   thd->security_ctx->host= host;
   thd->extra_port=         extra_port;
   thd->scheduler=          scheduler;
-  thd->thread_id= thd->variables.pseudo_thread_id= thread_id;
   thd->real_id=            real_id;
   DBUG_RETURN(thd);
 }

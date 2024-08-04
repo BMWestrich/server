@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #include "mysys_priv.h"
 #include "mysys_err.h"
@@ -133,8 +133,6 @@ int my_sync(File fd, myf my_flags)
 } /* my_sync */
 
 
-static const char cur_dir_name[]= {FN_CURLIB, 0};
-
 /*
   Force directory information to disk.
 
@@ -151,6 +149,7 @@ int my_sync_dir(const char *dir_name __attribute__((unused)),
                 myf my_flags __attribute__((unused)))
 {
 #ifdef NEED_EXPLICIT_SYNC_DIR
+  static const char cur_dir_name[]= {FN_CURLIB, 0};
   File dir_fd;
   int res= 0;
   const char *correct_dir_name;
@@ -196,7 +195,7 @@ int my_sync_dir_by_file(const char *file_name __attribute__((unused)),
   char dir_name[FN_REFLEN];
   size_t dir_name_length;
   dirname_part(dir_name, file_name, &dir_name_length);
-  return my_sync_dir(dir_name, my_flags);
+  return my_sync_dir(dir_name, my_flags & ~MY_NOSYMLINKS);
 #else
   return 0;
 #endif

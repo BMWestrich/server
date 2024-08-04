@@ -11,7 +11,7 @@
 # 
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335  USA
 
 IF(NOT WIN32)
   RETURN()
@@ -24,10 +24,13 @@ ENDIF()
 
 
 SET(MANUFACTURER "MariaDB Corporation Ab")
-FIND_PATH(WIX_DIR heat.exe
-  "$ENV{ProgramFiles}/WiX Toolset v3.9/bin"
-  "$ENV{ProgramFiles}/WiX Toolset v3.10/bin"
-)
+SET(WIX_BIN_PATHS)
+FOREACH(WIX_VER 3.9 3.10 3.11)
+  LIST(APPEND WIX_BIN_PATHS "$ENV{ProgramFiles}/WiX Toolset v${WIX_VER}/bin")
+  LIST(APPEND WIX_BIN_PATHS "$ENV{ProgramFiles} (x86)/WiX Toolset v${WIX_VER}/bin")
+ENDFOREACH()
+
+FIND_PATH(WIX_DIR heat.exe ${WIX_BIN_PATHS})
 SET(CPACK_WIX_PACKAGE_BASE_NAME "MariaDB")
 IF(CMAKE_SIZEOF_VOID_P EQUAL 4)
  SET(CPACK_WIX_UPGRADE_CODE "49EB7A6A-1CEF-4A1E-9E89-B9A4993963E3")
@@ -48,7 +51,7 @@ IF(MSVC_VERSION EQUAL 1600 OR MSVC_VERSION EQUAL 1700 )
   SET(WIX_MSVC_SUFFIX "VS2010")
 ELSEIF(MSVC_VERSION EQUAL 1800)
   SET(WIX_MSVC_SUFFIX "VS2013")
-ELSEIF (MSVC_VERSION EQUAL 1900)
+ELSE()
   SET(WIX_MSVC_SUFFIX "VS2015")
 ENDIF()
 
@@ -199,3 +202,38 @@ ADD_CUSTOM_TARGET(
 )
 ADD_DEPENDENCIES(MSI_ESSENTIALS wixca)
 
+
+IF(CMAKE_GENERATOR MATCHES "Visual Studio")
+ SET(CPACK_CONFIG_PARAM -C $(Configuration))
+ENDIF()
+
+IF(SIGNCODE)
+  SET(SIGN_COMMAND COMMAND ${CMAKE_COMMAND} -P ${PROJECT_BINARY_DIR}/sign.cmake)
+ENDIF()
+
+ADD_CUSTOM_TARGET(
+  win_package_zip
+  ${SIGN_COMMAND}
+  COMMAND ${CMAKE_CPACK_COMMAND} ${CPACK_CONFIG_PARAM} --config ${CMAKE_CURRENT_SOURCE_DIR}/CPackZipConfig.cmake
+  WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
+ADD_CUSTOM_TARGET(
+  win_package_debuginfo
+  COMMAND ${CMAKE_CPACK_COMMAND} ${CPACK_CONFIG_PARAM} --config ${CMAKE_CURRENT_SOURCE_DIR}/CPackZipDebugInfoConfig.cmake
+  WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
+ADD_CUSTOM_TARGET(
+  win_package_test
+  COMMAND ${CMAKE_CPACK_COMMAND} ${CPACK_CONFIG_PARAM} --config ${CMAKE_CURRENT_SOURCE_DIR}/CPackZipTestConfig.cmake
+  WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
+ADD_CUSTOM_TARGET(win_package DEPENDS win_package_zip win_package_debuginfo)
+SET_TARGET_PROPERTIES(
+  win_package win_package_zip win_package_debuginfo
+  PROPERTIES
+  EXCLUDE_FROM_ALL TRUE
+  EXCLUDE_FROM_DEFAULT_BUILD TRUE
+)

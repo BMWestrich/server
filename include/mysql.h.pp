@@ -9,7 +9,23 @@ enum enum_server_command
   COM_TABLE_DUMP, COM_CONNECT_OUT, COM_REGISTER_SLAVE,
   COM_STMT_PREPARE, COM_STMT_EXECUTE, COM_STMT_SEND_LONG_DATA, COM_STMT_CLOSE,
   COM_STMT_RESET, COM_SET_OPTION, COM_STMT_FETCH, COM_DAEMON,
-  COM_END
+  COM_UNIMPLEMENTED,
+  COM_RESET_CONNECTION,
+  COM_MDB_GAP_BEG,
+  COM_MDB_GAP_END=249,
+  COM_STMT_BULK_EXECUTE=250,
+  COM_SLAVE_WORKER=251,
+  COM_SLAVE_IO=252,
+  COM_SLAVE_SQL=253,
+  COM_MULTI=254,
+  COM_END=255
+};
+enum enum_indicator_type
+{
+  STMT_INDICATOR_NONE= 0,
+  STMT_INDICATOR_NULL,
+  STMT_INDICATOR_DEFAULT,
+  STMT_INDICATOR_IGNORE
 };
 struct st_vio;
 typedef struct st_vio Vio;
@@ -27,7 +43,7 @@ typedef struct st_net {
   char save_char;
   char net_skip_rest_factor;
   my_bool thread_specific_malloc;
-  my_bool compress;
+  unsigned char compress;
   my_bool unused3;
   void *thd;
   unsigned int last_errno;
@@ -81,6 +97,16 @@ enum enum_mysql_set_option
   MYSQL_OPTION_MULTI_STATEMENTS_ON,
   MYSQL_OPTION_MULTI_STATEMENTS_OFF
 };
+enum enum_session_state_type
+{
+  SESSION_TRACK_SYSTEM_VARIABLES,
+  SESSION_TRACK_SCHEMA,
+  SESSION_TRACK_STATE_CHANGE,
+  SESSION_TRACK_GTIDS,
+  SESSION_TRACK_TRANSACTION_CHARACTERISTICS,
+  SESSION_TRACK_TRANSACTION_STATE,
+  SESSION_TRACK_always_at_the_end
+};
 my_bool my_net_init(NET *net, Vio* vio, void *thd, unsigned int my_flags);
 void my_net_local_init(NET *net);
 void net_end(NET *net);
@@ -93,6 +119,8 @@ my_bool net_write_command(NET *net,unsigned char command,
      const unsigned char *packet, size_t len);
 int net_real_write(NET *net,const unsigned char *packet, size_t len);
 unsigned long my_net_read_packet(NET *net, my_bool read_from_server);
+unsigned long my_net_read_packet_reallen(NET *net, my_bool read_from_server,
+                                         unsigned long* reallen);
 struct sockaddr;
 int my_connect(my_socket s, const struct sockaddr *name, unsigned int namelen,
         unsigned int timeout);
@@ -221,8 +249,6 @@ typedef struct st_typelib {
 extern my_ulonglong find_typeset(char *x, TYPELIB *typelib,int *error_position);
 extern int find_type_with_warning(const char *x, TYPELIB *typelib,
                                   const char *option);
-extern int find_type_or_exit(const char *x, TYPELIB *typelib,
-                             const char *option);
 extern int find_type(const char *x, const TYPELIB *typelib, unsigned int flags);
 extern void make_type(char *to,unsigned int nr,TYPELIB *typelib);
 extern const char *get_type(TYPELIB *typelib,unsigned int nr);
@@ -352,7 +378,7 @@ typedef struct st_mysql
   my_bool free_me;
   my_bool reconnect;
   char scramble[20 +1];
-  my_bool unused1;
+  my_bool auto_local_infile;
   void *unused2, *unused3, *unused4, *unused5;
   LIST *stmts;
   const struct st_mysql_methods *methods;

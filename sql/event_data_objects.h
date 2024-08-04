@@ -13,7 +13,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /**
   @addtogroup Event_Scheduler
@@ -33,7 +33,11 @@ struct TABLE;
 class Event_queue_element_for_exec
 {
 public:
-  Event_queue_element_for_exec(){};
+  Event_queue_element_for_exec()
+  {
+    dbname.str= NULL; dbname.length= 0;
+    name.str= NULL; name.length= 0;
+  };
   ~Event_queue_element_for_exec();
 
   bool
@@ -132,7 +136,7 @@ public:
   ulonglong created;
   ulonglong modified;
 
-  ulong sql_mode;
+  sql_mode_t sql_mode;
 
   class Stored_program_creation_ctx *creation_ctx;
   LEX_STRING body_utf8;
@@ -158,7 +162,7 @@ public:
   LEX_STRING definer_user;
   LEX_STRING definer_host;
 
-  ulong sql_mode;
+  sql_mode_t sql_mode;
 
   class Stored_program_creation_ctx *creation_ctx;
 

@@ -70,21 +70,16 @@ IF(CMAKE_SIZEOF_VOID_P EQUAL 8)
   SET(Win64 " Win64='yes'")
   SET(Platform x64)
   SET(PlatformProgramFilesFolder ProgramFiles64Folder)
+  SET(CA_QUIET_EXEC CAQuietExec64)
 ELSE()
   SET(CANDLE_ARCH -arch x86)
   SET(Platform x86)
   SET(PlatformProgramFilesFolder ProgramFilesFolder)
+  SET(CA_QUIET_EXEC CAQuietExec)
   SET(Win64)
 ENDIF()
 
 SET(ENV{VS_UNICODE_OUTPUT})
-# Workaround for CMake bug#11452
-# Switch off the monolithic install
-EXECUTE_PROCESS(
-  COMMAND ${CMAKE_COMMAND} -DCPACK_MONOLITHIC_INSTALL=0 ${CMAKE_BINARY_DIR}
-  OUTPUT_QUIET
-)
-
 
 INCLUDE(${CMAKE_BINARY_DIR}/CPackConfig.cmake)
 
@@ -405,9 +400,10 @@ IF("$ENV{EXTRA_LIGHT_ARGS}")
 ENDIF()
 
 FILE(REMOVE mysql_server.wixobj extra.wixobj)
+STRING(REPLACE " " ";" EXTRA_WIX_PREPROCESSOR_FLAGS_LIST ${EXTRA_WIX_PREPROCESSOR_FLAGS})
 EXECUTE_PROCESS(
  COMMAND ${CANDLE_EXECUTABLE} 
- ${EXTRA_WIX_PREPROCESSOR_FLAGS} 
+ ${EXTRA_WIX_PREPROCESSOR_FLAGS_LIST}
  ${CANDLE_ARCH} 
  -ext WixUtilExtension 
  -ext WixFirewallExtension   
@@ -417,7 +413,7 @@ EXECUTE_PROCESS(
 
 EXECUTE_PROCESS(
  COMMAND ${CANDLE_EXECUTABLE} ${CANDLE_ARCH}
- ${EXTRA_WIX_PREPROCESSOR_FLAGS} 
+ ${EXTRA_WIX_PREPROCESSOR_FLAGS_LIST}
  -ext WixUtilExtension 
  -ext WixFirewallExtension  
  ${CMAKE_CURRENT_BINARY_DIR}/extra.wxs 
@@ -425,7 +421,7 @@ EXECUTE_PROCESS(
 )
 
 EXECUTE_PROCESS(
- COMMAND ${LIGHT_EXECUTABLE} -ext WixUIExtension -ext WixUtilExtension 
+ COMMAND ${LIGHT_EXECUTABLE} -v -ext WixUIExtension -ext WixUtilExtension
  -ext WixFirewallExtension -sice:ICE61
   mysql_server.wixobj  extra.wixobj -out  ${CPACK_PACKAGE_FILE_NAME}.msi
   ${EXTRA_LIGHT_ARGS}
@@ -434,17 +430,11 @@ EXECUTE_PROCESS(
 IF(SIGNCODE)
   EXECUTE_PROCESS(
   COMMAND ${SIGNTOOL_EXECUTABLE} sign ${SIGNTOOL_PARAMETERS} 
+  /d ${CPACK_PACKAGE_FILE_NAME}.msi
   ${CPACK_PACKAGE_FILE_NAME}.msi
 )
 ENDIF()
 CONFIGURE_FILE(${CPACK_PACKAGE_FILE_NAME}.msi 
  ${CMAKE_BINARY_DIR}/${CPACK_PACKAGE_FILE_NAME}.msi 
   COPYONLY)
-  
-# Workaround for CMake bug#11452
-# Switch monolithic install on again
-EXECUTE_PROCESS(
-  COMMAND ${CMAKE_COMMAND} -DCPACK_MONOLITHIC_INSTALL=1 ${CMAKE_BINARY_DIR}
-  OUTPUT_QUIET
-)
 

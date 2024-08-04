@@ -1,5 +1,5 @@
 /* Copyright (c) 2000, 2012, Oracle and/or its affiliates.
-   Copyright (c) 2012 Monty Program Ab
+   Copyright (c) 2012, 2017, MariaDB Corporation.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -11,8 +11,8 @@
    GNU General Public License for more details.
 
    You should have received a copy of the GNU General Public License
-   along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   along with this program; if not, write to the Free Software Foundation, Inc.,
+   51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 /*
  * Vio Lite.
@@ -51,9 +51,9 @@ enum enum_vio_io_event
   VIO_IO_EVENT_CONNECT
 };
 
-#define VIO_LOCALHOST 1                         /* a localhost connection */
-#define VIO_BUFFERED_READ 2                     /* use buffered read */
-#define VIO_READ_BUFFER_SIZE 16384              /* size of read buffer */
+#define VIO_LOCALHOST 1U                        /* a localhost connection */
+#define VIO_BUFFERED_READ 2U                    /* use buffered read */
+#define VIO_READ_BUFFER_SIZE 16384U             /* size of read buffer */
 #define VIO_DESCRIPTION_SIZE 30                 /* size of description */
 
 Vio* vio_new(my_socket sd, enum enum_vio_type type, uint flags);
@@ -123,13 +123,6 @@ int vio_getnameinfo(const struct sockaddr *sa,
                     int flags);
 
 #ifdef HAVE_OPENSSL
-#include <openssl/opensslv.h>
-#if OPENSSL_VERSION_NUMBER < 0x0090700f
-#define DES_cblock des_cblock
-#define DES_key_schedule des_key_schedule
-#define DES_set_key_unchecked(k,ks) des_set_key_unchecked((k),*(ks))
-#define DES_ede3_cbc_encrypt(i,o,l,k1,k2,k3,iv,e) des_ede3_cbc_encrypt((i),(o),(l),*(k1),*(k2),*(k3),(iv),(e))
-#endif
 /* apple deprecated openssl in MacOSX Lion */
 #ifdef __APPLE__
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
@@ -145,15 +138,14 @@ typedef my_socket YASSL_SOCKET_T;
 #define YASSL_SOCKET_T_DEFINED
 #include <openssl/ssl.h>
 #include <openssl/err.h>
-
-#ifdef HAVE_ERR_remove_thread_state
-#define ERR_remove_state(X) ERR_remove_thread_state(NULL)
+#ifdef DEPRECATED
+#undef DEPRECATED
 #endif
 
 enum enum_ssl_init_error
 {
-  SSL_INITERR_NOERROR= 0, SSL_INITERR_CERT, SSL_INITERR_KEY, 
-  SSL_INITERR_NOMATCH, SSL_INITERR_BAD_PATHS, SSL_INITERR_CIPHERS, 
+  SSL_INITERR_NOERROR= 0, SSL_INITERR_CERT, SSL_INITERR_KEY,
+  SSL_INITERR_NOMATCH, SSL_INITERR_BAD_PATHS, SSL_INITERR_CIPHERS,
   SSL_INITERR_MEMFAIL, SSL_INITERR_DH, SSL_INITERR_LASTERR
 };
 const char* sslGetErrString(enum enum_ssl_init_error err);
@@ -211,14 +203,6 @@ void vio_end(void);
 #define SHUT_RD SD_RECEIVE
 #endif
 
-/*
-  Set thread id for io cancellation (required on Windows XP only,
-  and should to be removed if XP is no more supported)
-*/
-
-#define vio_set_thread_id(vio, tid) if(vio) vio->thread_id= tid
-#else
-#define vio_set_thread_id(vio, tid)
 #endif
 
 /* This enumerator is used in parser - should be always visible */
@@ -288,7 +272,6 @@ struct st_vio
 #ifdef _WIN32
   HANDLE hPipe;
   OVERLAPPED overlapped;
-  DWORD thread_id; /* Used on XP only by vio_shutdown() */
   DWORD read_timeout_ms;
   DWORD write_timeout_ms;
 #endif

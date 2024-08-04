@@ -1,16 +1,11 @@
 # Testing table creations for row-based replication.
 
 --source include/have_binlog_format_row.inc
---source include/master-slave.inc
 --source include/have_innodb.inc
+--source include/master-slave.inc
 connection slave;
 --source include/have_innodb.inc
 connection master;
-
-# Bug#18326: Do not lock table for writing during prepare of statement
-# The use of the ps protocol causes extra table maps in the binlog, so
-# we disable the ps-protocol for this statement.
---disable_ps_protocol
 
 # Set the default storage engine to different values on master and
 # slave. We need to stop the slave for the server variable to take
@@ -34,12 +29,10 @@ CREATE TABLE t2 (a INT, b INT) ENGINE=Merge;
 CREATE TABLE t3 (a INT, b INT) CHARSET=utf8;
 CREATE TABLE t4 (a INT, b INT) ENGINE=Merge CHARSET=utf8;
 --source include/show_binlog_events.inc
---echo **** On Master ****
 --query_vertical SHOW CREATE TABLE t1
 --query_vertical SHOW CREATE TABLE t2
 --query_vertical SHOW CREATE TABLE t3
 sync_slave_with_master;
---echo **** On Slave ****
 --query_vertical SHOW CREATE TABLE t1
 --query_vertical SHOW CREATE TABLE t2
 --query_vertical SHOW CREATE TABLE t3
@@ -50,13 +43,11 @@ CREATE TABLE t5 (b INT, c INT) SELECT * FROM t3;
 CREATE TEMPORARY TABLE tt3 (a INT, b INT);
 INSERT INTO tt3 VALUES (1,2), (2,4), (3,6), (4,2), (5,10), (6,12);
 CREATE TABLE t6 (b INT, c INT) SELECT * FROM tt3;
---echo **** On Master ****
 --query_vertical SHOW CREATE TABLE t5
 SELECT * FROM t5 ORDER BY a,b,c;
 --query_vertical SHOW CREATE TABLE t6
 SELECT * FROM t6 ORDER BY a,b,c;
 sync_slave_with_master;
---echo **** On Slave ****
 --query_vertical SHOW CREATE TABLE t5
 SELECT * FROM t5 ORDER BY a,b,c;
 --query_vertical SHOW CREATE TABLE t6
@@ -102,12 +93,10 @@ CREATE TABLE t9 LIKE tt4;
 CREATE TEMPORARY TABLE tt5 LIKE t4;
 CREATE TEMPORARY TABLE tt6 LIKE tt4;
 CREATE TEMPORARY TABLE tt7 SELECT 1;
---echo **** On Master ****
 --query_vertical SHOW CREATE TABLE t8
 --query_vertical SHOW CREATE TABLE t9
 --source include/show_binlog_events.inc
 sync_slave_with_master;
---echo **** On Slave ****
 --query_vertical SHOW CREATE TABLE t8
 --query_vertical SHOW CREATE TABLE t9
 

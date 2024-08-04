@@ -1,6 +1,7 @@
 /*****************************************************************************
 
 Copyright (c) 1996, 2011, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2016, 2019, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +13,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -36,14 +37,19 @@ ibool
 trx_state_eq(
 /*=========*/
 	const trx_t*	trx,	/*!< in: transaction */
-	trx_state_t	state)	/*!< in: state;
+	trx_state_t	state,	/*!< in: state;
 				if state != TRX_STATE_NOT_STARTED
 				asserts that
 				trx->state != TRX_STATE_NOT_STARTED */
+	bool		relaxed)
+				/*!< in: whether to allow
+				trx->state == TRX_STATE_NOT_STARTED
+				after an error has been reported */
 {
 #ifdef UNIV_DEBUG
 	switch (trx->state) {
 	case TRX_STATE_PREPARED:
+	case TRX_STATE_PREPARED_RECOVERED:
 		ut_ad(!trx_is_autocommit_non_locking(trx));
 		return(trx->state == state);
 
@@ -57,7 +63,9 @@ trx_state_eq(
 
 	case TRX_STATE_NOT_STARTED:
 		/* This state is not allowed for running transactions. */
-		ut_a(state == TRX_STATE_NOT_STARTED);
+		ut_a(state == TRX_STATE_NOT_STARTED
+		     || (relaxed
+			 && thd_get_error_number(trx->mysql_thd)));
 		ut_ad(!trx->in_rw_trx_list);
 		ut_ad(!trx->in_ro_trx_list);
 		return(state == trx->state);
@@ -171,7 +179,7 @@ UNIV_INLINE
 void
 trx_search_latch_release_if_reserved(
 /*=================================*/
-	trx_t*	   trx __attribute__((unused))) /*!< in: transaction */
+	trx_t*	   trx MY_ATTRIBUTE((unused))) /*!< in: transaction */
 {
 	ut_ad(!trx->has_search_latch);
 }

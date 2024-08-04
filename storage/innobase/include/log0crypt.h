@@ -1,7 +1,7 @@
 /*****************************************************************************
 
 Copyright (C) 2013, 2015, Google Inc. All Rights Reserved.
-Copyright (C) 2014, 2015, MariaDB Corporation. All Rights Reserved.
+Copyright (C) 2014, 2017, MariaDB Corporation. All Rights Reserved.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -13,7 +13,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+51 Franklin St, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 /**************************************************//**
@@ -22,27 +22,25 @@ Innodb log encrypt/decrypt
 
 Created 11/25/2013 Minli Zhu
 Modified           Jan Lindström jan.lindstrom@mariadb.com
+MDEV-11782: Rewritten for MariaDB 10.2 by Marko Mäkelä, MariaDB Corporation.
 *******************************************************/
 #ifndef log0crypt_h
 #define log0crypt_h
 
-#include "univ.i"
-#include "ut0byte.h"
-#include "my_crypt.h"
+#include "log0log.h"
 
-typedef int Crypt_result;
-
-/* If true, enable redo log encryption. */
+/** innodb_encrypt_log: whether to encrypt the redo log */
 extern my_bool srv_encrypt_log;
 
-/***********************************************************************
-Set next checkpoint's key version to latest one, and generate new key */
+/** Initialize the redo log encryption key and random parameters
+when creating a new redo log.
+The random parameters will be persisted in the log checkpoint pages.
+@see log_crypt_write_checkpoint_buf()
+@see log_crypt_read_checkpoint_buf()
+@return whether the operation succeeded */
 UNIV_INTERN
-void
-log_crypt_set_ver_and_key(
-/*======================*/
-	ib_uint64_t next_checkpoint_no);/*!< in: next checkpoint no */
-
+bool
+log_crypt_init();
 
 /*********************************************************************//**
 Writes the crypto (version, msg and iv) info, which has been used for
@@ -54,67 +52,70 @@ log_crypt_write_checkpoint_buf(
 /*===========================*/
 	byte*	buf);			/*!< in/out: checkpoint buffer */
 
-/*********************************************************************//**
-Read the crypto (version, msg and iv) info, which has been used for
-log blocks with lsn <= this checkpoint's lsn, from a log header's
-checkpoint buf. */
+/** Read the MariaDB 10.1 checkpoint crypto (version, msg and iv) info.
+@param[in]	buf	checkpoint buffer
+@return	whether the operation was successful */
 UNIV_INTERN
 bool
-log_crypt_read_checkpoint_buf(
-/*===========================*/
-	const byte*	buf);		/*!< in: checkpoint buffer */
+log_crypt_101_read_checkpoint(const byte* buf);
 
-/********************************************************
-Encrypt one or more log block before it is flushed to disk */
+/** Decrypt a MariaDB 10.1 redo log block.
+@param[in,out]	buf	log block
+@return	whether the decryption was successful */
+UNIV_INTERN
+bool
+log_crypt_101_read_block(byte* buf);
+
+/** Read the checkpoint crypto (version, msg and iv) info.
+@param[in]	buf	checkpoint buffer
+@return	whether the operation was successful */
+UNIV_INTERN
+bool
+log_crypt_read_checkpoint_buf(const byte* buf);
+
+/** Encrypt or decrypt log blocks.
+@param[in,out]	buf	log blocks to encrypt or decrypt
+@param[in]	lsn	log sequence number of the start of the buffer
+@param[in]	size	size of the buffer, in bytes
+@param[in]	decrypt	whether to decrypt instead of encrypting */
 UNIV_INTERN
 void
-log_encrypt_before_write(
-/*=====================*/
-	ib_uint64_t	next_checkpoint_no,	/*!< in: log group to be flushed */
-	byte* 		block,			/*!< in/out: pointer to a log block */
-	const ulint 	size);			/*!< in: size of log blocks */
+log_crypt(byte* buf, lsn_t lsn, ulint size, bool decrypt = false);
 
-/********************************************************
-Decrypt a specified log segment after they are read from a log file to a buffer.
-*/
+/** Encrypt or decrypt a temporary file block.
+@param[in]	src		block to encrypt or decrypt
+@param[in]	size		size of the block
+@param[out]	dst		destination block
+@param[in]	offs		offset to block
+@param[in]	encrypt		true=encrypt; false=decrypt
+@return whether the operation succeeded */
 UNIV_INTERN
-void
-log_decrypt_after_read(
-/*===================*/
-	byte*		frame,	/*!< in/out: log segment */
-	const ulint	size);	/*!< in: log segment size */
+bool
+log_tmp_block_encrypt(
+	const byte*	src,
+	ulint		size,
+	byte*		dst,
+	uint64_t	offs,
+	bool		encrypt = true)
+	MY_ATTRIBUTE((warn_unused_result, nonnull));
 
-/* Error codes for crypt info */
-typedef enum {
-	LOG_UNENCRYPTED = 0,
-	LOG_CRYPT_KEY_NOT_FOUND = 1,
-	LOG_DECRYPT_MAYBE_FAILED = 2
-} log_crypt_err_t;
+/** Decrypt a temporary file block.
+@param[in]	src		block to decrypt
+@param[in]	size		size of the block
+@param[out]	dst		destination block
+@param[in]	offs		offset to block
+@return whether the operation succeeded */
+inline
+bool
+log_tmp_block_decrypt(
+	const byte*	src,
+	ulint		size,
+	byte*		dst,
+	uint64_t	offs)
+{
+	return(log_tmp_block_encrypt(src, size, dst, offs, false));
+}
 
-/********************************************************
-Check is the checkpoint information encrypted. This check
-is based on fact has log group crypt info and based
-on this crypt info was the key version different from
-unencrypted key version. There is no realible way to
-distinguish encrypted log block from corrupted log block,
-but if log block corruption is found this function is
-used to find out if log block is maybe encrypted but
-encryption key, key management plugin or encryption
-algorithm does not match.
-@return TRUE, if log block may be encrypted */
-UNIV_INTERN
-ibool
-log_crypt_block_maybe_encrypted(
-/*============================*/
-	const byte* 		log_block, 	/*!< in: log block */
-	log_crypt_err_t* 	err_info); 	/*!< out: error info */
-
-/********************************************************
-Print crypt error message to error log */
-UNIV_INTERN
-void
-log_crypt_print_error(
-/*==================*/
-	log_crypt_err_t 	err_info); 	/*!< out: error info */
-
+/** @return whether temporary files are encrypted */
+inline bool log_tmp_is_encrypted() { return srv_encrypt_log; }
 #endif  // log0crypt.h

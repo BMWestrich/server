@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02111-1335 USA */
 
 #define MYSQL_SERVER
 #include <sql_class.h>
@@ -21,23 +21,23 @@
 
 static const LEX_CSTRING result_types[]=
 {
-  STRING_WITH_LEN("VARCHAR"),
-  STRING_WITH_LEN("DOUBLE"),
-  STRING_WITH_LEN("INT"),
-  STRING_WITH_LEN("<IMPOSSIBLE1>"), // ROW_RESULT
-  STRING_WITH_LEN("DECIMAL"),
-  STRING_WITH_LEN("<IMPOSSIBLE2>") // TIME_RESULT
+  { STRING_WITH_LEN("VARCHAR") },
+  { STRING_WITH_LEN("DOUBLE") },
+  { STRING_WITH_LEN("INT") },
+  { STRING_WITH_LEN("<IMPOSSIBLE1>") }, // ROW_RESULT
+  { STRING_WITH_LEN("DECIMAL") },
+  { STRING_WITH_LEN("<IMPOSSIBLE2>")} // TIME_RESULT
 };
 
 
 static const LEX_CSTRING unsigned_result_types[]=
 {
-  STRING_WITH_LEN("<IMPOSSIBLE3>"), // UNSIGNED STRING_RESULT
-  STRING_WITH_LEN("DOUBLE UNSIGNED"),
-  STRING_WITH_LEN("INT UNSIGNED"),
-  STRING_WITH_LEN("<IMPOSSIBLE4>"), // UNSIGNED ROW_RESULT
-  STRING_WITH_LEN("DECIMAL UNSIGNED"),
-  STRING_WITH_LEN("<IMPOSSIBLE5>") // UNSIGNED TIME_RESULT
+  { STRING_WITH_LEN("<IMPOSSIBLE3>") }, // UNSIGNED STRING_RESULT
+  { STRING_WITH_LEN("DOUBLE UNSIGNED") },
+  { STRING_WITH_LEN("INT UNSIGNED") },
+  { STRING_WITH_LEN("<IMPOSSIBLE4>") }, // UNSIGNED ROW_RESULT
+  { STRING_WITH_LEN("DECIMAL UNSIGNED") },
+  { STRING_WITH_LEN("<IMPOSSIBLE5>") } // UNSIGNED TIME_RESULT
 };
 
 
@@ -134,6 +134,6 @@ maria_declare_plugin(user_variables)
   NULL,
   NULL,
   "1.0",
-  MariaDB_PLUGIN_MATURITY_ALPHA
+  MariaDB_PLUGIN_MATURITY_STABLE
 }
 maria_declare_plugin_end;

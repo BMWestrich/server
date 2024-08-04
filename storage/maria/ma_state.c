@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 /*
   Functions to maintain live statistics for Maria transactional tables
@@ -58,6 +58,7 @@ my_bool _ma_setup_live_state(MARIA_HA *info)
   MARIA_USED_TABLES *tables;
   MARIA_STATE_HISTORY *history;
   DBUG_ENTER("_ma_setup_live_state");
+  DBUG_PRINT("enter", ("info: %p", info));
 
   DBUG_ASSERT(share->lock_key_trees);
 
@@ -65,7 +66,7 @@ my_bool _ma_setup_live_state(MARIA_HA *info)
     DBUG_RETURN(1);
 
   trn= info->trn;
-  for (tables= (MARIA_USED_TABLES*) info->trn->used_tables;
+  for (tables= (MARIA_USED_TABLES*) trn->used_tables;
        tables;
        tables= tables->next)
   {
@@ -86,8 +87,8 @@ my_bool _ma_setup_live_state(MARIA_HA *info)
 
   mysql_mutex_lock(&share->intern_lock);
   share->in_trans++;
-  DBUG_PRINT("info", ("share: 0x%lx  in_trans: %d",
-                      (ulong) share, share->in_trans));
+  DBUG_PRINT("info", ("share: %p  in_trans: %d",
+                     share, share->in_trans));
 
   history= share->state_history;
 
@@ -110,6 +111,8 @@ my_bool _ma_setup_live_state(MARIA_HA *info)
 end:
   info->state_start= &tables->state_start;
   info->state= &tables->state_current;
+  info->used_tables= tables;
+  tables->use_count++;
 
   /*
     Mark in transaction state if we are not using transid (versioning)
@@ -118,6 +121,7 @@ end:
   */
   tables->state_current.no_transid|= !(info->row_flag & ROW_FLAG_TRANSID);
 
+  DBUG_PRINT("exit", ("tables: %p  info->state: %p", tables, info->state));
   DBUG_RETURN(0);
 }
 
@@ -241,9 +245,10 @@ void _ma_reset_state(MARIA_HA *info)
   DBUG_ENTER("_ma_reset_state");
 
   /* Always true if share->now_transactional is set */
-  if (history)
+  if (history && share->have_versioning)
   {
     MARIA_STATE_HISTORY *next;
+    DBUG_PRINT("info", ("resetting history"));
 
     /* Set the current history to current state */
     share->state_history->state= share->state.state;
@@ -255,7 +260,7 @@ void _ma_reset_state(MARIA_HA *info)
       my_free(history);
     }
     share->state_history->next= 0;
-    share->state_history->trid= 0;              /* Visibile for all */
+    share->state_history->trid= 0;              /* Visible for all */
   }
   DBUG_VOID_RETURN;
 }
@@ -450,7 +455,7 @@ my_bool _ma_trnman_end_trans_hook(TRN *trn, my_bool commit,
   MARIA_USED_TABLES *tables, *next;
   DBUG_ENTER("_ma_trnman_end_trans_hook");
   DBUG_PRINT("enter", ("trn: %p  used_tables: %p", trn, trn->used_tables));
-  
+
   for (tables= (MARIA_USED_TABLES*) trn->used_tables;
        tables;
        tables= next)
@@ -524,8 +529,8 @@ my_bool _ma_trnman_end_trans_hook(TRN *trn, my_bool commit,
             /* Remove not visible states */
             share->state_history= _ma_remove_not_visible_states(history, 0, 1);
           }
-          DBUG_PRINT("info", ("share: 0x%lx  in_trans: %d",
-                              (ulong) share, share->in_trans));
+          DBUG_PRINT("info", ("share: %p in_trans: %d",
+                              share, share->in_trans));
         }
       }
       share->in_trans--;
@@ -546,6 +551,7 @@ my_bool _ma_trnman_end_trans_hook(TRN *trn, my_bool commit,
     my_free(tables);
   }
   trn->used_tables= 0;
+  trn->used_instances= 0;
   DBUG_RETURN(error);
 }
 
@@ -560,18 +566,26 @@ my_bool _ma_trnman_end_trans_hook(TRN *trn, my_bool commit,
      share->internal_lock must be locked when function is called
 */
 
-void _ma_remove_table_from_trnman(MARIA_SHARE *share, TRN *trn)
+void _ma_remove_table_from_trnman(MARIA_HA *info)
 {
+  MARIA_SHARE *share= info->s;
+  TRN *trn= info->trn;
   MARIA_USED_TABLES *tables, **prev;
+  MARIA_HA *handler, **prev_file;
+  uint unlinked= 0;
   DBUG_ENTER("_ma_remove_table_from_trnman");
   DBUG_PRINT("enter", ("trn: %p  used_tables: %p  share: %p  in_trans: %d",
                        trn, trn->used_tables, share, share->in_trans));
 
   mysql_mutex_assert_owner(&share->intern_lock);
-  
-  for (prev= (MARIA_USED_TABLES**) (char*) &trn->used_tables, tables= *prev;
-       tables;
-       tables= *prev)
+
+  if (trn == &dummy_transaction_object)
+    DBUG_VOID_RETURN;
+
+  /* First remove share from used_tables */
+  for (prev= (MARIA_USED_TABLES**) (char*) &trn->used_tables;
+       (tables= *prev);
+       prev= &tables->next)
   {
     if (tables->share == share)
     {
@@ -580,8 +594,39 @@ void _ma_remove_table_from_trnman(MARIA_SHARE *share, TRN *trn)
       my_free(tables);
       break;
     }
-    prev= &tables->next;
   }
+  if (!tables)
+  {
+    /*
+      This can only happens in case of rename of intermediate table as
+      part of alter table
+    */
+    DBUG_PRINT("warning", ("share: %p where not in used_tables_list", share));
+  }
+
+  /* unlink all instances of the table from used_instances */
+  prev_file= (MARIA_HA**) &trn->used_instances;
+  while ((handler= *prev_file))
+  {
+    if (handler->s == share)
+    {
+      unlinked++;
+      *prev_file= handler->trn_next;  /* Remove instance */
+    }
+    else
+      prev_file= &handler->trn_next;  /* Continue with next instance */
+  }
+
+  DBUG_PRINT("note", ("unlinked tables: %u", unlinked));
+  if (!unlinked)
+  {
+    /*
+      This can only happens in case of rename of intermediate table as
+      part of alter table
+    */
+    DBUG_PRINT("warning", ("table: %p where not in used_instances", info));
+  }
+  info->trn= 0;                                 /* Not part of trans anymore */
   DBUG_VOID_RETURN;
 }
 
@@ -597,7 +642,7 @@ void _ma_remove_table_from_trnman(MARIA_SHARE *share, TRN *trn)
 
   SYNOPSIS
     _ma_get_status()
-    param		Pointer to Myisam handler
+    param		Pointer to Aria handler
     concurrent_insert	Set to 1 if we are going to do concurrent inserts
 			(THR_WRITE_CONCURRENT_INSERT was used)
 */
@@ -627,6 +672,8 @@ void _ma_block_get_status(void* param, my_bool concurrent_insert)
 my_bool _ma_block_start_trans(void* param)
 {
   MARIA_HA *info=(MARIA_HA*) param;
+  DBUG_ENTER("_ma_block_start_trans");
+
   if (info->s->lock_key_trees)
   {
     /*
@@ -634,7 +681,7 @@ my_bool _ma_block_start_trans(void* param)
       out of memory conditions)
       TODO: Fix this by having one extra state pre-allocated
     */
-    return _ma_setup_live_state(info);
+    DBUG_RETURN(_ma_setup_live_state(info));
   }
   else
   {
@@ -663,9 +710,9 @@ my_bool _ma_block_start_trans(void* param)
       Assume for now that this doesn't fail (It can only fail in
       out of memory conditions)
     */
-    return maria_create_trn_hook(info) != 0;
+    DBUG_RETURN(maria_create_trn_hook(info) != 0);
   }
-  return 0;
+  DBUG_RETURN(0);
 }
 
 
@@ -697,7 +744,7 @@ my_bool _ma_block_check_status(void *param __attribute__((unused)))
 my_bool _ma_block_start_trans_no_versioning(void* param)
 {
   MARIA_HA *info=(MARIA_HA*) param;
-  DBUG_ENTER("_ma_block_get_status_no_version");
+  DBUG_ENTER("_ma_block_start_trans_no_versioning");
   DBUG_ASSERT(info->s->base.born_transactional && !info->s->lock_key_trees);
 
   info->state->changed= 0;              /* from _ma_reset_update_flag() */
@@ -722,6 +769,8 @@ my_bool _ma_block_start_trans_no_versioning(void* param)
 void maria_versioning(MARIA_HA *info, my_bool versioning)
 {
   MARIA_SHARE *share= info->s;
+  DBUG_ENTER("maria_versioning");
+
   /* For now, this is a hack */
   if (share->have_versioning)
   {
@@ -738,6 +787,7 @@ void maria_versioning(MARIA_HA *info, my_bool versioning)
       info->state= &share->state.state;	/* Change global values by default */
     info->state_start= info->state;             /* Initial values */
   }
+  DBUG_VOID_RETURN;
 }
 
 
@@ -750,9 +800,18 @@ void maria_versioning(MARIA_HA *info, my_bool versioning)
 
 void _ma_set_share_data_file_length(MARIA_SHARE *share, ulonglong new_length)
 {
-  mysql_mutex_lock(&share->intern_lock);
+  if (!share->internal_table)
+    mysql_mutex_lock(&share->intern_lock);
   if (share->state.state.data_file_length < new_length)
+  {
     share->state.state.data_file_length= new_length;
+    if (new_length >= share->base.max_data_file_length)
+    {
+      /* Give an error on next insert */
+      share->state.changed|= STATE_DATA_FILE_FULL;
+    }
+  }
+  if (!share->internal_table)
   mysql_mutex_unlock(&share->intern_lock);
 }
 

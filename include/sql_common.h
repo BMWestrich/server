@@ -1,7 +1,7 @@
 #ifndef SQL_COMMON_INCLUDED
 #define SQL_COMMON_INCLUDED
-/* Copyright (c) 2003, 2012, Oracle and/or its affiliates.
-   Copyright (c) 2010, 2012, Monty Program Ab
+/* Copyright (c) 2003, 2018, Oracle and/or its affiliates.
+   Copyright (c) 2010, 2018, MariaDB
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -14,7 +14,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #ifdef	__cplusplus
 extern "C" {
@@ -77,9 +77,13 @@ typedef struct st_mysql_methods
 #endif
 } MYSQL_METHODS;
 
+#ifdef LIBMARIADB
+#define simple_command(mysql, command, arg, length, skip_check) ma_simple_command(mysql, command, (char *)arg, length, skip_check, NULL)
+#else
 #define simple_command(mysql, command, arg, length, skip_check) \
   (*(mysql)->methods->advanced_command)(mysql, command, 0,  \
                                         0, arg, length, skip_check, NULL)
+#endif
 #define stmt_command(mysql, command, arg, length, stmt) \
   (*(mysql)->methods->advanced_command)(mysql, command, 0,  \
                                         0, arg, length, 1, stmt)
@@ -100,6 +104,7 @@ cli_advanced_command(MYSQL *mysql, enum enum_server_command command,
 		     const unsigned char *arg, ulong arg_length,
                      my_bool skip_check, MYSQL_STMT *stmt);
 unsigned long cli_safe_read(MYSQL *mysql);
+unsigned long cli_safe_read_reallen(MYSQL *mysql, ulong* reallen);
 void net_clear_error(NET *net);
 void set_stmt_errmsg(MYSQL_STMT *stmt, NET *net);
 void set_stmt_error(MYSQL_STMT *stmt, int errcode, const char *sqlstate,
@@ -109,8 +114,9 @@ void set_mysql_extended_error(MYSQL *mysql, int errcode, const char *sqlstate,
                               const char *format, ...);
 
 /* client side of the pluggable authentication */
+struct st_vio;
 struct st_plugin_vio_info;
-void mpvio_info(Vio *vio, struct st_plugin_vio_info *info);
+void mpvio_info(struct st_vio *vio, struct st_plugin_vio_info *info);
 int run_plugin_auth(MYSQL *mysql, char *data, uint data_len,
                     const char *data_plugin, const char *db);
 int mysql_client_plugin_init();

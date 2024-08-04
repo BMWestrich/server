@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2012, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2012, 2016, Oracle and/or its affiliates. All Rights Reserved.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +12,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -46,7 +46,7 @@ row_import_for_mysql(
 	dict_table_t*	table,		/*!< in/out: table */
 	row_prebuilt_t*	prebuilt)	/*!< in: prebuilt struct
 						in MySQL */
-	__attribute__((nonnull, warn_unused_result));
+	MY_ATTRIBUTE((nonnull, warn_unused_result));
 
 /*****************************************************************//**
 Update the DICT_TF2_DISCARDED flag in SYS_TABLES.
@@ -64,7 +64,7 @@ row_import_update_discarded_flag(
 	bool		dict_locked)		/*!< in: Set to true if the
 						caller already owns the
 						dict_sys_t:: mutex. */
-	__attribute__((nonnull, warn_unused_result));
+	MY_ATTRIBUTE((nonnull, warn_unused_result));
 
 /*****************************************************************//**
 Update the (space, root page) of a table's indexes from the values
@@ -83,7 +83,7 @@ row_import_update_index_root(
 	bool			dict_locked)	/*!< in: Set to true if the
 						caller already owns the
 						dict_sys_t:: mutex. */
-	__attribute__((nonnull, warn_unused_result));
+	MY_ATTRIBUTE((nonnull, warn_unused_result));
 #ifndef UNIV_NONINL
 #include "row0import.ic"
 #endif

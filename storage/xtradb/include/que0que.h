@@ -12,7 +12,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -384,9 +384,6 @@ struct que_thr_t{
 	UT_LIST_NODE_T(que_thr_t)
 			thrs;		/*!< list of thread nodes of the fork
 					node */
-	UT_LIST_NODE_T(que_thr_t)
-			trx_thrs;	/*!< lists of threads in wait list of
-					the trx */
 	UT_LIST_NODE_T(que_thr_t)
 			queue;		/*!< list of runnable thread nodes in
 					the server task queue */

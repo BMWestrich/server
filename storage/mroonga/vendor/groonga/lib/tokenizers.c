@@ -1,6 +1,6 @@
 /* -*- c-basic-offset: 2 -*- */
 /*
-  Copyright(C) 2009-2015 Brazil
+  Copyright(C) 2009-2017 Brazil
 
   This library is free software; you can redistribute it and/or
   modify it under the terms of the GNU Lesser General Public
@@ -13,7 +13,7 @@
 
   You should have received a copy of the GNU Lesser General Public
   License along with this library; if not, write to the Free Software
-  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA
 */
 #include <string.h>
 #include "grn_token_cursor.h"
@@ -237,6 +237,8 @@ delimit_null_init(grn_ctx *ctx, int nargs, grn_obj **args, grn_user_data *user_d
 
 /* ngram tokenizer */
 
+static grn_bool grn_ngram_tokenizer_remove_blank_disable = GRN_FALSE;
+
 typedef struct {
   grn_tokenizer_token token;
   grn_tokenizer_query *query;
@@ -268,6 +270,9 @@ ngram_init(grn_ctx *ctx, int nargs, grn_obj **args, grn_user_data *user_data, ui
   unsigned int normalized_length_in_bytes;
   grn_ngram_tokenizer *tokenizer;
 
+  if (grn_ngram_tokenizer_remove_blank_disable) {
+    normalize_flags &= ~GRN_STRING_REMOVE_BLANK;
+  }
   query = grn_tokenizer_query_open(ctx, nargs, args, normalize_flags);
   if (!query) {
     return NULL;
@@ -544,7 +549,7 @@ regexp_next(grn_ctx *ctx, int nargs, grn_obj **args, grn_user_data *user_data)
   grn_obj *buffer = &(tokenizer->buffer);
   const char *current = tokenizer->next;
   const char *end = tokenizer->end;
-  const const uint_least8_t *char_types = tokenizer->char_types;
+  const uint_least8_t *char_types = tokenizer->char_types;
   grn_tokenize_mode mode = tokenizer->query->tokenize_mode;
   grn_bool is_begin = tokenizer->is_begin;
   grn_bool is_start_token = tokenizer->is_start_token;
@@ -598,6 +603,7 @@ regexp_next(grn_ctx *ctx, int nargs, grn_obj **args, grn_user_data *user_data)
     if (is_begin &&
         char_len == GRN_TOKENIZER_BEGIN_MARK_UTF8_LEN &&
         memcmp(current, GRN_TOKENIZER_BEGIN_MARK_UTF8, char_len) == 0) {
+      tokenizer->is_start_token = GRN_TRUE;
       n_characters++;
       GRN_TEXT_PUT(ctx, buffer, current, char_len);
       current += char_len;
@@ -791,6 +797,36 @@ grn_db_init_mecab_tokenizer(grn_ctx *ctx)
   }
 }
 
+void
+grn_db_fin_mecab_tokenizer(grn_ctx *ctx)
+{
+  switch (GRN_CTX_GET_ENCODING(ctx)) {
+  case GRN_ENC_EUC_JP :
+  case GRN_ENC_UTF8 :
+  case GRN_ENC_SJIS :
+#if defined(GRN_EMBEDDED) && defined(GRN_WITH_MECAB)
+    {
+      GRN_PLUGIN_DECLARE_FUNCTIONS(tokenizers_mecab);
+      GRN_PLUGIN_IMPL_NAME_TAGGED(fin, tokenizers_mecab)(ctx);
+    }
+#else /* defined(GRN_EMBEDDED) && defined(GRN_WITH_MECAB) */
+    {
+      const char *mecab_plugin_name = "tokenizers/mecab";
+      char *path;
+      path = grn_plugin_find_path(ctx, mecab_plugin_name);
+      if (path) {
+        GRN_FREE(path);
+        grn_plugin_unregister(ctx, mecab_plugin_name);
+      }
+    }
+#endif /* defined(GRN_EMBEDDED) && defined(GRN_WITH_MECAB) */
+    break;
+  default :
+    break;
+  }
+  return;
+}
+
 #define DEF_TOKENIZER(name, init, next, fin, vars)\
   (grn_proc_create(ctx, (name), (sizeof(name) - 1),\
                    GRN_PROC_TOKENIZER, (init), (next), (fin), 3, (vars)))
@@ -807,6 +843,17 @@ grn_db_init_builtin_tokenizers(grn_ctx *ctx)
   GRN_TEXT_INIT(&vars[0].value, 0);
   GRN_TEXT_INIT(&vars[1].value, 0);
   GRN_UINT32_INIT(&vars[2].value, 0);
+
+  {
+    char grn_ngram_tokenizer_remove_blank_disable_env[GRN_ENV_BUFFER_SIZE];
+
+    grn_getenv("GRN_NGRAM_TOKENIZER_REMOVE_BLANK_DISABLE",
+               grn_ngram_tokenizer_remove_blank_disable_env,
+               GRN_ENV_BUFFER_SIZE);
+    if (grn_ngram_tokenizer_remove_blank_disable_env[0]) {
+      grn_ngram_tokenizer_remove_blank_disable = GRN_TRUE;
+    }
+  }
 
   obj = DEF_TOKENIZER("TokenDelimit",
                       delimit_init, delimited_next, delimited_fin, vars);

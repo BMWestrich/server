@@ -14,7 +14,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335  USA */
 
 #include "my_base.h"                            /* ha_rows */
 #include "handler.h"                            /* UNDEF_NODEGROUP */
@@ -65,7 +65,7 @@ typedef struct p_column_list_val
   Item* item_expression;
   partition_info *part_info;
   uint partition_id;
-  bool max_value;
+  bool max_value; // MAXVALUE for RANGE type or DEFAULT value for LIST type
   bool null_value;
   char fixed;
 } part_column_list_val;
@@ -132,7 +132,9 @@ public:
     connect_string(null_lex_str),
     part_state(part_elem->part_state),
     nodegroup_id(part_elem->nodegroup_id),
-    has_null_value(FALSE)
+    has_null_value(FALSE),
+    signed_flag(part_elem->signed_flag),
+    max_value(part_elem->max_value)
   {
   }
   ~partition_element() {}

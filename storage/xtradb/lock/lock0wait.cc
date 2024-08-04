@@ -1,6 +1,7 @@
 /*****************************************************************************
 
-Copyright (c) 1996, 2013, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1996, 2016, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2014, 2020, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +13,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -32,6 +33,20 @@ Created 25/5/2010 Sunny Bains
 #include "srv0start.h"
 #include "ha_prototypes.h"
 #include "lock0priv.h"
+#include "lock0iter.h"
+
+#include <sstream>
+
+extern "C"
+LEX_STRING* thd_query_string(MYSQL_THD thd);
+
+struct blocking_trx_info {
+	uint64_t trx_id;
+	uint32_t thread_id;
+	int64_t query_id;
+};
+
+static const size_t MAX_BLOCKING_TRX_IN_REPORT = 10;
 
 #include <mysql/service_wsrep.h>
 
@@ -59,7 +74,7 @@ lock_wait_table_print(void)
 			(ulong) slot->in_use,
 			(ulong) slot->suspended,
 			slot->wait_timeout,
-			(ulong) difftime(ut_time(), slot->suspend_time));
+			(ulong) difftime(time(NULL), slot->suspend_time));
 	}
 }
 
@@ -156,7 +171,7 @@ lock_wait_table_reserve_slot(
 
 			os_event_reset(slot->event);
 			slot->suspended = TRUE;
-			slot->suspend_time = ut_time();
+			slot->suspend_time = time(NULL);
 			slot->wait_timeout = wait_timeout;
 
 			if (slot == lock_sys->last_slot) {
@@ -186,26 +201,69 @@ lock_wait_table_reserve_slot(
 	return(NULL);
 }
 
+/** Print lock wait timeout info to stderr. It's supposed this function
+is executed in trx's THD thread as it calls some non-thread-safe
+functions to get some info from THD.
+@param[in]	trx	requested trx
+@param[in]	blocking	blocking info array
+@param[in]	blocking_count	blocking info array size */
+static
+void
+print_lock_wait_timeout(
+	const trx_t &trx,
+	blocking_trx_info *blocking,
+	size_t blocking_count)
+{
+	std::ostringstream outs;
+
+	outs << "Lock wait timeout info:\n";
+	outs << "Requested thread id: " <<
+		thd_get_thread_id(trx.mysql_thd) <<
+		"\n";
+	outs << "Requested trx id: " << trx.id << "\n";
+	outs << "Requested query: " <<
+		thd_query_string(trx.mysql_thd)->str << "\n";
+
+	outs << "Total blocking transactions count: " <<
+		blocking_count <<
+		"\n";
+
+	for (size_t i = 0; i < blocking_count; ++i) {
+		outs << "Blocking transaction number: " << (i + 1) << "\n";
+		outs << "Blocking thread id: " <<
+			blocking[i].thread_id <<
+			"\n";
+		outs << "Blocking query id: " <<
+			blocking[i].query_id <<
+			"\n";
+		outs << "Blocking trx id: " << blocking[i].trx_id << "\n";
+	}
+	ut_print_timestamp(stderr);
+	fprintf(stderr, " %s", outs.str().c_str());
+}
+
 #ifdef WITH_WSREP
 /*********************************************************************//**
 check if lock timeout was for priority thread, 
 as a side effect trigger lock monitor
+@param[in]    trx    transaction owning the lock
+@param[in]    locked true if trx and lock_sys_mutex is ownd
 @return        false for regular lock timeout */
-static ibool
+static
+bool
 wsrep_is_BF_lock_timeout(
-/*====================*/
-    trx_t* trx) /* in: trx to check for lock priority */
+	const trx_t*	trx,
+	bool		locked = true)
 {
-       if (wsrep_on(trx->mysql_thd) &&
-           wsrep_thd_is_BF(trx->mysql_thd, FALSE)) {
-               fprintf(stderr, "WSREP: BF lock wait long\n");
-                srv_print_innodb_monitor       = TRUE;
-                srv_print_innodb_lock_monitor  = TRUE;
-                os_event_set(srv_monitor_event);
-                return TRUE;
-       }
-       return FALSE;
- }
+	if (trx->is_wsrep() && wsrep_thd_is_BF(trx->mysql_thd, FALSE)) {
+		fprintf(stderr, "WSREP: BF lock wait long for trx " TRX_ID_FMT "\n", trx->id);
+		srv_print_innodb_monitor	= TRUE;
+		srv_print_innodb_lock_monitor	= TRUE;
+		os_event_set(srv_monitor_event);
+		return true;
+	}
+	return false;
+}
 #endif /* WITH_WSREP */
 
 /***************************************************************//**
@@ -222,15 +280,12 @@ lock_wait_suspend_thread(
 				user OS thread */
 {
 	srv_slot_t*	slot;
-	double		wait_time;
 	trx_t*		trx;
 	ulint		had_dict_lock;
 	ibool		was_declared_inside_innodb;
-	ib_int64_t	start_time			= 0;
-	ib_int64_t	finish_time;
-	ulint		sec;
-	ulint		ms;
 	ulong		lock_wait_timeout;
+	blocking_trx_info blocking[MAX_BLOCKING_TRX_IN_REPORT];
+	size_t blocking_count = 0;
 
 	trx = thr_get_trx(thr);
 
@@ -272,29 +327,31 @@ lock_wait_suspend_thread(
 
 	slot = lock_wait_table_reserve_slot(thr, lock_wait_timeout);
 
-	if (thr->lock_state == QUE_THR_LOCK_ROW) {
-		srv_stats.n_lock_wait_count.inc();
-		srv_stats.n_lock_wait_current_count.inc();
-
-		if (ut_usectime(&sec, &ms) == -1) {
-			start_time = -1;
-		} else {
-			start_time = (ib_int64_t) sec * 1000000 + ms;
-		}
-	}
-
 	lock_wait_mutex_exit();
 	trx_mutex_exit(trx);
 
-	ulint	lock_type = ULINT_UNDEFINED;
+	ulonglong start_time = 0;
 
-	lock_mutex_enter();
-
-	if (const lock_t* wait_lock = trx->lock.wait_lock) {
-		lock_type = lock_get_type_low(wait_lock);
+	if (thr->lock_state == QUE_THR_LOCK_ROW) {
+		srv_stats.n_lock_wait_count.inc();
+		srv_stats.n_lock_wait_current_count.inc();
+		start_time = my_interval_timer();
 	}
 
-	lock_mutex_exit();
+	ulint	lock_type = ULINT_UNDEFINED;
+
+	/* The wait_lock can be cleared by another thread when the
+	lock is released. But the wait can only be initiated by the
+	current thread which owns the transaction. Only acquire the
+	mutex if the wait_lock is still active. */
+	if (const lock_t* wait_lock = trx->lock.wait_lock) {
+		lock_mutex_enter();
+		wait_lock = trx->lock.wait_lock;
+		if (wait_lock) {
+			lock_type = lock_get_type_low(wait_lock);
+		}
+		lock_mutex_exit();
+	}
 
 	had_dict_lock = trx->dict_operation_lock_mode;
 
@@ -358,53 +415,48 @@ lock_wait_suspend_thread(
 		row_mysql_freeze_data_dictionary(trx);
 	}
 
-	wait_time = ut_difftime(ut_time(), slot->suspend_time);
+	double wait_time = difftime(time(NULL), slot->suspend_time);
 
 	/* Release the slot for others to use */
 
 	lock_wait_table_release_slot(slot);
 
 	if (thr->lock_state == QUE_THR_LOCK_ROW) {
-		ulint	diff_time;
-
-		if (ut_usectime(&sec, &ms) == -1) {
-			finish_time = -1;
-		} else {
-			finish_time = (ib_int64_t) sec * 1000000 + ms;
-		}
-
-		diff_time = (finish_time > start_time) ?
-			    (ulint) (finish_time - start_time) : 0;
-
 		srv_stats.n_lock_wait_current_count.dec();
-		srv_stats.n_lock_wait_time.add(diff_time);
 
-		/* Only update the variable if we successfully
-		retrieved the start and finish times. See Bug#36819. */
-		if (diff_time > lock_sys->n_lock_max_wait_time
-		    && start_time != -1
-		    && finish_time != -1) {
+		const ulonglong finish_time = my_interval_timer();
+		ulint diff_time;
 
-			lock_sys->n_lock_max_wait_time = diff_time;
+		if (finish_time < start_time) {
+			diff_time = 0;
+		} else {
+			diff_time = ulint((finish_time - start_time) / 1000);
+			srv_stats.n_lock_wait_time.add(diff_time);
+			/* Only update the variable if we successfully
+			retrieved the start and finish times. See Bug#36819. */
+			if (diff_time > lock_sys->n_lock_max_wait_time) {
+				lock_sys->n_lock_max_wait_time = diff_time;
+			}
 		}
 
 		/* Record the lock wait time for this thread */
 		thd_set_lock_wait_time(trx->mysql_thd, diff_time);
-
 	}
 
 	if (lock_wait_timeout < 100000000
 	    && wait_time > (double) lock_wait_timeout) {
 #ifdef WITH_WSREP
-                if (!wsrep_on(trx->mysql_thd) ||
-                    (!wsrep_is_BF_lock_timeout(trx) &&
-                     trx->error_state != DB_DEADLOCK)) {
+		if (!trx->is_wsrep() ||
+		    (!wsrep_is_BF_lock_timeout(trx) &&
+		     trx->error_state != DB_DEADLOCK)) {
 #endif /* WITH_WSREP */
 
-		trx->error_state = DB_LOCK_WAIT_TIMEOUT;
+			trx->error_state = DB_LOCK_WAIT_TIMEOUT;
+			if (srv_print_lock_wait_timeout_info)
+				print_lock_wait_timeout(*trx, blocking, blocking_count);
 
 #ifdef WITH_WSREP
-                }
+		}
 #endif /* WITH_WSREP */
 		MONITOR_INC(MONITOR_TIMEOUT);
 	}
@@ -456,19 +508,12 @@ lock_wait_check_and_cancel(
 	const srv_slot_t*	slot)	/*!< in: slot reserved by a user
 					thread when the wait started */
 {
-	trx_t*		trx;
-	double		wait_time;
-	ib_time_t	suspend_time = slot->suspend_time;
-
 	ut_ad(lock_wait_mutex_own());
-
 	ut_ad(slot->in_use);
-
 	ut_ad(slot->suspended);
 
-	wait_time = ut_difftime(ut_time(), suspend_time);
-
-	trx = thr_get_trx(slot->thr);
+	double wait_time = difftime(time(NULL), slot->suspend_time);
+	trx_t* trx = thr_get_trx(slot->thr);
 
 	if (trx_is_interrupted(trx)
 	    || (slot->wait_timeout < 100000000
@@ -502,7 +547,6 @@ lock_wait_check_and_cancel(
 
 		trx_mutex_exit(trx);
 	}
-
 }
 
 /*********************************************************************//**
@@ -510,11 +554,7 @@ A thread which wakes up threads whose lock wait may have lasted too long.
 @return	a dummy parameter */
 extern "C" UNIV_INTERN
 os_thread_ret_t
-DECLARE_THREAD(lock_wait_timeout_thread)(
-/*=====================================*/
-	void*	arg __attribute__((unused)))
-			/* in: a dummy parameter required by
-			os_thread_create */
+DECLARE_THREAD(lock_wait_timeout_thread)(void*)
 {
 	ib_int64_t	sig_count = 0;
 	os_event_t	event = lock_sys->timeout_event;
@@ -524,8 +564,6 @@ DECLARE_THREAD(lock_wait_timeout_thread)(
 #ifdef UNIV_PFS_THREAD
 	pfs_register_thread(srv_lock_timeout_thread_key);
 #endif /* UNIV_PFS_THREAD */
-
-	lock_sys->timeout_thread_active = true;
 
 	do {
 		srv_slot_t*	slot;

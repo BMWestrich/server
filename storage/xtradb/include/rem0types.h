@@ -12,7 +12,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -70,5 +70,8 @@ enum rec_format_enum {
 	REC_FORMAT_DYNAMIC	= 3	/*!< DYNAMIC row format */
 };
 typedef enum rec_format_enum rec_format_t;
+
+/** Compressed field header size in bytes */
+#define ZIP_COLUMN_HEADER_LENGTH	2
 
 #endif

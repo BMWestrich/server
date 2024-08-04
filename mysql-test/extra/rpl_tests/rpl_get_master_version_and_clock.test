@@ -41,8 +41,8 @@ if (!$debug_sync_action)
 
 # Restart slave
 --source include/stop_slave.inc
-
-eval SET @@global.debug_dbug= "+d,$dbug_sync_point";
+SET @old_dbug = @@global.debug_dbug;
+eval SET @@global.debug_dbug= "d,$dbug_sync_point";
 
 --source include/start_slave.inc
 --echo slave is going to hang in get_master_version_and_clock
@@ -61,9 +61,8 @@ connection slave;
 # '2003' CR_CONN_HOST_ERROR 
 # '2002' CR_CONNECTION_ERROR 
 # '2006' CR_SERVER_GONE_ERROR 
-# '1040' ER_CON_COUNT_ERROR 
 # '1053' ER_SERVER_SHUTDOWN
-let $slave_io_errno= 1040, 1053, 2002, 2003, 2006, 2013;
+let $slave_io_errno= 1053, 2002, 2003, 2006, 2013;
 --let $slave_io_error_is_nonfatal= 1
 source include/wait_for_slave_io_error.inc;
 
@@ -71,7 +70,7 @@ source include/wait_for_slave_io_error.inc;
 # now to avoid restarting IO-thread to re-enter it.
 # There will be a new IO thread forked out with its @@session.debug
 # unset.
-eval set @@global.debug_dbug= "-d,$dbug_sync_point";
+set @@global.debug_dbug= @old_dbug;
 
 --let $rpl_server_number= 1
 --source include/rpl_start_server.inc

@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /**
   @file
@@ -28,10 +28,8 @@
   There is no reference counting and no unloading either.
 */
 
-#if _MSC_VER
 /* Silence warnings about variable 'unused' being used. */
 #define FORCE_INIT_OF_VARS 1
-#endif
 
 #include <my_global.h>
 #include "mysql.h"
@@ -235,7 +233,7 @@ static void load_env_plugins(MYSQL *mysql)
   This function must be called before any other client plugin function.
 
   @retval 0    successful
-  @retval != 0 error occured
+  @retval != 0 error occurred
 */
 int mysql_client_plugin_init()
 {
@@ -362,7 +360,13 @@ mysql_load_plugin_v(MYSQL *mysql, const char *name, int type,
            mysql->options.extension && mysql->options.extension->plugin_dir ?
            mysql->options.extension->plugin_dir : PLUGINDIR, "/",
            name, SO_EXT, NullS);
-   
+
+  if (strpbrk(name, "()[]!@#$%^&/*;.,'?\\"))
+  {
+    errmsg= "invalid plugin name";
+    goto err;
+  }
+
   DBUG_PRINT ("info", ("dlopeninig %s", dlpath));
   /* Open new dll handle */
   if (!(dlhandle= dlopen(dlpath, RTLD_NOW)))
@@ -375,8 +379,7 @@ mysql_load_plugin_v(MYSQL *mysql, const char *name, int type,
   if (!(sym= dlsym(dlhandle, plugin_declarations_sym)))
   {
     errmsg= "not a plugin";
-    (void)dlclose(dlhandle);
-    goto err;
+    goto errc;
   }
 
   plugin= (struct st_mysql_client_plugin*)sym;
@@ -384,19 +387,19 @@ mysql_load_plugin_v(MYSQL *mysql, const char *name, int type,
   if (type >=0 && type != plugin->type)
   {
     errmsg= "type mismatch";
-    goto err;
+    goto errc;
   }
 
   if (strcmp(name, plugin->name))
   {
     errmsg= "name mismatch";
-    goto err;
+    goto errc;
   }
 
   if (type < 0 && find_plugin(name, plugin->type))
   {
     errmsg= "it is already loaded";
-    goto err;
+    goto errc;
   }
 
   plugin= add_plugin(mysql, plugin, dlhandle, argc, args);
@@ -406,6 +409,8 @@ mysql_load_plugin_v(MYSQL *mysql, const char *name, int type,
   DBUG_PRINT ("leave", ("plugin loaded ok"));
   DBUG_RETURN (plugin);
 
+errc:
+  dlclose(dlhandle);
 err:
   mysql_mutex_unlock(&LOCK_load_client_plugin);
   DBUG_PRINT ("leave", ("plugin load error : %s", errmsg));

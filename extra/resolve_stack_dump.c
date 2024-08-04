@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /* Resolve numeric stack dump produced by mysqld 3.23.30 and later
    versions into symbolic names. By Sasha Pachev <sasha@mysql.com>
@@ -53,7 +53,7 @@ static struct my_option my_long_options[] =
    0, 0, 0, GET_NO_ARG, NO_ARG, 0, 0, 0, 0, 0, 0},
   {"version", 'V', "Output version information and exit.",
    0, 0, 0, GET_NO_ARG, NO_ARG, 0, 0, 0, 0, 0, 0},
-  {"symbols-file", 's', "Use specified symbols file.", &sym_fname,
+  {"symbols-file", 's', "Use specified symbols file", &sym_fname,
    &sym_fname, 0, GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
   {"numeric-dump-file", 'n', "Read the dump from specified file.",
    &dump_fname, &dump_fname, 0, GET_STR, REQUIRED_ARG,
@@ -63,7 +63,7 @@ static struct my_option my_long_options[] =
 
 
 static void verify_sort();
-
+static void clean_up();
 
 static void print_version(void)
 {
@@ -97,7 +97,16 @@ static void die(const char* fmt, ...)
   vfprintf(stderr, fmt, args);
   fprintf(stderr, "\n");
   va_end(args);
+  clean_up();
+  my_end(0);
   exit(1);
+}
+
+void local_exit(int error)
+{
+  clean_up();
+  my_end(0);
+  exit(error);
 }
 
 
@@ -108,10 +117,12 @@ get_one_option(int optid, const struct my_option *opt __attribute__((unused)),
   switch(optid) {
   case 'V':
     print_version();
-    exit(0);
+    local_exit(0);
+    break;
   case '?':
     usage();
-    exit(0);
+    local_exit(0);
+    break;
   }
   return 0;
 }
@@ -122,7 +133,7 @@ static int parse_args(int argc, char **argv)
   int ho_error;
 
   if ((ho_error=handle_options(&argc, &argv, my_long_options, get_one_option)))
-    exit(ho_error);
+    local_exit(ho_error);
 
   /*
     The following code is to make the command compatible with the old
@@ -143,13 +154,13 @@ static int parse_args(int argc, char **argv)
     else
     {
       usage();
-      exit(1);
+      local_exit(1);
     }
   }
   else if (argc != 0 || !sym_fname)
   {
     usage();
-    exit(1);
+    local_exit(1);
   }
   return 0;
 }
@@ -192,7 +203,7 @@ static my_long_addr_t read_addr(char** buf)
   while((c = hex_val(*p++)) != HEX_INVALID)
       addr = (addr << 4) + c;
 
-  *buf = p; 
+  *buf= p-1;
   return addr;
 }
 
@@ -203,6 +214,7 @@ static int init_sym_entry(SYM_ENTRY* se, char* buf)
 
   if (!se->addr)
     return -1;
+  buf++;
   while (my_isspace(&my_charset_latin1,*buf++))
     /* empty */;
 
@@ -241,6 +253,10 @@ static void init_sym_table()
 static void clean_up()
 {
   delete_dynamic(&sym_table);
+  if (fp_dump && fp_dump != stdin)
+    my_fclose(fp_dump, MYF(0));
+  if (fp_sym)
+    my_fclose(fp_sym, MYF(0));
 }
 
 static void verify_sort()
@@ -281,32 +297,46 @@ static SYM_ENTRY* resolve_addr(uchar* addr, SYM_ENTRY* se)
 }
 
 
+/*
+  Resolve anything that starts with [0x or (+0x or 0x
+  Skip '_end' as this is an indication of a wrong symbol (stack?)
+*/
+
 static void do_resolve()
 {
   char buf[1024], *p;
   while (fgets(buf, sizeof(buf), fp_dump))
   {
-    /* skip bracket */
-    p= (p= strchr(buf, '[')) ? p+1 : buf;
-    /* skip space */
-    while (my_isspace(&my_charset_latin1,*p))
-      ++p;
-
-    if (*p++ == '0' && *p++ == 'x')
+    for (p= buf ; *p ; p++)
     {
-      SYM_ENTRY se ;
-      uchar* addr = (uchar*)read_addr(&p);
-      if (resolve_addr(addr, &se))
-	fprintf(fp_out, "%p %s + %d\n", addr, se.symbol,
-		(int) (addr - se.addr));
+      int found= 0;
+      if (p[0] == '[' && p[1] == '0' && p[2] == 'x')
+        found= 3;
+      if (p[0] == '(' && p[1] == '+' && p[2] == '0' && p[3] == 'x')
+        found= 4;
+      if (p[0] == '0' && p[1] == 'x')
+        found= 2;
+
+      if (found)
+      {
+        SYM_ENTRY se ;
+        uchar *addr;
+        char *tmp= p + found;
+        addr= (uchar*)read_addr(&tmp);
+        if (resolve_addr(addr, &se) && strcmp(se.symbol, "_end"))
+        {
+          found-= 2;               /* Don't print 0x as it's added by %p */
+          while (found--)
+            fputc(*p++, stdout);
+          fprintf(fp_out, "%p %s + %d", addr,
+                  se.symbol, (int) (addr - se.addr));
+          p= tmp-1;
+        }
+        else
+          fputc(*p, stdout);
+      }
       else
-	fprintf(fp_out, "%p (?)\n", addr);
-
-    }
-    else
-    {
-      fputs(buf, fp_out);
-      continue;
+        fputc(*p, stdout);
     }
   }
 }
@@ -320,5 +350,6 @@ int main(int argc, char** argv)
   init_sym_table();
   do_resolve();
   clean_up();
+  my_end(0);
   return 0;
 }

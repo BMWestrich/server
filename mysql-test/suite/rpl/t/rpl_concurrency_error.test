@@ -17,9 +17,9 @@
 # log, the error is ignored and only the non-transactional tables are changed.
 ###############################################################################
 
---source include/master-slave.inc
 --source include/have_innodb.inc
 --source include/have_binlog_format_statement.inc
+--source include/master-slave.inc
 
 call mtr.add_suppression("Unsafe statement written to the binary log using statement format since BINLOG_FORMAT = STATEMENT");
 
@@ -75,7 +75,7 @@ while ($type)
     SET AUTOCOMMIT = 0;
   }
   --error ER_LOCK_WAIT_TIMEOUT
-  eval UPDATE t SET f = 'magenta $type' WHERE f = 'red';
+  eval UPDATE IGNORE t SET f = 'magenta $type' WHERE f = 'red';
   eval INSERT INTO t VALUES (5 + ($type * 10),"brown");
   INSERT INTO n VALUES (now(),"brown");
   
@@ -110,7 +110,7 @@ while ($type)
     SET AUTOCOMMIT = 0;
   }
   --error ER_LOCK_WAIT_TIMEOUT
-  eval UPDATE t SET f = 'dark blue $type' WHERE f = 'red';
+  eval UPDATE IGNORE t SET f = 'dark blue $type' WHERE f = 'red';
   eval INSERT INTO t VALUES (6 + ($type * 10),"brown");
   INSERT INTO n VALUES (now(),"brown");
   

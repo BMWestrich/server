@@ -13,7 +13,7 @@
 
   You should have received a copy of the GNU Lesser General Public
   License along with this library; if not, write to the Free Software
-  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA
 */
 
 #include "../grn_ctx_impl.h"
@@ -189,6 +189,14 @@ grn_mrb_error_init(grn_ctx *ctx)
   mrb_define_class_under(mrb, module, "CommandError",
                          groonga_error_class);
   mrb_define_class_under(mrb, module, "PluginError",
+                         groonga_error_class);
+  mrb_define_class_under(mrb, module, "ScorerError",
+                         groonga_error_class);
+  mrb_define_class_under(mrb, module, "Cancel",
+                         groonga_error_class);
+  mrb_define_class_under(mrb, module, "WindowFunctionError",
+                         groonga_error_class);
+  mrb_define_class_under(mrb, module, "ZstdError",
                          groonga_error_class);
 }
 #endif

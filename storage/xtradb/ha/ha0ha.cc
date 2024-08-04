@@ -12,7 +12,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -155,11 +155,15 @@ ha_clear(
 
 	switch (table->type) {
 	case HASH_TABLE_SYNC_MUTEX:
+		for (ulint i = 0; i < table->n_sync_obj; i++)
+			mutex_free(table->sync_obj.mutexes + i);
 		mem_free(table->sync_obj.mutexes);
 		table->sync_obj.mutexes = NULL;
 		break;
 
 	case HASH_TABLE_SYNC_RW_LOCK:
+		for (ulint i = 0; i < table->n_sync_obj; i++)
+			rw_lock_free(table->sync_obj.rw_locks + i);
 		mem_free(table->sync_obj.rw_locks);
 		table->sync_obj.rw_locks = NULL;
 		break;

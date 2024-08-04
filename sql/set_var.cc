@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /* variable declarations are in sys_vars.cc now !!! */
 
@@ -64,7 +64,7 @@ int sys_var_init()
   /* Must be already initialized. */
   DBUG_ASSERT(system_charset_info != NULL);
 
-  if (my_hash_init(&system_variable_hash, system_charset_info, 100, 0,
+  if (my_hash_init(&system_variable_hash, system_charset_info, 700, 0,
                    0, (my_hash_get_key) get_sys_var_length, 0, HASH_UNIQUE))
     goto error;
 
@@ -76,6 +76,11 @@ int sys_var_init()
 error:
   fprintf(stderr, "failed to initialize System variables");
   DBUG_RETURN(1);
+}
+
+uint sys_var_elements()
+{
+  return system_variable_hash.records;
 }
 
 int sys_var_add_options(DYNAMIC_ARRAY *long_options, int parse_flags)
@@ -109,6 +114,9 @@ void sys_var_end()
 
   DBUG_VOID_RETURN;
 }
+
+
+static bool static_test_load= TRUE;
 
 /**
   sys_var constructor
@@ -179,6 +187,8 @@ sys_var::sys_var(sys_var_chain *chain, const char *name_arg,
   else
     chain->first= this;
   chain->last= this;
+
+  test_load= &static_test_load;
 }
 
 bool sys_var::update(THD *thd, set_var *var)
@@ -199,8 +209,28 @@ bool sys_var::update(THD *thd, set_var *var)
       (on_update && on_update(this, thd, OPT_GLOBAL));
   }
   else
-    return session_update(thd, var) ||
+  {
+    bool ret= session_update(thd, var) ||
       (on_update && on_update(this, thd, OPT_SESSION));
+
+    /*
+      Make sure we don't session-track variables that are not actually
+      part of the session. tx_isolation and and tx_read_only for example
+      exist as GLOBAL, SESSION, and one-shot ("for next transaction only").
+    */
+    if ((var->type == OPT_SESSION) && (!ret))
+    {
+      SESSION_TRACKER_CHANGED(thd, SESSION_SYSVARS_TRACKER,
+                              (LEX_CSTRING*)var->var);
+      /*
+        Here MySQL sends variable name to avoid reporting change of
+        the tracker itself, but we decided that it is not needed
+      */
+      SESSION_TRACKER_CHANGED(thd, SESSION_STATE_CHANGE_TRACKER, NULL);
+    }
+
+    return ret;
+  }
 }
 
 uchar *sys_var::session_value_ptr(THD *thd, const LEX_STRING *base)
@@ -371,7 +401,7 @@ double sys_var::val_real(bool *is_null,
   switch (show_type())
   {
     case_get_string_as_lex_string;
-    case_for_integers(return val);
+    case_for_integers(return (double)val);
     case_for_double(return val);
     case SHOW_MY_BOOL:  return *(my_bool*)value;
     default:            
@@ -422,6 +452,22 @@ void sys_var::do_deprecated_warning(THD *thd)
 
   @retval         true on error, false otherwise (warning or ok)
  */
+
+
+bool throw_bounds_warning(THD *thd, const char *name,const char *v)
+{
+  if (thd->variables.sql_mode & MODE_STRICT_ALL_TABLES)
+  {
+    my_error(ER_WRONG_VALUE_FOR_VAR, MYF(0), name, v);
+    return true;
+  }
+  push_warning_printf(thd, Sql_condition::WARN_LEVEL_WARN,
+                      ER_TRUNCATED_WRONG_VALUE,
+                      ER_THD(thd, ER_TRUNCATED_WRONG_VALUE), name, v);
+  return false;
+}
+
+
 bool throw_bounds_warning(THD *thd, const char *name,
                           bool fixed, bool is_unsigned, longlong v)
 {
@@ -434,14 +480,12 @@ bool throw_bounds_warning(THD *thd, const char *name,
     else
       llstr(v, buf);
 
-    if (thd->is_strict_mode())
+    if (thd->variables.sql_mode & MODE_STRICT_ALL_TABLES)
     {
       my_error(ER_WRONG_VALUE_FOR_VAR, MYF(0), name, buf);
       return true;
     }
-    push_warning_printf(thd, Sql_condition::WARN_LEVEL_WARN,
-                        ER_TRUNCATED_WRONG_VALUE,
-                        ER_THD(thd, ER_TRUNCATED_WRONG_VALUE), name, buf);
+    return throw_bounds_warning(thd, name, buf);
   }
   return false;
 }
@@ -454,14 +498,12 @@ bool throw_bounds_warning(THD *thd, const char *name, bool fixed, double v)
 
     my_gcvt(v, MY_GCVT_ARG_DOUBLE, sizeof(buf) - 1, buf, NULL);
 
-    if (thd->is_strict_mode())
+    if (thd->variables.sql_mode & MODE_STRICT_ALL_TABLES)
     {
       my_error(ER_WRONG_VALUE_FOR_VAR, MYF(0), name, buf);
       return true;
     }
-    push_warning_printf(thd, Sql_condition::WARN_LEVEL_WARN,
-                        ER_TRUNCATED_WRONG_VALUE,
-                        ER_THD(thd, ER_TRUNCATED_WRONG_VALUE), name, buf);
+    return throw_bounds_warning(thd, name, buf);
   }
   return false;
 }
@@ -565,10 +607,10 @@ int mysql_del_sys_var_chain(sys_var *first)
 {
   int result= 0;
 
-  mysql_rwlock_wrlock(&LOCK_system_variables_hash);
+  mysql_prlock_wrlock(&LOCK_system_variables_hash);
   for (sys_var *var= first; var; var= var->next)
     result|= my_hash_delete(&system_variable_hash, (uchar*) var);
-  mysql_rwlock_unlock(&LOCK_system_variables_hash);
+  mysql_prlock_unlock(&LOCK_system_variables_hash);
 
   return result;
 }
@@ -739,7 +781,7 @@ int set_var::check(THD *thd)
   if ((!value->fixed &&
        value->fix_fields(thd, &value)) || value->check_cols(1))
     return -1;
-  if (var->check_update_type(value->result_type()))
+  if (var->check_update_type(value))
   {
     my_error(ER_WRONG_TYPE_FOR_VAR, MYF(0), var->name.str);
     return -1;
@@ -862,6 +904,8 @@ int set_var_user::update(THD *thd)
                MYF(0));
     return -1;
   }
+
+  SESSION_TRACKER_CHANGED(thd, SESSION_STATE_CHANGE_TRACKER, NULL);
   return 0;
 }
 
@@ -909,7 +953,11 @@ int set_var_role::check(THD *thd)
 int set_var_role::update(THD *thd)
 {
 #ifndef NO_EMBEDDED_ACCESS_CHECKS
-  return acl_setrole(thd, role.str, access);
+  int res= acl_setrole(thd, role.str, access);
+  if (!res)
+    thd->session_tracker.mark_as_changed(thd, SESSION_STATE_CHANGE_TRACKER,
+                                         NULL);
+  return res;
 #else
   return 0;
 #endif
@@ -923,8 +971,17 @@ int set_var_default_role::check(THD *thd)
 {
 #ifndef NO_EMBEDDED_ACCESS_CHECKS
   real_user= get_current_user(thd, user);
-  int status= acl_check_set_default_role(thd, real_user->host.str, real_user->user.str);
-  return status;
+  real_role= role.str;
+  if (role.str == current_role.str)
+  {
+    if (!thd->security_ctx->priv_role[0])
+      real_role= "NONE";
+    else
+      real_role= thd->security_ctx->priv_role;
+  }
+
+  return acl_check_set_default_role(thd, real_user->host.str,
+                                    real_user->user.str, real_role);
 #else
   return 0;
 #endif
@@ -935,7 +992,8 @@ int set_var_default_role::update(THD *thd)
 #ifndef NO_EMBEDDED_ACCESS_CHECKS
   Reprepare_observer *save_reprepare_observer= thd->m_reprepare_observer;
   thd->m_reprepare_observer= 0;
-  int res= acl_set_default_role(thd, real_user->host.str, real_user->user.str, role.str);
+  int res= acl_set_default_role(thd, real_user->host.str, real_user->user.str,
+                                real_role);
   thd->m_reprepare_observer= save_reprepare_observer;
   return res;
 #else
@@ -961,10 +1019,23 @@ int set_var_collation_client::check(THD *thd)
 
 int set_var_collation_client::update(THD *thd)
 {
-  thd->variables.character_set_client= character_set_client;
-  thd->variables.character_set_results= character_set_results;
-  thd->variables.collation_connection= collation_connection;
-  thd->update_charset();
+  thd->update_charset(character_set_client, collation_connection,
+                      character_set_results);
+
+  /* Mark client collation variables as changed */
+#ifndef EMBEDDED_LIBRARY
+  if (thd->session_tracker.get_tracker(SESSION_SYSVARS_TRACKER)->is_enabled())
+  {
+    thd->session_tracker.get_tracker(SESSION_SYSVARS_TRACKER)->
+      mark_as_changed(thd, (LEX_CSTRING*)Sys_character_set_client_ptr);
+    thd->session_tracker.get_tracker(SESSION_SYSVARS_TRACKER)->
+      mark_as_changed(thd, (LEX_CSTRING*)Sys_character_set_results_ptr);
+    thd->session_tracker.get_tracker(SESSION_SYSVARS_TRACKER)->
+      mark_as_changed(thd, (LEX_CSTRING*)Sys_character_set_connection_ptr);
+  }
+  thd->session_tracker.mark_as_changed(thd, SESSION_STATE_CHANGE_TRACKER, NULL);
+#endif //EMBEDDED_LIBRARY
+
   thd->protocol_text.init(thd);
   thd->protocol_binary.init(thd);
   return 0;
@@ -1006,7 +1077,7 @@ int fill_sysvars(THD *thd, TABLE_LIST *tables, COND *cond)
 
   cond= make_cond_for_info_schema(thd, cond, tables);
   thd->count_cuted_fields= CHECK_FIELD_WARN;
-  mysql_rwlock_rdlock(&LOCK_system_variables_hash);
+  mysql_prlock_rdlock(&LOCK_system_variables_hash);
 
   for (uint i= 0; i < system_variable_hash.records; i++)
   {
@@ -1168,7 +1239,7 @@ int fill_sysvars(THD *thd, TABLE_LIST *tables, COND *cond)
   }
   res= 0;
 end:
-  mysql_rwlock_unlock(&LOCK_system_variables_hash);
+  mysql_prlock_unlock(&LOCK_system_variables_hash);
   thd->count_cuted_fields= save_count_cuted_fields;
   return res;
 }

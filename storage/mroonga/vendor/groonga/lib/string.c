@@ -13,7 +13,7 @@
 
   You should have received a copy of the GNU Lesser General Public
   License along with this library; if not, write to the Free Software
-  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA
 */
 
 #include "grn.h"
@@ -245,6 +245,9 @@ grn_string_get_normalized(grn_ctx *ctx, grn_obj *string,
     if (n_characters) { *n_characters = string_->n_characters; }
     rc = GRN_SUCCESS;
   } else {
+    if (normalized) { *normalized = NULL; }
+    if (length_in_bytes) { *length_in_bytes = 0; }
+    if (n_characters) { *n_characters = 0; }
     rc = GRN_INVALID_ARGUMENT;
   }
   GRN_API_RETURN(rc);

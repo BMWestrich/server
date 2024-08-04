@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA */
 #ifdef USE_PRAGMA_IMPLEMENTATION
 #pragma implementation                         /* gcc class implementation */
 #endif
@@ -211,7 +211,7 @@ void Server_side_cursor::operator delete(void *ptr, size_t size)
   MEM_ROOT own_root= *cursor->mem_root;
 
   DBUG_ENTER("Server_side_cursor::operator delete");
-  TRASH(ptr, size);
+  TRASH_FREE(ptr, size);
   /*
     If this cursor has never been opened mem_root is empty. Otherwise
     mem_root points to the memory the cursor object was allocated in.
@@ -433,7 +433,7 @@ void Materialized_cursor::on_table_fill_finished()
 bool Select_materialize::send_result_set_metadata(List<Item> &list, uint flags)
 {
   DBUG_ASSERT(table == 0);
-  if (create_result_table(unit->thd, unit->get_unit_column_types(),
+  if (create_result_table(unit->thd, unit->get_column_types(true),
                           FALSE,
                           thd->variables.option_bits | TMP_TABLE_ALL_COLUMNS,
                           "", FALSE, TRUE, TRUE))

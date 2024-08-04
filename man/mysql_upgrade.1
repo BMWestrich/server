@@ -1,6 +1,6 @@
 '\" t
 .\"
-.TH "\FBMYSQL_UPGRADE\FR" "1" "14/12/2015" "MariaDB 10\&.1" "MariaDB Database System"
+.TH "\FBMYSQL_UPGRADE\FR" "1" "20 July 2020" "MariaDB 10\&.2" "MariaDB Database System"
 .\" -----------------------------------------------------------------
 .\" * set default formatting
 .\" -----------------------------------------------------------------
@@ -165,6 +165,8 @@ in the data directory\&. This is used to quickly check whether all tables have b
 \fB\-\-force\fR
 option\&.
 .PP
+For this reason, \fBmysql_upgrade\fR needs to be run as a user with write access to the data directory\&.
+.PP
 If you install MariaDB from RPM packages on Linux, you must install the server and client RPMs\&.
 \fBmysql_upgrade\fR
 is included in the server RPM but requires the client RPM because the latter includes
@@ -227,6 +229,21 @@ Old option accepted for backward compatibility but ignored\&.
 \fB\-\-character\-sets\-dir=\fR\fB\fIpath\fR\fR
 .sp
 Old option accepted for backward compatibility but ignored\&.
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+.\" mysql_upgrade: check-if-upgrade-is-needed option
+.\" check-if-upgrade-is-needed option: mysql_upgrade
+\fB\-\-check\-if\-upgrade\-is\-needed\fR
+.sp
+Exit with a status code indicating if an upgrade is needed\&. Returns 0 if upgrade needed or current version couldn't be determined, 1 when no action required\&.
 .RE
 .sp
 .RS 4
@@ -691,8 +708,7 @@ it was built/distributed. Defaults to on; use \fB\-\-skip\-version\-check\fR to 
 .sp
 Cause binary logging to be enabled while
 \fBmysql_upgrade\fR
-runs\&. This is the default behavior; to disable binary logging during the upgrade, use the inverse of this option (that is, start the program with
-\fB\-\-skip\-write\-binlog\fR)\&.
+runs\&.
 .RE
 .SH "COPYRIGHT"
 .br
@@ -703,7 +719,7 @@ This documentation is free software; you can redistribute it and/or modify it on
 .PP
 This documentation is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 .PP
-You should have received a copy of the GNU General Public License along with the program; if not, write to the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA or see http://www.gnu.org/licenses/.
+You should have received a copy of the GNU General Public License along with the program; if not, write to the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA or see http://www.gnu.org/licenses/.
 .sp
 .SH "SEE ALSO"
 For more information, please refer to the MariaDB Knowledge Base, available online at https://mariadb.com/kb/

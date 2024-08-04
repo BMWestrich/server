@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /* There may be prolems include all of theese. Try to test in
    configure with ones are needed? */
@@ -23,6 +23,7 @@
 #define _m_string_h
 
 #include "my_global.h"                          /* HAVE_* */
+#include "my_decimal_limits.h"
 
 #ifndef __USE_GNU
 #define __USE_GNU				/* We want to use stpcpy */
@@ -64,19 +65,12 @@
 extern "C" {
 #endif
 
-/*
-  my_str_malloc(), my_str_realloc() and my_str_free() are assigned to
-  implementations in strings/alloc.c, but can be overridden in
-  the calling program.
- */
-extern void *(*my_str_malloc)(size_t);
-extern void *(*my_str_realloc)(void *, size_t);
-extern void (*my_str_free)(void *);
-
+#ifdef DBUG_OFF
 #if defined(HAVE_STPCPY) && MY_GNUC_PREREQ(3, 4) && !defined(__INTEL_COMPILER)
 #define strmov(A,B) __builtin_stpcpy((A),(B))
 #elif defined(HAVE_STPCPY)
 #define strmov(A,B) stpcpy((A),(B))
+#endif
 #endif
 
 /* Declared in int2str() */
@@ -138,14 +132,13 @@ size_t my_fcvt(double x, int precision, char *to, my_bool *error);
 size_t my_gcvt(double x, my_gcvt_arg_type type, int width, char *to,
                my_bool *error);
 
-#define NOT_FIXED_DEC 31
-
 /*
   The longest string my_fcvt can return is 311 + "precision" bytes.
-  Here we assume that we never cal my_fcvt() with precision >= NOT_FIXED_DEC
+  Here we assume that we never cal my_fcvt() with
+  precision >= DECIMAL_NOT_SPECIFIED
   (+ 1 byte for the terminating '\0').
 */
-#define FLOATING_POINT_BUFFER (311 + NOT_FIXED_DEC)
+#define FLOATING_POINT_BUFFER (311 + DECIMAL_NOT_SPECIFIED)
 
 /*
   We want to use the 'e' format in some cases even if we have enough space

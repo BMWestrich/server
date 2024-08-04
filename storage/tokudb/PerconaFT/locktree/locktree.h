@@ -32,18 +32,34 @@ Copyright (c) 2006, 2015, Percona and/or its affiliates. All rights reserved.
 
     You should have received a copy of the GNU Affero General Public License
     along with PerconaFT.  If not, see <http://www.gnu.org/licenses/>.
+
+----------------------------------------
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
 ======= */
 
 #ident "Copyright (c) 2006, 2015, Percona and/or its affiliates. All rights reserved."
 
 #pragma once
 
-#include <db.h>
-#include <toku_time.h>
-#include <toku_pthread.h>
+#include <atomic>
 
-#include <ft/ft-ops.h> // just for DICTIONARY_ID..
+#include <db.h>
+#include <toku_pthread.h>
+#include <toku_time.h>
+
 #include <ft/comparator.h>
+#include <ft/ft-ops.h>  // just for DICTIONARY_ID..
 
 #include <util/omt.h>
 
@@ -80,20 +96,33 @@ namespace toku {
     // Lock request state for some locktree
     struct lt_lock_request_info {
         omt<lock_request *> pending_lock_requests;
+        std::atomic_bool pending_is_empty;
         toku_mutex_t mutex;
         bool should_retry_lock_requests;
         lt_counters counters;
+        std::atomic_ullong retry_want;
+        unsigned long long retry_done;
+        toku_mutex_t retry_mutex;
+        toku_cond_t retry_cv;
+        bool running_retry;
+
+        void init(void);
+        void destroy(void);
     };
 
-    // The locktree manager manages a set of locktrees, one for each open dictionary.
-    // Locktrees are retrieved from the manager. When they are no longer needed, they 
-    // are be released by the user.
+    // The locktree manager manages a set of locktrees, one for each open
+    // dictionary. Locktrees are retrieved from the manager. When they are no
+    // longer needed, they are be released by the user.
     class locktree_manager {
-    public:
+       public:
         // param: create_cb, called just after a locktree is first created.
         //        destroy_cb, called just before a locktree is destroyed.
-        //        escalate_cb, called after a locktree is escalated (with extra param)
-        void create(lt_create_cb create_cb, lt_destroy_cb destroy_cb, lt_escalate_cb escalate_cb, void *extra);
+        //        escalate_cb, called after a locktree is escalated (with extra
+        //        param)
+        void create(lt_create_cb create_cb,
+                    lt_destroy_cb destroy_cb,
+                    lt_escalate_cb escalate_cb,
+                    void *extra);
 
         void destroy(void);
 
@@ -158,6 +187,8 @@ namespace toku {
 
         // Add time t to the escalator's wait time statistics
         void add_escalator_wait_time(uint64_t t);
+
+        void kill_waiter(void *extra);
 
     private:
         static const uint64_t DEFAULT_MAX_LOCK_MEMORY = 64L * 1024 * 1024;

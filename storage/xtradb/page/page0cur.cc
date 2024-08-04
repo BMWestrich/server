@@ -2,6 +2,7 @@
 
 Copyright (c) 1994, 2013, Oracle and/or its affiliates. All Rights Reserved.
 Copyright (c) 2012, Facebook Inc.
+Copyright (c) 2020, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -13,7 +14,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -48,7 +49,7 @@ number between 0 and 2^64-1 inclusive. The formula and the constants
 being used are:
 X[n+1] = (a * X[n] + c) mod m
 where:
-X[0] = ut_time_us(NULL)
+X[0] = my_interval_timer()
 a = 1103515245 (3^5 * 5 * 7 * 129749)
 c = 12345 (3 * 5 * 823)
 m = 18446744073709551616 (2^64)
@@ -61,12 +62,10 @@ page_cur_lcg_prng(void)
 {
 #define LCG_a	1103515245
 #define LCG_c	12345
-	static ib_uint64_t	lcg_current = 0;
-	static ibool		initialized = FALSE;
+	static uint64_t	lcg_current;
 
-	if (!initialized) {
-		lcg_current = (ib_uint64_t) ut_time_us(NULL);
-		initialized = TRUE;
+	if (!lcg_current) {
+		lcg_current = my_interval_timer();
 	}
 
 	/* no need to "% 2^64" explicitly because lcg_current is
@@ -903,7 +902,7 @@ page_cur_parse_insert_rec(
 		ut_print_buf(stderr, ptr2, 300);
 		putc('\n', stderr);
 
-		buf_page_print(page, 0, 0);
+		buf_page_print(page, 0);
 
 		ut_error;
 	}
@@ -941,6 +940,52 @@ page_cur_parse_insert_rec(
 	}
 
 	return(ptr + end_seg_len);
+}
+
+/************************************************************//**
+Allocates a block of memory from the heap of an index page.
+@return	pointer to start of allocated buffer, or NULL if allocation fails */
+static
+byte*
+page_mem_alloc_heap(
+/*================*/
+	page_t*		page,	/*!< in/out: index page */
+	page_zip_des_t*	page_zip,/*!< in/out: compressed page with enough
+				space available for inserting the record,
+				or NULL */
+	ulint		need,	/*!< in: total number of bytes needed */
+	ulint*		heap_no)/*!< out: this contains the heap number
+				of the allocated record
+				if allocation succeeds */
+{
+	byte*	block;
+	ulint	avl_space;
+
+	ut_ad(page && heap_no);
+
+	avl_space = page_get_max_insert_size(page, 1);
+
+	if (avl_space >= need) {
+		const ulint h = page_dir_get_n_heap(page);
+		if (UNIV_UNLIKELY(h >= 8191)) {
+			/* At the minimum record size of 5+2 bytes,
+			we can only reach this condition when using
+			innodb_page_size=64k. */
+			ut_ad(srv_page_size == 65536);
+			return(NULL);
+		}
+		*heap_no = h;
+
+		block = page_header_get_ptr(page, PAGE_HEAP_TOP);
+
+		page_header_set_ptr(page, page_zip, PAGE_HEAP_TOP,
+				    block + need);
+		page_dir_set_n_heap(page, page_zip, 1 + *heap_no);
+
+		return(block);
+	}
+
+	return(NULL);
 }
 
 /***********************************************************//**
@@ -1054,6 +1099,26 @@ use_heap:
 	/* 3. Create the record */
 	insert_rec = rec_copy(insert_buf, rec, offsets);
 	rec_offs_make_valid(insert_rec, index, offsets);
+
+	/* This is because assertion below is debug assertion */
+#ifdef UNIV_DEBUG
+	if (UNIV_UNLIKELY(current_rec == insert_rec)) {
+		ulint extra_len, data_len;
+		extra_len = rec_offs_extra_size(offsets);
+		data_len = rec_offs_data_size(offsets);
+
+		fprintf(stderr, "InnoDB: Error: current_rec == insert_rec "
+			" extra_len %lu data_len %lu insert_buf %p rec %p\n",
+			extra_len, data_len, insert_buf, rec);
+		fprintf(stderr, "InnoDB; Physical record: \n");
+		rec_print(stderr, rec, index);
+		fprintf(stderr, "InnoDB: Inserted record: \n");
+		rec_print(stderr, insert_rec, index);
+		fprintf(stderr, "InnoDB: Current record: \n");
+		rec_print(stderr, current_rec, index);
+		ut_a(current_rec != insert_rec);
+	}
+#endif /* UNIV_DEBUG */
 
 	/* 4. Insert the record in the linked list of records */
 	ut_ad(current_rec != insert_rec);

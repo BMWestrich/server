@@ -13,7 +13,7 @@
    You should have received a copy of the GNU General Public License
    along with this program; see the file COPYING. If not, write to the
    Free Software Foundation, Inc., 51 Franklin St, Fifth Floor, Boston,
-   MA  02110-1301  USA.
+   MA  02110-1335  USA.
 */
 
 
@@ -193,8 +193,9 @@ DWord() {}
                 "a" (a), "rm" (b) : "cc");
 
         #elif defined(__mips64)
-            __asm__("dmultu %2,%3" : "=d" (r.halfs_.high), "=l" (r.halfs_.low)
-                : "r" (a), "r" (b));
+            unsigned __int128 t = (unsigned __int128) a * b;
+            r.halfs_.high = t >> 64;
+            r.halfs_.low = (word) t;
 
         #elif defined(_M_IX86)
             // for testing

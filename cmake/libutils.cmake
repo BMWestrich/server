@@ -11,7 +11,7 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA 
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335  USA 
 
 
 # This file exports macros that emulate some functionality found  in GNU libtool
@@ -58,13 +58,13 @@ IF(WIN32 OR CYGWIN OR APPLE OR WITH_PIC OR DISABLE_SHARED OR NOT CMAKE_SHARED_LI
 ENDIF()
 
 INCLUDE(CMakeParseArguments)
-# CREATE_EXPORT_FILE (VAR target api_functions)
+# CREATE_EXPORTS_FILE (VAR target api_functions)
 # Internal macro, used to create source file for shared libraries that 
 # otherwise consists entirely of "convenience" libraries. On Windows, 
 # also exports API functions as dllexport. On unix, creates a dummy file 
 # that references all exports and this prevents linker from creating an 
 # empty library(there are unportable alternatives, --whole-archive)
-MACRO(CREATE_EXPORT_FILE VAR TARGET API_FUNCTIONS)
+MACRO(CREATE_EXPORTS_FILE VAR TARGET API_FUNCTIONS)
   IF(WIN32)
     SET(DUMMY ${CMAKE_CURRENT_BINARY_DIR}/${TARGET}_dummy.c)
     SET(EXPORTS ${CMAKE_CURRENT_BINARY_DIR}/${TARGET}_exports.def)
@@ -136,6 +136,10 @@ MACRO(MERGE_STATIC_LIBS TARGET OUTPUT_NAME LIBS_TO_MERGE)
   SET(SOURCE_FILE ${CMAKE_CURRENT_BINARY_DIR}/${TARGET}_depends.c)
   ADD_LIBRARY(${TARGET} STATIC ${SOURCE_FILE})
   SET_TARGET_PROPERTIES(${TARGET} PROPERTIES OUTPUT_NAME ${OUTPUT_NAME})
+  IF(NOT _SKIP_PIC)
+    SET_TARGET_PROPERTIES(${TARGET} PROPERTIES  COMPILE_FLAGS
+    "${CMAKE_SHARED_LIBRARY_C_FLAGS}")
+  ENDIF()
 
   SET(OSLIBS)
   FOREACH(LIB ${LIBS_TO_MERGE})
@@ -188,7 +192,7 @@ MACRO(MERGE_STATIC_LIBS TARGET OUTPUT_NAME LIBS_TO_MERGE)
       # binaries properly)
       ADD_CUSTOM_COMMAND(TARGET ${TARGET} POST_BUILD
         COMMAND rm ${TARGET_LOCATION}
-        COMMAND /usr/bin/libtool -static -o ${TARGET_LOCATION} 
+        COMMAND libtool -static -o ${TARGET_LOCATION} 
         ${STATIC_LIBS}
       )  
     ELSE()
@@ -241,11 +245,11 @@ MACRO(MERGE_LIBRARIES)
     # check for non-PIC libraries
     IF(NOT _SKIP_PIC)
       FOREACH(LIB ${LIBS})
-        GET_TARGET_PROPERTY(${LIB} TYPE LIBTYPE)
-        IF(LIBTYPE STREQUAL "STATIC_LIBRARY")
-          GET_TARGET_PROPERTY(LIB COMPILE_FLAGS LIB_COMPILE_FLAGS)
+        GET_TARGET_PROPERTY(LTYPE ${LIB} TYPE)
+        IF(LTYPE STREQUAL "STATIC_LIBRARY")
+          GET_TARGET_PROPERTY(LIB_COMPILE_FLAGS ${LIB} COMPILE_FLAGS)
           STRING(REPLACE "${CMAKE_SHARED_LIBRARY_C_FLAGS}" 
-          "<PIC_FLAG>" LIB_COMPILE_FLAGS ${LIB_COMPILE_FLAG})
+            "<PIC_FLAG>" LIB_COMPILE_FLAGS "${LIB_COMPILE_FLAGS}")
           IF(NOT LIB_COMPILE_FLAGS MATCHES "<PIC_FLAG>")
             MESSAGE(FATAL_ERROR 
             "Attempted to link non-PIC static library ${LIB} to shared library ${TARGET}\n"
@@ -255,7 +259,7 @@ MACRO(MERGE_LIBRARIES)
         ENDIF()
       ENDFOREACH()
     ENDIF()
-    CREATE_EXPORT_FILE(SRC ${TARGET} "${ARG_EXPORTS}")
+    CREATE_EXPORTS_FILE(SRC ${TARGET} "${ARG_EXPORTS}")
     IF(NOT ARG_NOINSTALL)
       ADD_VERSION_INFO(${TARGET} SHARED SRC)
     ENDIF()

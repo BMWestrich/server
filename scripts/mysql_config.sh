@@ -12,7 +12,7 @@
 # 
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA
 
 # This script reports various configuration settings that may be needed
 # when using the MariaDB client library.
@@ -113,6 +113,17 @@ if [ "$basedir" != "/usr" ]; then
   include="$include -I$pkgincludedir/.."
 fi
 cflags="$include @CFLAGS_FOR_CLIENTS@"
+
+mariadb_config="$basedir/bin/mariadb_config"
+if test -x "$basedir/bin/mariadb_config"; then
+  cflags=`"$mariadb_config" --cflags`
+  include=`"$mariadb_config" --include`
+  libs=`"$mariadb_config" --libs`
+  plugindir=`"$mariadb_config" --plugindir`
+  socket=`"$mariadb_config" --socket`
+  port=`"$mariadb_config" --port`
+  version=`"$mariadb_config" --version`
+fi
 
 usage () {
         cat <<EOF

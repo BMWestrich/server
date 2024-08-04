@@ -1,5 +1,6 @@
 /* -*- c-basic-offset: 2 -*- */
-/* Copyright(C) 2011 Brazil
+/*
+  Copyright(C) 2011-2016 Brazil
 
   This library is free software; you can redistribute it and/or
   modify it under the terms of the GNU Lesser General Public
@@ -12,11 +13,10 @@
 
   You should have received a copy of the GNU Lesser General Public
   License along with this library; if not, write to the Free Software
-  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA
 */
 
-#ifndef GRN_DAT_PREDICTIVE_CURSOR_HPP_
-#define GRN_DAT_PREDICTIVE_CURSOR_HPP_
+#pragma once
 
 #include "cursor.hpp"
 #include "vector.hpp"
@@ -82,5 +82,3 @@ class GRN_DAT_API PredictiveCursor : public Cursor {
 
 }  // namespace dat
 }  // namespace grn
-
-#endif  // GRN_DAT_PREDICTIVE_CURSOR_HPP_

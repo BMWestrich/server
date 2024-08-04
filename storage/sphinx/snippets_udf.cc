@@ -178,10 +178,10 @@ enum
 	SEARCHD_WARNING	= 3		///< general success, warning message and command-specific reply follow
 };
 
-#define SPHINXSE_DEFAULT_SCHEME		"sphinx"
-#define SPHINXSE_DEFAULT_HOST		"127.0.0.1"
+#define SPHINXSE_DEFAULT_SCHEME		(char*) "sphinx"
+#define SPHINXSE_DEFAULT_HOST		(char*) "127.0.0.1"
 #define SPHINXSE_DEFAULT_PORT		9312
-#define SPHINXSE_DEFAULT_INDEX		"*"
+#define SPHINXSE_DEFAULT_INDEX		(char*) "*"
 
 class CSphBuffer
 {
@@ -447,10 +447,10 @@ int CSphUrl::Connect()
 	uint uServerVersion;
 	uint uClientVersion = htonl ( SPHINX_SEARCHD_PROTO );
 	int iSocket = -1;
-	char * pError = NULL;
+	const char * pError = NULL;
 	do
 	{
-		iSocket = socket ( iDomain, SOCK_STREAM, 0 );
+		iSocket = (int)socket ( iDomain, SOCK_STREAM, 0 );
 		if ( iSocket==-1 )
 		{
 			pError = "Failed to create client socket";
@@ -642,7 +642,7 @@ struct CSphSnippets
 	}
 
 #define STRING CHECK_TYPE(STRING_RESULT)
-#define INT CHECK_TYPE(INT_RESULT); int iValue = *(long long *)pArgs->args[i]
+#define INT CHECK_TYPE(INT_RESULT); int iValue =(int)*(long long *)pArgs->args[i]
 
 my_bool sphinx_snippets_init ( UDF_INIT * pUDF, UDF_ARGS * pArgs, char * sMessage )
 {

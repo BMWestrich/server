@@ -436,7 +436,7 @@ CREATE TABLE t1 AS SELECT REGEXP_REPLACE('abc','b','x');
 SHOW CREATE TABLE t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `REGEXP_REPLACE('abc','b','x')` longtext CHARACTER SET utf8 NOT NULL
+  `REGEXP_REPLACE('abc','b','x')` longtext CHARACTER SET utf8 DEFAULT NULL
 ) ENGINE=MyISAM DEFAULT CHARSET=latin1
 DROP TABLE t1;
 EXPLAIN EXTENDED SELECT REGEXP_REPLACE('abc','b','x');
@@ -444,6 +444,7 @@ id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	No tables used
 Warnings:
 Note	1003	select regexp_replace('abc','b','x') AS `REGEXP_REPLACE('abc','b','x')`
+SET STATEMENT sql_mode = 'NO_ENGINE_SUBSTITUTION' FOR
 CREATE TABLE t1 AS SELECT REGEXP_REPLACE('abc','b','x')+0;
 Warnings:
 Warning	1292	Truncated incorrect DOUBLE value: 'axc'
@@ -738,7 +739,7 @@ CREATE TABLE t1 AS SELECT REGEXP_SUBSTR('abc','b');
 SHOW CREATE TABLE t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `REGEXP_SUBSTR('abc','b')` varchar(3) CHARACTER SET utf8 NOT NULL
+  `REGEXP_SUBSTR('abc','b')` varchar(3) CHARACTER SET utf8 DEFAULT NULL
 ) ENGINE=MyISAM DEFAULT CHARSET=latin1
 DROP TABLE t1;
 EXPLAIN EXTENDED SELECT REGEXP_SUBSTR('abc','b');
@@ -746,6 +747,7 @@ id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	No tables used
 Warnings:
 Note	1003	select regexp_substr('abc','b') AS `REGEXP_SUBSTR('abc','b')`
+SET STATEMENT sql_mode = 'NO_ENGINE_SUBSTITUTION' FOR
 CREATE TABLE t1 AS SELECT REGEXP_SUBSTR('abc','b')+0;
 Warnings:
 Warning	1292	Truncated incorrect DOUBLE value: 'b'
@@ -878,3 +880,51 @@ SET @regCheck= '\\xE0\\x01';
 SELECT CAST(0xE001 AS BINARY) REGEXP @regCheck;
 CAST(0xE001 AS BINARY) REGEXP @regCheck
 1
+# MDEV-12420: Testing recursion overflow
+SELECT 1 FROM dual WHERE ('Alpha,Bravo,Charlie,Delta,Echo,Foxtrot,StrataCentral,Golf,Hotel,India,Juliet,Kilo,Lima,Mike,StrataL3,November,Oscar,StrataL2,Sand,P3,P4SwitchTest,Arsys,Poppa,ExtensionMgr,Arp,Quebec,Romeo,StrataApiV2,PtReyes,Sierra,SandAcl,Arrow,Artools,BridgeTest,Tango,SandT,PAlaska,Namespace,Agent,Qos,PatchPanel,ProjectReport,Ark,Gimp,Agent,SliceAgent,Arnet,Bgp,Ale,Tommy,Central,AsicPktTestLib,Hsc,SandL3,Abuild,Pca9555,Standby,ControllerDut,CalSys,SandLib,Sb820,PointV2,BfnLib,Evpn,BfnSdk,Sflow,ManagementActive,AutoTest,GatedTest,Bgp,Sand,xinetd,BfnAgentLib,bf-utils,Hello,BfnState,Eos,Artest,Qos,Scd,ThermoMgr,Uniform,EosUtils,Eb,FanController,Central,BfnL3,BfnL2,tcp_wrappers,Victor,Environment,Route,Failover,Whiskey,Xray,Gimp,BfnFixed,Strata,SoCal,XApi,Msrp,XpProfile,tcpdump,PatchPanel,ArosTest,FhTest,Arbus,XpAcl,MacConc,XpApi,telnet,QosTest,Alpha2,BfnVlan,Stp,VxlanControllerTest,MplsAgent,Bravo2,Lanz,BfnMbb,Intf,XCtrl,Unicast,SandTunnel,L3Unicast,Ipsec,MplsTest,Rsvp,EthIntf,StageMgr,Sol,MplsUtils,Nat,Ira,P4NamespaceDut,Counters,Charlie2,Aqlc,Mlag,Power,OpenFlow,Lag,RestApi,BfdTest,strongs,Sfa,CEosUtils,Adt746,MaintenanceMode,MlagDut,EosImage,IpEth,MultiProtocol,Launcher,Max3179,Snmp,Acl,IpEthTest,PhyEee,bf-syslibs,tacc,XpL2,p4-ar-switch,p4-bf-switch,LdpTest,BfnPhy,Mirroring,Phy6,Ptp'  REGEXP '^((?!\b(Strata|StrataApi|StrataApiV2)\b).)*$');
+1
+Warnings:
+Warning	1139	Got error 'pcre_exec: recursion limit of NUM exceeded' from regexp
+SELECT CONCAT(REPEAT('100,',60),'101') RLIKE '^(([1-9][0-9]*),)*[1-9][0-9]*$';
+CONCAT(REPEAT('100,',60),'101') RLIKE '^(([1-9][0-9]*),)*[1-9][0-9]*$'
+1
+SELECT CONCAT(REPEAT('100,',400),'101') RLIKE '^(([1-9][0-9]*),)*[1-9][0-9]*$';
+CONCAT(REPEAT('100,',400),'101') RLIKE '^(([1-9][0-9]*),)*[1-9][0-9]*$'
+0
+Warnings:
+Warning	1139	Got error 'pcre_exec: recursion limit of NUM exceeded' from regexp
+SELECT REGEXP_INSTR(CONCAT(REPEAT('100,',60),'101'), '^(([1-9][0-9]*),)*[1-9][0-9]*$');
+REGEXP_INSTR(CONCAT(REPEAT('100,',60),'101'), '^(([1-9][0-9]*),)*[1-9][0-9]*$')
+1
+SELECT REGEXP_INSTR(CONCAT(REPEAT('100,',400),'101'), '^(([1-9][0-9]*),)*[1-9][0-9]*$');
+REGEXP_INSTR(CONCAT(REPEAT('100,',400),'101'), '^(([1-9][0-9]*),)*[1-9][0-9]*$')
+0
+Warnings:
+Warning	1139	Got error 'pcre_exec: recursion limit of NUM exceeded' from regexp
+SELECT LENGTH(REGEXP_SUBSTR(CONCAT(REPEAT('100,',60),'101'), '^(([1-9][0-9]*),)*[1-9][0-9]*$'));
+LENGTH(REGEXP_SUBSTR(CONCAT(REPEAT('100,',60),'101'), '^(([1-9][0-9]*),)*[1-9][0-9]*$'))
+243
+SELECT LENGTH(REGEXP_SUBSTR(CONCAT(REPEAT('100,',400),'101'), '^(([1-9][0-9]*),)*[1-9][0-9]*$'));
+LENGTH(REGEXP_SUBSTR(CONCAT(REPEAT('100,',400),'101'), '^(([1-9][0-9]*),)*[1-9][0-9]*$'))
+0
+Warnings:
+Warning	1139	Got error 'pcre_exec: recursion limit of NUM exceeded' from regexp
+SELECT LENGTH(REGEXP_REPLACE(CONCAT(REPEAT('100,',60),'101'), '^(([1-9][0-9]*),)*[1-9][0-9]*$', ''));
+LENGTH(REGEXP_REPLACE(CONCAT(REPEAT('100,',60),'101'), '^(([1-9][0-9]*),)*[1-9][0-9]*$', ''))
+0
+SELECT LENGTH(REGEXP_REPLACE(CONCAT(REPEAT('100,',400),'101'), '^(([1-9][0-9]*),)*[1-9][0-9]*$', ''));
+LENGTH(REGEXP_REPLACE(CONCAT(REPEAT('100,',400),'101'), '^(([1-9][0-9]*),)*[1-9][0-9]*$', ''))
+1603
+Warnings:
+Warning	1139	Got error 'pcre_exec: recursion limit of NUM exceeded' from regexp
+SELECT REGEXP_INSTR('a_kollision', 'oll');
+REGEXP_INSTR('a_kollision', 'oll')
+4
+SELECT REGEXP_INSTR('a_kollision', '(oll)');
+REGEXP_INSTR('a_kollision', '(oll)')
+4
+SELECT REGEXP_INSTR('a_kollision', 'o([lm])\\1');
+REGEXP_INSTR('a_kollision', 'o([lm])\\1')
+4
+SELECT a FROM (SELECT "aa" a) t WHERE a REGEXP '[0-9]';
+a

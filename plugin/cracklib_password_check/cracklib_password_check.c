@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #include <my_config.h>
 #include <mysql/plugin_password_validation.h>
@@ -30,6 +30,7 @@ static int crackme(MYSQL_LEX_STRING *username, MYSQL_LEX_STRING *password)
   const char *res;
 
   memcpy(user, username->str, username->length);
+  user[username->length]= 0;
   if ((host= strchr(user, '@')))
     *host++= 0;
 
@@ -78,6 +79,6 @@ maria_declare_plugin(cracklib_password_check)
   NULL,
   sysvars,
   "1.0",
-  MariaDB_PLUGIN_MATURITY_ALPHA,
+  MariaDB_PLUGIN_MATURITY_STABLE
 }
 maria_declare_plugin_end;

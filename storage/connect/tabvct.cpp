@@ -1,11 +1,11 @@
 /************* TabVct C++ Program Source Code File (.CPP) **************/
 /* PROGRAM NAME: TABVCT                                                */
 /* -------------                                                       */
-/*  Version 3.8                                                        */
+/*  Version 3.9                                                        */
 /*                                                                     */
 /* COPYRIGHT:                                                          */
 /* ----------                                                          */
-/*  (C) Copyright to the author Olivier BERTRAND          1999-2015    */
+/*  (C) Copyright to the author Olivier BERTRAND          1999-2017    */
 /*                                                                     */
 /* WHAT THIS PROGRAM DOES:                                             */
 /* -----------------------                                             */
@@ -35,7 +35,7 @@
 /*  Include relevant MariaDB header file.                              */
 /***********************************************************************/
 #include "my_global.h"
-#if defined(__WIN__)
+#if defined(_WIN32)
 #include <io.h>
 #include <fcntl.h>
 #if defined(__BORLANDC__)
@@ -115,11 +115,14 @@ bool VCTDEF::DefineAM(PGLOBAL g, LPCSTR, int poff)
 
   Recfm = RECFM_VCT;
 
+	// poff is no more in use; This will have to be revisited
+#if 0
   // For packed files the logical record length is calculated in poff
   if (poff != Lrecl) {
     Lrecl = poff;
     SetIntCatInfo("Lrecl", poff);
     } // endif poff
+#endif // 0
 
   Padded = false;
   Blksize = 0;
@@ -146,7 +149,7 @@ bool VCTDEF::Erase(char *filename)
 
     for (i = 1, cdp = To_Cols; cdp; i++, cdp = cdp->GetNext()) {
       sprintf(filename, fpat, i);
-//#if defined(__WIN__)
+//#if defined(_WIN32)
 //      rc |= !DeleteFile(filename);
 //#else    // UNIX
       rc |= remove(filename);
@@ -174,8 +177,8 @@ bool VCTDEF::Erase(char *filename)
 /***********************************************************************/
 int VCTDEF::MakeFnPattern(char *fpat)
   {
-  char    pat[8];
-#if defined(__WIN__)
+  char    pat[16];
+#if defined(_WIN32)
   char    drive[_MAX_DRIVE];
 #else
   char    *drive = NULL;
@@ -241,7 +244,7 @@ PTDB VCTDEF::GetTable(PGLOBAL g, MODE mode)
   /*********************************************************************/
   if (mode != MODE_INSERT)
     if (tdbp->GetBlockValues(g))
-      PushWarning(g, (PTDBASE)tdbp);
+      PushWarning(g, tdbp);
 //    return NULL;            // causes a crash when deleting index
 
   return tdbp;
@@ -263,7 +266,7 @@ TDBVCT::TDBVCT(PGLOBAL g, PTDBVCT tdbp) : TDBFIX(g, tdbp)
   } // end of TDBVCT copy constructor
 
 // Method
-PTDB TDBVCT::CopyOne(PTABS t)
+PTDB TDBVCT::Clone(PTABS t)
   {
   PTDB    tp;
   PVCTCOL cp1, cp2;
@@ -277,7 +280,7 @@ PTDB TDBVCT::CopyOne(PTABS t)
     } // endfor cp1
 
   return tp;
-  } // end of CopyOne
+  } // end of Clone
 
 /***********************************************************************/
 /*  Allocate VCT column description block.                             */
@@ -304,7 +307,7 @@ bool TDBVCT::IsUsingTemp(PGLOBAL)
 /***********************************************************************/
 bool TDBVCT::OpenDB(PGLOBAL g)
   {
-  if (trace)
+  if (trace(1))
     htrc("VCT OpenDB: tdbp=%p tdb=R%d use=%d key=%p mode=%d\n",
          this, Tdb_No, Use, To_Key_Col, Mode);
 
@@ -364,7 +367,7 @@ bool TDBVCT::OpenDB(PGLOBAL g)
 /***********************************************************************/
 int TDBVCT::ReadDB(PGLOBAL g)
   {
-  if (trace)
+  if (trace(1))
     htrc("VCT ReadDB: R%d Mode=%d CurBlk=%d CurNum=%d key=%p link=%p Kindex=%p\n",
          GetTdb_No(), Mode, Txfp->CurBlk, Txfp->CurNum,
          To_Key_Col, To_Link, To_Kindex);
@@ -456,13 +459,11 @@ bool VCTCOL::SetBuffer(PGLOBAL g, PVAL value, bool ok, bool check)
 
     if (tdbp->Txfp->GetAmType() == TYPE_AM_VMP && ok) {
       Blk = AllocValBlock(g, (void*)1, Buf_Type, tdbp->Txfp->Nrec,
-                                                  Format.Length,
-                                                  Format.Prec, check);
+                          Format.Length, Format.Prec, check, true, Unsigned);
       Status |= BUF_MAPPED;  // Will point into mapped file
     } else
       Blk = AllocValBlock(g, NULL, Buf_Type, tdbp->Txfp->Nrec,
-                                             Format.Length,
-                                             Format.Prec, check);
+                          Format.Length, Format.Prec, check, true, Unsigned);
     } // endif Mode
 
   return false;
@@ -490,15 +491,15 @@ void VCTCOL::ReadBlock(PGLOBAL g)
 #if defined(_DEBUG)
   if (!Blk) {
     strcpy(g->Message, MSG(TO_BLK_IS_NULL));
-    longjmp(g->jumper[g->jump_level], 58);
-    } // endif
+		throw 58;
+	} // endif
 #endif
 
   /*********************************************************************/
   /*  Read column block according to used access method.               */
   /*********************************************************************/
   if (txfp->ReadBlock(g, this))
-    longjmp(g->jumper[g->jump_level], 6);
+		throw 6;
 
   ColBlk = txfp->CurBlk;
   ColPos = -1;                       // Any invalid position
@@ -518,15 +519,15 @@ void VCTCOL::WriteBlock(PGLOBAL g)
 #if defined(_DEBUG)
     if (!Blk) {
       strcpy(g->Message, MSG(BLK_IS_NULL));
-      longjmp(g->jumper[g->jump_level], 56);
-      } // endif
+			throw 56;
+		} // endif
 #endif
 
     /*******************************************************************/
     /*  Write column block according to used access method.            */
     /*******************************************************************/
     if (txfp->WriteBlock(g, this))
-      longjmp(g->jumper[g->jump_level], 6);
+			throw 6;
 
     Modif = 0;
     } // endif Modif
@@ -546,7 +547,7 @@ void VCTCOL::ReadColumn(PGLOBAL g)
   assert (!To_Kcol);
 #endif
 
-  if (trace > 1)
+  if (trace(2))
     htrc("VCT ReadColumn: col %s R%d coluse=%.4X status=%.4X buf_type=%d\n",
          Name, To_Tdb->GetTdb_No(), ColUse, Status, Buf_Type);
 
@@ -574,7 +575,7 @@ void VCTCOL::WriteColumn(PGLOBAL)
   {
   PTXF txfp = ((PTDBVCT)To_Tdb)->Txfp;;
 
-  if (trace > 1)
+  if (trace(2))
     htrc("VCT WriteColumn: col %s R%d coluse=%.4X status=%.4X buf_type=%d\n",
          Name, To_Tdb->GetTdb_No(), ColUse, Status, Buf_Type);
 

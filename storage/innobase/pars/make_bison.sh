@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Copyright (c) 1994, 2011, Oracle and/or its affiliates. All Rights Reserved.
+# Copyright (c) 1994, 2013, Oracle and/or its affiliates. All Rights Reserved.
 #
 # This program is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +12,7 @@
 #
 # You should have received a copy of the GNU General Public License along with
 # this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 #
 # generate parser files from bison input files.
 
@@ -26,7 +26,6 @@ mv pars0grm.tab.h ../include/pars0grm.h
 sed -e '
 s/'"$TMPFILE"'/'"$OUTFILE"'/;
 s/^\(\(YYSTYPE\|int\) yy\(char\|nerrs\)\)/static \1/;
-s/\(\(YYSTYPE\|int\) yy\(lval\|parse\)\)/UNIV_INTERN \1/;
 ' < "$TMPFILE" > "$OUTFILE"
 
 rm "$TMPFILE"

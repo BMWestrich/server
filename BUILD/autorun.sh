@@ -15,11 +15,9 @@
 # You should have received a copy of the GNU Library General Public
 # License along with this library; if not, write to the Free
 # Software Foundation, Inc., 51 Franklin St, Fifth Floor, Boston,
-# MA 02110-1301, USA
+# MA 02110-1335  USA
 
 # Create MySQL cmake configure wrapper
-
-die() { echo "$@"; exit 1; }
 
 # Use a configure script that will call CMake.
 path=`dirname $0`

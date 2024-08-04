@@ -13,7 +13,7 @@
    You should have received a copy of the GNU General Public License
    along with this program; see the file COPYING. If not, write to the
    Free Software Foundation, Inc., 51 Franklin St, Fifth Floor, Boston,
-   MA  02110-1301  USA.
+   MA  02110-1335  USA.
 */
 
 /* asn.cpp implements ASN1 BER, PublicKey, and x509v3 decoding 
@@ -482,8 +482,9 @@ void DH_Decoder::Decode(DH& key)
 
 CertDecoder::CertDecoder(Source& s, bool decode, SignerList* signers,
                          bool noVerify, CertType ct)
-    : BER_Decoder(s), certBegin_(0), sigIndex_(0), sigLength_(0),
-      signature_(0), verify_(!noVerify)
+    : BER_Decoder(s), certBegin_(0), sigIndex_(0), sigLength_(0), subCnPos_(-1),
+      subCnLen_(0), issCnPos_(-1), issCnLen_(0), signature_(0),
+      verify_(!noVerify)
 {
     issuer_[0] = 0;
     subject_[0] = 0;
@@ -804,6 +805,13 @@ void CertDecoder::GetName(NameType nt)
             case COMMON_NAME:
                 if (!(ptr = AddTag(ptr, buf_end, "/CN=", 4, strLen)))
                     return;
+                if (nt == ISSUER) {
+                    issCnPos_ = (int)(ptr - strLen - issuer_);
+                    issCnLen_ = (int)strLen;
+                } else {
+                    subCnPos_ = (int)(ptr - strLen - subject_);
+                    subCnLen_ = (int)strLen;
+                }
                 break;
             case SUR_NAME:
                 if (!(ptr = AddTag(ptr, buf_end, "/SN=", 4, strLen)))
@@ -1211,17 +1219,17 @@ word32 DecodeDSA_Signature(byte* decoded, const byte* encoded, word32 sz)
     }
     word32 rLen = GetLength(source);
     if (rLen != 20) {
-        if (rLen == 21) {       // zero at front, eat
+        while (rLen > 20 && source.remaining() > 0) {  // zero's at front, eat
             source.next();
             --rLen;
         }
-        else if (rLen == 19) {  // add zero to front so 20 bytes
+        if (rLen < 20) { // add zero's to front so 20 bytes
+            word32 tmpLen = rLen;
+            while (tmpLen < 20) {
             decoded[0] = 0;
             decoded++;
+                tmpLen++;
         }
-        else {
-            source.SetError(DSA_SZ_E);
-            return 0;
         }
     }
     memcpy(decoded, source.get_buffer() + source.get_index(), rLen);
@@ -1234,17 +1242,17 @@ word32 DecodeDSA_Signature(byte* decoded, const byte* encoded, word32 sz)
     }
     word32 sLen = GetLength(source);
     if (sLen != 20) {
-        if (sLen == 21) {
-            source.next();          // zero at front, eat
+        while (sLen > 20 && source.remaining() > 0) {
+            source.next();          // zero's at front, eat
             --sLen;
         }
-        else if (sLen == 19) {
-            decoded[rLen] = 0;      // add zero to front so 20 bytes
+        if (sLen < 20) { // add zero's to front so 20 bytes
+            word32 tmpLen = sLen;
+            while (tmpLen < 20) {
+                decoded[rLen] = 0;
             decoded++;
+                tmpLen++;
         }
-        else {
-            source.SetError(DSA_SZ_E);
-            return 0;
         }
     }
     memcpy(decoded + rLen, source.get_buffer() + source.get_index(), sLen);

@@ -2,6 +2,7 @@
 #define STRUCTS_INCLUDED
 
 /* Copyright (c) 2000, 2010, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2017, MariaDB Corporation.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -14,7 +15,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 
 
@@ -64,22 +65,23 @@ typedef struct st_keyfile_info {	/* used with ha_info() */
 
 
 typedef struct st_key_part_info {	/* Info about a key part */
-  Field *field;
-  uint	offset;				/* offset in record (from 0) */
-  uint	null_offset;			/* Offset to null_bit in record */
+  Field *field;                         /* the Field object for the indexed
+                                           prefix of the original table Field.
+                                           NOT necessarily the original Field */
+  uint  offset;                         /* Offset in record (from 0) */
+  uint  null_offset;                    /* Offset to null_bit in record */
   /* Length of key part in bytes, excluding NULL flag and length bytes */
-  uint16 length;
+  uint length;
   /* 
     Number of bytes required to store the keypart value. This may be
     different from the "length" field as it also counts
      - possible NULL-flag byte (see HA_KEY_NULL_LENGTH)
      - possible HA_KEY_BLOB_LENGTH bytes needed to store actual value length.
   */
-  uint16 store_length;
+  uint store_length;
   uint16 key_type;
-  /* Fieldnr begins counting from 1 */
-  uint16 fieldnr;			/* Fieldnum in UNIREG */
-  uint16 key_part_flag;			/* 0 or HA_REVERSE_SORT */
+  uint16 fieldnr;                       /* Fieldnr begins counting from 1 */
+  uint16 key_part_flag;                 /* 0 or HA_REVERSE_SORT */
   uint8 type;
   uint8 null_bit;			/* Position to null_bit */
 } KEY_PART_INFO ;
@@ -88,7 +90,7 @@ class engine_option_value;
 struct ha_index_option_struct;
 
 typedef struct st_key {
-  uint	key_length;			/* Tot length of key */
+  uint	key_length;			/* total length of user defined key parts  */
   ulong flags;                          /* dupp key and pack flags */
   uint	user_defined_key_parts;	   /* How many key_parts */
   uint	usable_key_parts; /* Should normally be = user_defined_key_parts */
@@ -204,7 +206,7 @@ typedef int *(*update_var)(THD *, struct st_mysql_show_var *);
 typedef struct	st_lex_user {
   LEX_STRING user, host, plugin, auth;
   LEX_STRING pwtext, pwhash;
-  bool is_role() { return user.str[0] && !host.str[0]; }
+  bool is_role() const { return user.str[0] && !host.str[0]; }
   void set_lex_string(LEX_STRING *l, char *buf)
   {
     if (is_role())
@@ -330,26 +332,26 @@ typedef struct st_index_stats
 
 
 	/* Bits in form->update */
-#define REG_MAKE_DUPP		1	/* Make a copy of record when read */
-#define REG_NEW_RECORD		2	/* Write a new record if not found */
-#define REG_UPDATE		4	/* Uppdate record */
-#define REG_DELETE		8	/* Delete found record */
-#define REG_PROG		16	/* User is updating database */
-#define REG_CLEAR_AFTER_WRITE	32
-#define REG_MAY_BE_UPDATED	64
-#define REG_AUTO_UPDATE		64	/* Used in D-forms for scroll-tables */
-#define REG_OVERWRITE		128
-#define REG_SKIP_DUP		256
+#define REG_MAKE_DUPP		1U	/* Make a copy of record when read */
+#define REG_NEW_RECORD		2U	/* Write a new record if not found */
+#define REG_UPDATE		4U	/* Uppdate record */
+#define REG_DELETE		8U	/* Delete found record */
+#define REG_PROG		16U	/* User is updating database */
+#define REG_CLEAR_AFTER_WRITE	32U
+#define REG_MAY_BE_UPDATED	64U
+#define REG_AUTO_UPDATE		64U	/* Used in D-forms for scroll-tables */
+#define REG_OVERWRITE		128U
+#define REG_SKIP_DUP		256U
 
 	/* Bits in form->status */
-#define STATUS_NO_RECORD	(1+2)	/* Record isn't usably */
-#define STATUS_GARBAGE		1
-#define STATUS_NOT_FOUND	2	/* No record in database when needed */
-#define STATUS_NO_PARENT	4	/* Parent record wasn't found */
-#define STATUS_NOT_READ		8	/* Record isn't read */
-#define STATUS_UPDATED		16	/* Record is updated by formula */
-#define STATUS_NULL_ROW		32	/* table->null_row is set */
-#define STATUS_DELETED		64
+#define STATUS_NO_RECORD	(1U+2U)	/* Record isn't usable */
+#define STATUS_GARBAGE		1U
+#define STATUS_NOT_FOUND	2U	/* No record in database when needed */
+#define STATUS_NO_PARENT	4U	/* Parent record wasn't found */
+#define STATUS_NOT_READ		8U	/* Record isn't read */
+#define STATUS_UPDATED		16U	/* Record is updated by formula */
+#define STATUS_NULL_ROW		32U	/* table->null_row is set */
+#define STATUS_DELETED		64U
 
 /*
   Such interval is "discrete": it is the set of
@@ -624,6 +626,42 @@ public:
     set(type, 0, 0);
   }
   int dyncol_type() const { return m_type; }
+};
+
+
+class Load_data_param
+{
+protected:
+  CHARSET_INFO *m_charset;   // Character set of the file
+  ulonglong m_fixed_length;  // Sum of target field lengths for fixed format
+  bool m_is_fixed_length;
+  bool m_use_blobs;
+public:
+  Load_data_param(CHARSET_INFO *cs, bool is_fixed_length):
+    m_charset(cs),
+    m_fixed_length(0),
+    m_is_fixed_length(is_fixed_length),
+    m_use_blobs(false)
+  { }
+  bool add_outvar_field(THD *thd, const Field *field);
+  bool add_outvar_user_var(THD *thd);
+  CHARSET_INFO *charset() const { return m_charset; }
+  bool is_fixed_length() const { return m_is_fixed_length; }
+  bool use_blobs() const { return m_use_blobs; }
+};
+
+
+class Load_data_outvar
+{
+public:
+  virtual ~Load_data_outvar() {}
+  virtual bool load_data_set_null(THD *thd, const Load_data_param *param)= 0;
+  virtual bool load_data_set_value(THD *thd, const char *pos, uint length,
+                                   const Load_data_param *param)= 0;
+  virtual bool load_data_set_no_data(THD *thd, const Load_data_param *param)= 0;
+  virtual void load_data_print_for_log_event(THD *thd, class String *to) const= 0;
+  virtual bool load_data_add_outvar(THD *thd, Load_data_param *param) const= 0;
+  virtual uint load_data_fixed_length() const= 0;
 };
 
 

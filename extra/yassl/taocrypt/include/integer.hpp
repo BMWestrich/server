@@ -13,7 +13,7 @@
    You should have received a copy of the GNU General Public License
    along with this program; see the file COPYING. If not, write to the
    Free Software Foundation, Inc., 51 Franklin St, Fifth Floor, Boston,
-   MA  02110-1301  USA.
+   MA  02110-1335  USA.
 */
 
 /* based on Wei Dai's integer.h from CryptoPP */
@@ -119,6 +119,9 @@ namespace TaoCrypt {
 
 
 
+#ifdef _WIN32
+    #undef max // avoid name clash
+#endif
 // general MAX
 template<typename T> inline
 const T& max(const T& a, const T& b)

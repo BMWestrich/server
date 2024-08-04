@@ -1,6 +1,7 @@
 /*****************************************************************************
 
 Copyright (c) 1996, 2011, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2017, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +13,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -124,13 +125,13 @@ trx_rseg_mem_free(
 /*==============*/
 	trx_rseg_t*	rseg);		/*!< in, own: instance to free */
 
-/*********************************************************************
-Creates a rollback segment. */
+/** Create a rollback segment.
+@param[in]	space	undo tablespace ID
+@return pointer to new rollback segment
+@retval	NULL	on failure */
 UNIV_INTERN
 trx_rseg_t*
-trx_rseg_create(
-/*============*/
-	ulint	space);			/*!< in: id of UNDO tablespace */
+trx_rseg_create(ulint space);
 
 /********************************************************************
 Get the number of unique rollback tablespaces in use except space id 0.

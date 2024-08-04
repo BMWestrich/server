@@ -1,6 +1,7 @@
 /*****************************************************************************
 
-Copyright (c) 2012, 2014, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2012, 2016, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2017, 2018, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +13,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -25,19 +26,18 @@ Created 2012-02-08 by Sunny Bains.
 
 #include "row0quiesce.h"
 #include "row0mysql.h"
-
-#ifdef UNIV_NONINL
-#include "row0quiesce.ic"
-#endif
-
 #include "ibuf0ibuf.h"
 #include "srv0start.h"
 #include "trx0purge.h"
 
+#ifdef HAVE_MY_AES_H
+#include <my_aes.h>
+#endif
+
 /*********************************************************************//**
 Write the meta data (index user fields) config file.
 @return DB_SUCCESS or error code. */
-static	__attribute__((nonnull, warn_unused_result))
+static	MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 row_quiesce_write_index_fields(
 /*===========================*/
@@ -64,7 +64,7 @@ row_quiesce_write_index_fields(
 
 			ib_senderrf(
 				thd, IB_LOG_LEVEL_WARN, ER_IO_WRITE_ERROR,
-				errno, strerror(errno),
+				(ulong) errno, strerror(errno),
 				"while writing index fields.");
 
 			return(DB_IO_ERROR);
@@ -84,7 +84,7 @@ row_quiesce_write_index_fields(
 
 			ib_senderrf(
 				thd, IB_LOG_LEVEL_WARN, ER_IO_WRITE_ERROR,
-				errno, strerror(errno),
+				(ulong) errno, strerror(errno),
 				"while writing index column.");
 
 			return(DB_IO_ERROR);
@@ -97,7 +97,7 @@ row_quiesce_write_index_fields(
 /*********************************************************************//**
 Write the meta data config file index information.
 @return DB_SUCCESS or error code. */
-static	__attribute__((nonnull, warn_unused_result))
+static	MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 row_quiesce_write_indexes(
 /*======================*/
@@ -118,7 +118,7 @@ row_quiesce_write_indexes(
 		if (fwrite(row, 1,  sizeof(row), file) != sizeof(row)) {
 			ib_senderrf(
 				thd, IB_LOG_LEVEL_WARN, ER_IO_WRITE_ERROR,
-				errno, strerror(errno),
+				(ulong) errno, strerror(errno),
 				"while writing index count.");
 
 			return(DB_IO_ERROR);
@@ -172,7 +172,7 @@ row_quiesce_write_indexes(
 
 			ib_senderrf(
 				thd, IB_LOG_LEVEL_WARN, ER_IO_WRITE_ERROR,
-				errno, strerror(errno),
+				(ulong) errno, strerror(errno),
 				"while writing index meta-data.");
 
 			return(DB_IO_ERROR);
@@ -193,7 +193,7 @@ row_quiesce_write_indexes(
 
 			ib_senderrf(
 				thd, IB_LOG_LEVEL_WARN, ER_IO_WRITE_ERROR,
-				errno, strerror(errno),
+				(ulong) errno, strerror(errno),
 				"while writing index name.");
 
 			return(DB_IO_ERROR);
@@ -210,7 +210,7 @@ Write the meta data (table columns) config file. Serialise the contents of
 dict_col_t structure, along with the column name. All fields are serialized
 as ib_uint32_t.
 @return DB_SUCCESS or error code. */
-static	__attribute__((nonnull, warn_unused_result))
+static	MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 row_quiesce_write_table(
 /*====================*/
@@ -236,7 +236,11 @@ row_quiesce_write_table(
 		mach_write_to_4(ptr, col->len);
 		ptr += sizeof(ib_uint32_t);
 
-		mach_write_to_4(ptr, col->mbminmaxlen);
+		/* FIXME: This will not work if mbminlen>4.
+		This field is also redundant, because the lengths
+		are a property of the character set encoding, which
+		in turn is encodedin prtype above. */
+		mach_write_to_4(ptr, col->mbmaxlen * 5 + col->mbminlen);
 		ptr += sizeof(ib_uint32_t);
 
 		mach_write_to_4(ptr, col->ind);
@@ -253,7 +257,7 @@ row_quiesce_write_table(
 		if (fwrite(row, 1,  sizeof(row), file) != sizeof(row)) {
 			ib_senderrf(
 				thd, IB_LOG_LEVEL_WARN, ER_IO_WRITE_ERROR,
-				errno, strerror(errno),
+				(ulong) errno, strerror(errno),
 				"while writing table column data.");
 
 			return(DB_IO_ERROR);
@@ -280,7 +284,7 @@ row_quiesce_write_table(
 
 			ib_senderrf(
 				thd, IB_LOG_LEVEL_WARN, ER_IO_WRITE_ERROR,
-				errno, strerror(errno),
+				(ulong) errno, strerror(errno),
 				"while writing column name.");
 
 			return(DB_IO_ERROR);
@@ -293,7 +297,7 @@ row_quiesce_write_table(
 /*********************************************************************//**
 Write the meta data config file header.
 @return DB_SUCCESS or error code. */
-static	__attribute__((nonnull, warn_unused_result))
+static	MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 row_quiesce_write_header(
 /*=====================*/
@@ -312,7 +316,7 @@ row_quiesce_write_header(
 	if (fwrite(&value, 1,  sizeof(value), file) != sizeof(value)) {
 		ib_senderrf(
 			thd, IB_LOG_LEVEL_WARN, ER_IO_WRITE_ERROR,
-			errno, strerror(errno),
+			(ulong) errno, strerror(errno),
 			"while writing meta-data version number.");
 
 		return(DB_IO_ERROR);
@@ -326,8 +330,7 @@ row_quiesce_write_header(
 	if (hostname == 0) {
 		static const char	NullHostname[] = "Hostname unknown";
 
-		ib_logf(IB_LOG_LEVEL_WARN,
-			"Unable to determine server hostname.");
+		ib::warn() << "Unable to determine server hostname.";
 
 		hostname = NullHostname;
 	}
@@ -343,15 +346,15 @@ row_quiesce_write_header(
 
 		ib_senderrf(
 			thd, IB_LOG_LEVEL_WARN, ER_IO_WRITE_ERROR,
-			errno, strerror(errno),
+			(ulong) errno, strerror(errno),
 			"while writing hostname.");
 
 		return(DB_IO_ERROR);
 	}
 
 	/* The table name includes the NUL byte. */
-	ut_a(table->name != 0);
-	len = static_cast<ib_uint32_t>(strlen(table->name) + 1);
+	ut_a(table->name.m_name != NULL);
+	len = static_cast<ib_uint32_t>(strlen(table->name.m_name) + 1);
 
 	/* Write the table name. */
 	mach_write_to_4(value, len);
@@ -359,11 +362,11 @@ row_quiesce_write_header(
 	DBUG_EXECUTE_IF("ib_export_io_write_failure_6", close(fileno(file)););
 
 	if (fwrite(&value, 1,  sizeof(value), file) != sizeof(value)
-	    || fwrite(table->name, 1,  len, file) != len) {
+	    || fwrite(table->name.m_name, 1,  len, file) != len) {
 
 		ib_senderrf(
 			thd, IB_LOG_LEVEL_WARN, ER_IO_WRITE_ERROR,
-			errno, strerror(errno),
+			(ulong) errno, strerror(errno),
 			"while writing table name.");
 
 		return(DB_IO_ERROR);
@@ -379,7 +382,7 @@ row_quiesce_write_header(
 	if (fwrite(row, 1,  sizeof(ib_uint64_t), file) != sizeof(ib_uint64_t)) {
 		ib_senderrf(
 			thd, IB_LOG_LEVEL_WARN, ER_IO_WRITE_ERROR,
-			errno, strerror(errno),
+			(ulong) errno, strerror(errno),
 			"while writing table autoinc value.");
 
 		return(DB_IO_ERROR);
@@ -403,7 +406,7 @@ row_quiesce_write_header(
 	if (fwrite(row, 1,  sizeof(row), file) != sizeof(row)) {
 		ib_senderrf(
 			thd, IB_LOG_LEVEL_WARN, ER_IO_WRITE_ERROR,
-			errno, strerror(errno),
+			(ulong) errno, strerror(errno),
 			"while writing table meta-data.");
 
 		return(DB_IO_ERROR);
@@ -415,7 +418,7 @@ row_quiesce_write_header(
 /*********************************************************************//**
 Write the table meta data after quiesce.
 @return DB_SUCCESS or error code */
-static	__attribute__((nonnull, warn_unused_result))
+static	MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 row_quiesce_write_cfg(
 /*==================*/
@@ -428,7 +431,7 @@ row_quiesce_write_cfg(
 
 	srv_get_meta_data_filename(table, name, sizeof(name));
 
-	ib_logf(IB_LOG_LEVEL_INFO, "Writing table metadata to '%s'", name);
+	ib::info() << "Writing table metadata to '" << name << "'";
 
 	FILE*	file = fopen(name, "w+b");
 
@@ -452,23 +455,21 @@ row_quiesce_write_cfg(
 
 			char	msg[BUFSIZ];
 
-			ut_snprintf(msg, sizeof(msg), "%s flush() failed",
-				    name);
+			snprintf(msg, sizeof(msg), "%s flush() failed", name);
 
 			ib_senderrf(
 				thd, IB_LOG_LEVEL_WARN, ER_IO_WRITE_ERROR,
-				errno, strerror(errno), msg);
+				(ulong) errno, strerror(errno), msg);
 		}
 
 		if (fclose(file) != 0) {
 			char	msg[BUFSIZ];
 
-			ut_snprintf(msg, sizeof(msg), "%s flose() failed",
-				    name);
+			snprintf(msg, sizeof(msg), "%s flose() failed", name);
 
 			ib_senderrf(
 				thd, IB_LOG_LEVEL_WARN, ER_IO_WRITE_ERROR,
-				errno, strerror(errno), msg);
+				(ulong) errno, strerror(errno), msg);
 		}
 	}
 
@@ -505,7 +506,6 @@ row_quiesce_table_has_fts_index(
 
 /*********************************************************************//**
 Quiesce the tablespace that the table resides in. */
-UNIV_INTERN
 void
 row_quiesce_table_start(
 /*====================*/
@@ -516,53 +516,46 @@ row_quiesce_table_start(
 	ut_a(srv_n_purge_threads > 0);
 	ut_ad(!srv_read_only_mode);
 
-	char		table_name[MAX_FULL_NAME_LEN + 1];
-
 	ut_a(trx->mysql_thd != 0);
 
-	innobase_format_name(
-		table_name, sizeof(table_name), table->name, FALSE);
+	ut_ad(fil_space_get(table->space) != NULL);
+	ib::info() << "Sync to disk of " << table->name << " started.";
 
-	ib_logf(IB_LOG_LEVEL_INFO,
-		"Sync to disk of '%s' started.", table_name);
-
-	if (trx_purge_state() != PURGE_STATE_DISABLED) {
+	if (srv_undo_sources) {
 		trx_purge_stop();
 	}
 
-	ut_a(table->id > 0);
-
 	for (ulint count = 0;
-	     ibuf_contract_in_background(table->id, TRUE) != 0
+	     ibuf_merge_space(table->space) != 0
 	     && !trx_is_interrupted(trx);
 	     ++count) {
 		if (!(count % 20)) {
-			ib_logf(IB_LOG_LEVEL_INFO,
-				"Merging change buffer entries for '%s'",
-				table_name);
+			ib::info() << "Merging change buffer entries for "
+				<< table->name;
 		}
 	}
 
 	if (!trx_is_interrupted(trx)) {
-		buf_LRU_flush_or_remove_pages(
-			table->space, BUF_REMOVE_FLUSH_WRITE, trx);
+		{
+			FlushObserver observer(table->space, trx, NULL);
+			buf_LRU_flush_or_remove_pages(table->space, &observer);
+		}
 
 		if (trx_is_interrupted(trx)) {
 
-			ib_logf(IB_LOG_LEVEL_WARN, "Quiesce aborted!");
+			ib::warn() << "Quiesce aborted!";
 
 		} else if (row_quiesce_write_cfg(table, trx->mysql_thd)
 			   != DB_SUCCESS) {
 
-			ib_logf(IB_LOG_LEVEL_WARN,
-				"There was an error writing to the "
-				"meta data file");
+			ib::warn() << "There was an error writing to the"
+				" meta data file";
 		} else {
-			ib_logf(IB_LOG_LEVEL_INFO,
-				"Table '%s' flushed to disk", table_name);
+			ib::info() << "Table " << table->name
+				<< " flushed to disk";
 		}
 	} else {
-		ib_logf(IB_LOG_LEVEL_WARN, "Quiesce aborted!");
+		ib::warn() << "Quiesce aborted!";
 	}
 
 	dberr_t	err = row_quiesce_set_state(table, QUIESCE_COMPLETE, trx);
@@ -571,7 +564,6 @@ row_quiesce_table_start(
 
 /*********************************************************************//**
 Cleanup after table quiesce. */
-UNIV_INTERN
 void
 row_quiesce_table_complete(
 /*=======================*/
@@ -579,12 +571,8 @@ row_quiesce_table_complete(
 	trx_t*		trx)		/*!< in/out: transaction/session */
 {
 	ulint		count = 0;
-	char		table_name[MAX_FULL_NAME_LEN + 1];
 
 	ut_a(trx->mysql_thd != 0);
-
-	innobase_format_name(
-		table_name, sizeof(table_name), table->name, FALSE);
 
 	/* We need to wait for the operation to complete if the
 	transaction has been killed. */
@@ -593,9 +581,8 @@ row_quiesce_table_complete(
 
 		/* Print a warning after every minute. */
 		if (!(count % 60)) {
-			ib_logf(IB_LOG_LEVEL_WARN,
-				"Waiting for quiesce of '%s' to complete",
-				table_name);
+			ib::warn() << "Waiting for quiesce of " << table->name
+				<< " to complete";
 		}
 
 		/* Sleep for a second. */
@@ -604,19 +591,20 @@ row_quiesce_table_complete(
 		++count;
 	}
 
-	/* Remove the .cfg file now that the user has resumed
-	normal operations. Otherwise it will cause problems when
-	the user tries to drop the database (remove directory). */
-	char		cfg_name[OS_FILE_MAX_PATH];
+	if (!opt_bootstrap) {
+		/* Remove the .cfg file now that the user has resumed
+		normal operations. Otherwise it will cause problems when
+		the user tries to drop the database (remove directory). */
+		char		cfg_name[OS_FILE_MAX_PATH];
 
-	srv_get_meta_data_filename(table, cfg_name, sizeof(cfg_name));
+		srv_get_meta_data_filename(table, cfg_name, sizeof(cfg_name));
 
-	os_file_delete_if_exists(innodb_file_data_key, cfg_name);
+		os_file_delete_if_exists(innodb_data_file_key, cfg_name, NULL);
 
-	ib_logf(IB_LOG_LEVEL_INFO,
-		"Deleting the meta-data file '%s'", cfg_name);
+		ib::info() << "Deleting the meta-data file '" << cfg_name << "'";
+	}
 
-	if (trx_purge_state() != PURGE_STATE_DISABLED) {
+	if (srv_undo_sources) {
 		trx_purge_run();
 	}
 
@@ -627,7 +615,6 @@ row_quiesce_table_complete(
 /*********************************************************************//**
 Set a table's quiesce state.
 @return DB_SUCCESS or error code. */
-UNIV_INTERN
 dberr_t
 row_quiesce_set_state(
 /*==================*/
@@ -644,12 +631,19 @@ row_quiesce_set_state(
 
 		return(DB_UNSUPPORTED);
 
+	} else if (dict_table_is_temporary(table)) {
+
+		ib_senderrf(trx->mysql_thd, IB_LOG_LEVEL_WARN,
+			    ER_CANNOT_DISCARD_TEMPORARY_TABLE);
+
+		return(DB_UNSUPPORTED);
 	} else if (table->space == TRX_SYS_SPACE) {
 
 		char	table_name[MAX_FULL_NAME_LEN + 1];
 
 		innobase_format_name(
-			table_name, sizeof(table_name), table->name, FALSE);
+			table_name, sizeof(table_name),
+			table->name.m_name);
 
 		ib_senderrf(trx->mysql_thd, IB_LOG_LEVEL_WARN,
 			    ER_TABLE_IN_SYSTEM_TABLESPACE, table_name);
@@ -659,8 +653,8 @@ row_quiesce_set_state(
 
 		ib_senderrf(trx->mysql_thd, IB_LOG_LEVEL_WARN,
 			    ER_NOT_SUPPORTED_YET,
-			    "FLUSH TABLES on tables that have an FTS index. "
-			    "FTS auxiliary tables will not be flushed.");
+			    "FLUSH TABLES on tables that have an FTS index."
+			    " FTS auxiliary tables will not be flushed.");
 
 	} else if (DICT_TF2_FLAG_IS_SET(table, DICT_TF2_FTS_HAS_DOC_ID)) {
 		/* If this flag is set then the table may not have any active
@@ -668,10 +662,10 @@ row_quiesce_set_state(
 
 		ib_senderrf(trx->mysql_thd, IB_LOG_LEVEL_WARN,
 			    ER_NOT_SUPPORTED_YET,
-			    "FLUSH TABLES on a table that had an FTS index, "
-			    "created on a hidden column, the "
-			    "auxiliary tables haven't been dropped as yet. "
-			    "FTS auxiliary tables will not be flushed.");
+			    "FLUSH TABLES on a table that had an FTS index,"
+			    " created on a hidden column, the"
+			    " auxiliary tables haven't been dropped as yet."
+			    " FTS auxiliary tables will not be flushed.");
 	}
 
 	row_mysql_lock_data_dictionary(trx);

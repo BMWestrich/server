@@ -11,7 +11,7 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335  USA
 
 # Add executable plus some additional MySQL specific stuff
 # Usage (same as for standard CMake's ADD_EXECUTABLE)
@@ -39,6 +39,14 @@ FUNCTION (MYSQL_ADD_EXECUTABLE)
   
   SET(sources ${ARG_UNPARSED_ARGUMENTS})
   ADD_VERSION_INFO(${target} EXECUTABLE sources)
+
+  IF(MSVC)
+    # Add compatibility manifest, to fix GetVersionEx on Windows 8.1 and later
+    IF (CMAKE_VERSION VERSION_GREATER 3.3)
+      SET(sources ${sources} ${PROJECT_SOURCE_DIR}/cmake/win_compatibility.manifest)
+    ENDIF()
+  ENDIF()
+
   IF (ARG_WIN32)
     SET(WIN32 WIN32)
   ELSE()
@@ -66,6 +74,9 @@ FUNCTION (MYSQL_ADD_EXECUTABLE)
       SET(COMP COMPONENT ${MYSQL_INSTALL_COMPONENT})
     ELSE()
       SET(COMP COMPONENT Client)
+    ENDIF()
+    IF (COMP MATCHES ${SKIP_COMPONENTS})
+      RETURN()
     ENDIF()
     MYSQL_INSTALL_TARGETS(${target} DESTINATION ${ARG_DESTINATION} ${COMP})
   ENDIF()

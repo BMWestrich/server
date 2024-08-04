@@ -312,7 +312,7 @@ EXPLAIN SELECT 1 FROM t1 WHERE NOT EXISTS
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	Extra
 1	PRIMARY	t1	ALL	NULL	NULL	NULL	NULL	1	Using where
 2	DEPENDENT SUBQUERY	t2	eq_ref	PRIMARY,d	PRIMARY	1	func	1	Using where
-3	DEPENDENT SUBQUERY	t2	index	NULL	d	2	NULL	1	Using where; Using index
+3	DEPENDENT SUBQUERY	t2	index	NULL	d	2	NULL	1	Using index
 DROP TABLE t2;
 CREATE TABLE t2 (b INT, c INT, UNIQUE KEY (b), UNIQUE KEY (b, c )) ENGINE=INNODB;
 INSERT INTO t2 VALUES (1, 1);
@@ -494,6 +494,35 @@ HAVING SQ2_alias1 . col_int_key >= 7
 drop table t1;
 set optimizer_switch=@subselect_innodb_tmp;
 #
+# MDEV-9635:Server crashes in part_of_refkey  or assertion
+# `!created && key_to_save < (int)s->keys' failed in
+# TABLE::use_index(int) or with join_cache_level>2
+#
+SET join_cache_level=3;
+CREATE TABLE t1 (f1 VARCHAR(1024)) ENGINE=InnoDB;
+CREATE ALGORITHM=TEMPTABLE VIEW v1 AS SELECT * FROM t1;
+CREATE TABLE t2 (f2 VARCHAR(4)) ENGINE=InnoDB;
+INSERT INTO t2 VALUES ('foo'),('bar');
+SELECT * FROM v1, t2 WHERE ( f1, f2 ) IN ( SELECT f1, f1 FROM t1 );
+f1	f2
+set join_cache_level = default;
+drop view v1;
+drop table t1,t2;
+#
+# MDEV-10693: cost-based choice between materialization and in-to-exists
+#             for a subquery from the expression used in ref access 
+#
+CREATE TABLE t1 (i1 INT PRIMARY KEY) ENGINE=InnoDB;
+INSERT INTO t1 VALUES (1),(2);
+CREATE TABLE t2 (i2 INT) ENGINE=InnoDB;
+CREATE TABLE t3 (i3 INT PRIMARY KEY) ENGINE=InnoDB;
+INSERT INTO t3 VALUES (3);
+SELECT * FROM t1
+WHERE NULL IN ( SELECT i2 FROM t2 
+WHERE i1 IN ( i2 IN ( SELECT i3 FROM t3 ) ) AND i2 = 2 );
+i1
+DROP TABLE t1,t2,t3;
+#
 # MDEV-6041: ORDER BY+subqueries: subquery_table.key=outer_table.col is not recongized as binding
 #
 create table t1(a int) engine=innodb;
@@ -546,4 +575,100 @@ t1;
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	Extra
 1	PRIMARY	t1	ALL	NULL	NULL	NULL	NULL	#	
 2	DEPENDENT SUBQUERY	t2	ref	key1	key1	5	test.t1.a	#	Using where; Using filesort
+drop table t1,t2;
+#
+# mdev-12931: semi-join in ON expression of STRAIGHT_JOIN 
+#             joining a base table and a mergeable derived table
+#
+CREATE TABLE t1 (f1 int) ENGINE=InnoDB;
+INSERT INTO t1 VALUES (3),(2);
+CREATE TABLE t2 (f2 int) ENGINE=InnoDB;
+INSERT INTO t2 VALUES (1),(4);
+CREATE TABLE t3 (f3 int) ENGINE=InnoDB;
+INSERT INTO t3 VALUES (5),(6);
+CREATE TABLE t4 (f4 int) ENGINE=InnoDB;
+INSERT INTO t4 VALUES (1),(8);
+SELECT * 
+FROM t1 
+INNER JOIN 
+( t2 STRAIGHT_JOIN ( SELECT * FROM t3 ) AS sq
+ON ( 1 IN ( SELECT f4 FROM t4 ) ) )
+ON ( f1 >= f2 );
+f1	f2	f3
+3	1	5
+2	1	5
+3	1	6
+2	1	6
+EXPLAIN EXTENDED
+SELECT * 
+FROM t1 
+INNER JOIN 
+( t2 STRAIGHT_JOIN ( SELECT * FROM t3 ) AS sq
+ON ( 1 IN ( SELECT f4 FROM t4 ) ) )
+ON ( f1 >= f2 );
+id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
+1	PRIMARY	<subquery3>	eq_ref	distinct_key	distinct_key	4	func	1	100.00	
+1	PRIMARY	t1	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (flat, BNL join)
+1	PRIMARY	t2	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where; Using join buffer (incremental, BNL join)
+1	PRIMARY	t3	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (incremental, BNL join)
+3	MATERIALIZED	t4	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
+Warnings:
+Note	1003	select `test`.`t1`.`f1` AS `f1`,`test`.`t2`.`f2` AS `f2`,`test`.`t3`.`f3` AS `f3` from `test`.`t1` join `test`.`t2` semi join (`test`.`t4`) join `test`.`t3` where `test`.`t4`.`f4` = 1 and `test`.`t1`.`f1` >= `test`.`t2`.`f2`
+DROP TABLE t1,t2,t3,t4;
+#
+# MDEV-23535: SIGSEGV, SIGABRT and SIGILL in typeinfo for Item_func_set_collation (on optimized builds)
+#
+set @save_character_set_connection=@@character_set_connection;
+set character_set_connection='utf8';
+CREATE TABLE t1(a DATETIME, b VARCHAR(50)) ENGINE=INNODB;
+INSERT INTO t1 VALUES ('2019-03-10 02:55:05', '2019-03-10 02:55:05');
+CREATE TABLE t2(a VARCHAR(50)) ENGINE=INNODB;
+INSERT INTO t2 VALUES ('2019-03-10 02:55:05');
+SELECT * FROM t1 WHERE (SELECT 1,CONCAT(a) FROM t1) = (SELECT 1,CONCAT(a) FROM t2);
+a	b
+2019-03-10 02:55:05	2019-03-10 02:55:05
+DROP TABLE t1,t2;
+set character_set_connection=@save_character_set_connection;
+#
+# MDEV-26047: MariaDB server crash at Item_subselect::init_expr_cache_tracker
+#
+CREATE TABLE t1 (a int) engine=innodb;
+SELECT 1 IN (
+SELECT NULL
+FROM t1
+WHERE
+a IS NOT NULL
+GROUP BY
+(SELECT NULL from dual WHERE a = 1)
+);
+1 IN (
+SELECT NULL
+FROM t1
+WHERE
+a IS NOT NULL
+GROUP BY
+(SELECT NULL from dual WHERE a = 1)
+)
+0
+drop table t1;
+# Testcase from MDEV-26164
+create table t1(a int);
+# Disable the warning as it includes current time and changes for every test run.
+select 1 from t1 where not exists
+(
+select 1 from t1 where binary current_time()
+group by (select a),(select 1)
+);
+1
+drop table t1;
+#
+# MDEV-28437: Assertion `!eliminated' failed in Item_subselect::exec
+#
+CREATE TABLE t1 (a INT) ENGINE=InnoDB;
+INSERT INTO t1 VALUES (1),(2);
+CREATE TABLE t2 (b INT PRIMARY KEY) ENGINE=InnoDB;
+INSERT INTO t1 VALUES (3),(4);
+SELECT 1 IN (SELECT a FROM t1 LEFT JOIN t2 ON (a = b AND EXISTS (SELECT * FROM t1)));
+1 IN (SELECT a FROM t1 LEFT JOIN t2 ON (a = b AND EXISTS (SELECT * FROM t1)))
+1
 drop table t1,t2;

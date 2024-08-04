@@ -1,7 +1,7 @@
 /*****************************************************************************
 
 Copyright (C) 2012, 2014 Facebook, Inc. All Rights Reserved.
-Copyright (C) 2014, 2015, MariaDB Corporation. All Rights Reserved.
+Copyright (C) 2014, 2019, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -13,7 +13,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 /**************************************************//**
@@ -35,60 +35,8 @@ Modified 30/07/2014 Jan Lindström jan.lindstrom@mariadb.com
 #include "ibuf0ibuf.h"
 #include "lock0lock.h"
 #include "srv0start.h"
-#include "srv0srv.h"
-#include "ut0timer.h"
 
 #include <list>
-
-/**************************************************//**
-Custom nullptr implementation for under g++ 4.6
-*******************************************************/
-/*
-// #pragma once
-namespace std
-{
- // based on SC22/WG21/N2431 = J16/07-0301
- struct nullptr_t
- {
- template<typename any> operator any * () const
- {
- return 0;
- }
- template<class any, typename T> operator T any:: * () const
- {
- return 0;
- }
-
-#ifdef _MSC_VER
- struct pad {};
- pad __[sizeof(void*)/sizeof(pad)];
-#else
- char __[sizeof(void*)];
-#endif
-private:
- // nullptr_t();// {}
- // nullptr_t(const nullptr_t&);
- // void operator = (const nullptr_t&);
- void operator &() const;
- template<typename any> void operator +(any) const
- {
- // I Love MSVC 2005!
- }
- template<typename any> void operator -(any) const
- {
- // I Love MSVC 2005!
- }
- };
-static const nullptr_t __nullptr = {};
-}
-
-#ifndef nullptr
-#define nullptr std::__nullptr
-#endif
-*/
-/**************************************************//**
-End of Custom nullptr implementation for under g++ 4.6
-*******************************************************/
 
 /* When there's no work, either because defragment is disabled, or because no
 query is submitted, thread checks state every BTR_DEFRAGMENT_SLEEP_IN_USECS.*/
@@ -150,11 +98,9 @@ Initialize defragmentation. */
 void
 btr_defragment_init()
 {
-	srv_defragment_interval = ut_microseconds_to_timer(
-		1000000.0 / srv_defragment_frequency);
+	srv_defragment_interval = 1000000000ULL / srv_defragment_frequency;
 	mutex_create(btr_defragment_mutex_key, &btr_defragment_mutex,
 		     SYNC_ANY_LATCH);
-	os_thread_create(btr_defragment_thread, NULL, NULL);
 }
 
 /******************************************************************//**
@@ -227,13 +173,13 @@ btr_defragment_add_index(
 		page = buf_block_get_frame(block);
 	}
 
-	if (page == NULL && index->table->is_encrypted) {
+	if (page == NULL && index->table->file_unreadable) {
 		mtr_commit(&mtr);
 		*err = DB_DECRYPTION_FAILED;
 		return NULL;
 	}
 
-	if (btr_page_get_level(page, &mtr) == 0) {
+	if (page_is_leaf(page)) {
 		// Index root is a leaf page, no need to defragment.
 		mtr_commit(&mtr);
 		return NULL;
@@ -735,14 +681,13 @@ btr_defragment_n_pages(
 	return current_block;
 }
 
-/******************************************************************//**
-Thread that merges consecutive b-tree pages into fewer pages to defragment
-the index. */
+/** Whether btr_defragment_thread is active */
+bool btr_defragment_thread_active;
+
+/** Merge consecutive b-tree pages into fewer pages to defragment indexes */
 extern "C" UNIV_INTERN
 os_thread_ret_t
-DECLARE_THREAD(btr_defragment_thread)(
-/*==========================================*/
-	void*	arg)	/*!< in: work queue */
+DECLARE_THREAD(btr_defragment_thread)(void*)
 {
 	btr_pcur_t*	pcur;
 	btr_cur_t*	cursor;
@@ -752,6 +697,8 @@ DECLARE_THREAD(btr_defragment_thread)(
 	buf_block_t*	last_block;
 
 	while (srv_shutdown_state == SRV_SHUTDOWN_NONE) {
+		ut_ad(btr_defragment_thread_active);
+
 		/* If defragmentation is disabled, sleep before
 		checking whether it's enabled. */
 		if (!srv_defragment) {
@@ -779,7 +726,7 @@ DECLARE_THREAD(btr_defragment_thread)(
 		}
 
 		pcur = item->pcur;
-		ulonglong now = ut_timer_now();
+		ulonglong now = my_interval_timer();
 		ulonglong elapsed = now - item->last_processed;
 
 		if (elapsed < srv_defragment_interval) {
@@ -789,11 +736,12 @@ DECLARE_THREAD(btr_defragment_thread)(
 			defragmentation of all indices queue up on a single
 			thread, it's likely other indices that follow this one
 			don't need to sleep again. */
-			os_thread_sleep(((ulint)ut_timer_to_microseconds(
-						srv_defragment_interval - elapsed)));
+			os_thread_sleep(static_cast<ulint>
+					((srv_defragment_interval - elapsed)
+					 / 1000));
 		}
 
-		now = ut_timer_now();
+		now = my_interval_timer();
 		mtr_start(&mtr);
 		btr_pcur_restore_position(BTR_MODIFY_TREE, pcur, &mtr);
 		cursor = btr_pcur_get_btr_cur(pcur);
@@ -825,9 +773,9 @@ DECLARE_THREAD(btr_defragment_thread)(
 			btr_defragment_remove_item(item);
 		}
 	}
-	btr_defragment_shutdown();
+
+	btr_defragment_thread_active = false;
 	os_thread_exit(NULL);
 	OS_THREAD_DUMMY_RETURN;
 }
-
 #endif /* !UNIV_HOTBACKUP */

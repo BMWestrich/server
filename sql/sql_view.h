@@ -16,7 +16,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA
 */
 
 #include "sql_class.h"     /* Required by sql_lex.h */
@@ -56,8 +56,12 @@ bool check_duplicate_names(THD *thd, List<Item>& item_list,
 bool mysql_rename_view(THD *thd, const char *new_db, const char *new_name,
                        TABLE_LIST *view);
 
+void make_valid_column_names(THD *thd, List<Item> &item_list);
+
 #define VIEW_ANY_ACL (SELECT_ACL | UPDATE_ACL | INSERT_ACL | DELETE_ACL)
 
 extern const LEX_STRING view_type;
+
+void make_valid_column_names(List<Item> &item_list);
 
 #endif /* SQL_VIEW_INCLUDED */

@@ -11,10 +11,11 @@
 #
 # You should have received a copy of the GNU Lesser General Public
 # License along with this library; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA
 
 include_directories(
   ${MRUBY_INCLUDE_DIRS}
+  ${MESSAGE_PACK_INCLUDE_DIRS}
   )
 
 add_subdirectory(suggest)
@@ -26,6 +27,19 @@ set_source_files_properties(${GROONGA_SOURCES}
   COMPILE_FLAGS "${GRN_C_COMPILE_FLAGS}")
 target_link_libraries(groonga libgroonga)
 install(TARGETS groonga DESTINATION ${BIN_DIR})
+
+if(GRN_WITH_MRUBY)
+  read_file_list(${CMAKE_CURRENT_SOURCE_DIR}/grndb_sources.am GRNDB_SOURCES)
+  add_executable(grndb ${GRNDB_SOURCES})
+  set_source_files_properties(${GRNDB_SOURCES}
+    PROPERTIES
+    COMPILE_FLAGS "${GRN_C_COMPILE_FLAGS}")
+  set_source_files_properties(${GRNDB_SOURCES}
+    PROPERTIES
+    COMPILE_DEFINITIONS "${MRUBY_DEFINITIONS}")
+  target_link_libraries(grndb libgroonga)
+  install(TARGETS grndb DESTINATION ${BIN_DIR})
+endif()
 
 if(NOT WIN32)
   read_file_list(${CMAKE_CURRENT_SOURCE_DIR}/grnslap_sources.am GRNSLAP_SOURCES)

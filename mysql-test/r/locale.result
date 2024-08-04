@@ -51,7 +51,7 @@ DROP TABLE t1;
 #
 SET lc_messages=sr_YU;
 Warnings:
-Warning	1287	'sr_YU' is deprecated and will be removed in a future release. Please use sr_RS instead
+Warning	1287	'sr_YU' ist veraltet. Bitte benutzen Sie 'sr_RS'
 SHOW VARIABLES LIKE 'lc_messages';
 Variable_name	Value
 lc_messages	sr_RS
@@ -90,6 +90,45 @@ SELECT DATE_FORMAT('2001-01-07', '%w %a %W');
 DATE_FORMAT('2001-01-07', '%w %a %W')
 0 Du Duminică
 End of 5.4 tests
+SET NAMES utf8;
+SET lc_time_names=de_AT;
+SELECT monthname('2001-01-01');
+monthname('2001-01-01')
+Jänner
+SELECT monthname('2001-02-01');
+monthname('2001-02-01')
+Februar
+SELECT monthname('2001-03-01');
+monthname('2001-03-01')
+März
+#
+# MDEV-10052 Illegal mix of collations with DAYNAME(date_field)<>varchar_field
+#
+SET NAMES utf8;
+CREATE TABLE t1 (c VARCHAR(8) CHARACTER SET latin1, d DATE);
+INSERT INTO t1 VALUES ('test',now());
+Warnings:
+Note	1265	Data truncated for column 'd' at row 1
+SET lc_time_names=ru_RU;
+SELECT c FROM t1 WHERE DAYNAME(d)<>c;
+ERROR HY000: Illegal mix of collations (utf8_general_ci,COERCIBLE) and (latin1_swedish_ci,IMPLICIT) for operation '<>'
+SELECT c FROM t1 WHERE MONTHNAME(d)<>c;
+ERROR HY000: Illegal mix of collations (utf8_general_ci,COERCIBLE) and (latin1_swedish_ci,IMPLICIT) for operation '<>'
+SET lc_time_names=en_US;
+SELECT c FROM t1 WHERE DAYNAME(d)<>c;
+c
+test
+SELECT c FROM t1 WHERE MONTHNAME(d)<>c;
+c
+test
+SET NAMES latin1;
+SELECT c FROM t1 WHERE DAYNAME(d)<>c;
+c
+test
+SELECT c FROM t1 WHERE MONTHNAME(d)<>c;
+c
+test
+DROP TABLE t1;
 #
 # Start of 5.6 tests
 #
@@ -184,5 +223,21 @@ SELECT * FROM non_existent;
 ERROR 42S02: Table 'test.non_existent' doesn't exist
 SET lc_time_names=@old_50915_lc_time_names;
 #
-# End of 5.6 tests
+# End of 10.0 tests
+#
+#
+# End of 10.1 tests
+#
+create view v1 as select
+format(123456789,2) as b,
+format(123456789,2,'rm_CH') as b1;
+select * from v1;
+b	b1
+123,456,789.00	123'456'789,00
+show create view v1;
+View	Create View	character_set_client	collation_connection
+v1	CREATE ALGORITHM=UNDEFINED DEFINER=`root`@`localhost` SQL SECURITY DEFINER VIEW `v1` AS select format(123456789,2) AS `b`,format(123456789,2,'rm_CH') AS `b1`	utf8	utf8_general_ci
+drop view v1;
+#
+# End of 10.2 tests
 #

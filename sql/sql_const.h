@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335  USA */
 
 /**
   @file
@@ -33,7 +33,17 @@
 #define MAX_SYS_VAR_LENGTH 32
 #define MAX_KEY MAX_INDEXES                     /* Max used keys */
 #define MAX_REF_PARTS 32			/* Max parts used as ref */
-#define MAX_KEY_LENGTH 3072			/* max possible key */
+
+/*
+  Maximum length of the data part of an index lookup key.
+
+  The "data part" is defined as the value itself, not including the
+  NULL-indicator bytes or varchar length bytes ("the Extras"). We need this
+  value because there was a bug where length of the Extras were not counted.
+
+  You probably need MAX_KEY_LENGTH, not this constant.
+*/
+#define MAX_DATA_LENGTH_FOR_KEY 3072
 #if SIZEOF_OFF_T > 4
 #define MAX_REFLENGTH 8				/* Max length for record ref */
 #else
@@ -45,7 +55,18 @@
 #define MAX_MBWIDTH		3		/* Max multibyte sequence */
 #define MAX_FILENAME_MBWIDTH    5
 #define MAX_FIELD_CHARLENGTH	255
-#define MAX_FIELD_VARCHARLENGTH	65535
+/*
+  In MAX_FIELD_VARCHARLENGTH we reserve extra bytes for the overhead:
+  - 2 bytes for the length
+  - 1 byte for NULL bits
+  to avoid the "Row size too large" error for these three corner definitions:
+    CREATE TABLE t1 (c VARBINARY(65533));
+    CREATE TABLE t1 (c VARBINARY(65534));
+    CREATE TABLE t1 (c VARBINARY(65535));
+  Like VARCHAR(65536), they will be converted to BLOB automatically
+  in non-sctict mode.
+*/
+#define MAX_FIELD_VARCHARLENGTH	(65535-2-1)
 #define MAX_FIELD_BLOBLENGTH UINT_MAX32         /* cf field_blob::get_length() */
 #define CONVERT_IF_BIGGER_TO_BLOB 512           /* Threshold *in characters*   */
 
@@ -69,6 +90,7 @@
 #define RAND_TABLE_BIT	(((table_map) 1) << (sizeof(table_map)*8-1))
 #define PSEUDO_TABLE_BITS (PARAM_TABLE_BIT | OUTER_REF_TABLE_BIT | \
                            RAND_TABLE_BIT)
+#define CONNECT_STRING_MAXLEN   65535           /* stored in 2 bytes in .frm */
 #define MAX_FIELDS	4096			/* Limit in the .frm file */
 #define MAX_PARTITIONS  8192
 
@@ -101,6 +123,8 @@
 #define DISK_BUFFER_SIZE	(uint) (IO_SIZE*16) /* Size of diskbuffer */
 
 #define FRM_VER_TRUE_VARCHAR (FRM_VER+4) /* 10 */
+#define FRM_VER_EXPRESSSIONS (FRM_VER+5) /* 11 */
+#define FRM_VER_CURRENT  FRM_VER_EXPRESSSIONS
 
 /***************************************************************************
   Configuration parameters
@@ -112,7 +136,7 @@
 #define MAX_ACCEPT_RETRY	10	// Test accept this many times
 #define MAX_FIELDS_BEFORE_HASH	32
 #define USER_VARS_HASH_SIZE     16
-#define TABLE_OPEN_CACHE_MIN    400
+#define TABLE_OPEN_CACHE_MIN    200
 #define TABLE_OPEN_CACHE_DEFAULT 2000
 #define TABLE_DEF_CACHE_DEFAULT 400
 /**
@@ -212,6 +236,14 @@
 #define HEAP_TEMPTABLE_LOOKUP_COST 0.05
 #define DISK_TEMPTABLE_LOOKUP_COST 1.0
 
+
+#define COST_MAX (DBL_MAX * (1.0 - DBL_EPSILON))
+
+#define COST_ADD(c,d) (COST_MAX - (d) > (c) ? (c) + (d) : COST_MAX)
+
+#define COST_MULT(c,f) (COST_MAX / (f) > (c) ? (c) * (f) : COST_MAX)
+
+
 #define MY_CHARSET_BIN_MB_MAXLEN 1
 
 /** Don't pack string keys shorter than this (if PACK_KEYS=1 isn't used). */
@@ -235,6 +267,8 @@
   that does not respond to "initial server greeting" timely
 */
 #define CONNECT_TIMEOUT		10
+ /* Wait 5 minutes before removing thread from thread cache */
+#define THREAD_CACHE_TIMEOUT	5*60
 
 /* The following can also be changed from the command line */
 #define DEFAULT_CONCURRENCY	10

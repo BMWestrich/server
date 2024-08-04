@@ -19,7 +19,7 @@ SELECT 1 FROM t1
 WHERE NOT EXISTS (SELECT 1 FROM t2 WHERE 1 = (SELECT MIN(t2.b) FROM t3))
 ORDER BY count(*);
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	Extra
-1	PRIMARY	t1	index	NULL	a	5	NULL	2	Using where; Using index; Using temporary
+1	PRIMARY	t1	index	NULL	a	5	NULL	2	Using index
 2	DEPENDENT SUBQUERY	t2	ALL	NULL	NULL	NULL	NULL	2	Using where
 3	DEPENDENT SUBQUERY	t3	system	NULL	NULL	NULL	NULL	0	const row not found
 # should not crash the next statement
@@ -428,7 +428,7 @@ INSERT INTO `t1` VALUES (10,'00:00:00','i','i'),(11,'00:00:00','','');
 set @old_optimizer_switch          = @@session.optimizer_switch;
 SET SESSION OPTIMIZER_SWITCH = 'materialization=off,semijoin=off,loosescan=off,firstmatch=off,mrr=on,engine_condition_pushdown=on';
 Warnings:
-Warning	1681	'engine_condition_pushdown=on' is deprecated and will be removed in a future release.
+Warning	1681	'engine_condition_pushdown=on' is deprecated and will be removed in a future release
 SELECT `time_nokey` G1  FROM t1  WHERE ( `varchar_nokey`  , `varchar_key`  )  IN ( 
 SELECT `varchar_nokey`  , `varchar_nokey`  )  AND `varchar_key`  >= 'c' HAVING G1  ORDER 
 BY `pk`   ;
@@ -618,7 +618,7 @@ INSERT INTO t2 VALUES (9,1);
 set @old_icp=@@optimizer_switch;
 SET SESSION optimizer_switch="engine_condition_pushdown=on";
 Warnings:
-Warning	1681	'engine_condition_pushdown=on' is deprecated and will be removed in a future release.
+Warning	1681	'engine_condition_pushdown=on' is deprecated and will be removed in a future release
 
 SELECT pk
 FROM t2
@@ -1358,6 +1358,8 @@ INSERT IGNORE INTO t2 VALUES (8,0,0),(5,0,0);
 CREATE TABLE t3 (f4 int,KEY (f4)) ;
 INSERT IGNORE INTO t3 VALUES (0),(0);
 set @@optimizer_switch='semijoin=off';
+# NOTE: the following should have 'SUBQUERY', not 'DEPENDENT SUBQUERY'
+# for line with id=2, see MDEV-27794.
 EXPLAIN
 SELECT * FROM t1 WHERE
 (SELECT f2 FROM t2
@@ -1367,7 +1369,7 @@ FROM t3 AS SQ1_t1 JOIN t3 AS SQ1_t3 ON SQ1_t3.f4
 GROUP BY SQ1_t1.f4));
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	Extra
 1	PRIMARY	t1	system	NULL	NULL	NULL	NULL	1	
-2	SUBQUERY	t2	ALL	NULL	NULL	NULL	NULL	2	Using where
+2	DEPENDENT SUBQUERY	t2	ALL	NULL	NULL	NULL	NULL	2	Using where
 3	SUBQUERY	SQ1_t1	index	NULL	f4	5	NULL	2	Using index; Using temporary
 3	SUBQUERY	SQ1_t3	index	f4	f4	5	NULL	2	Using where; Using index; Using join buffer (flat, BNL join)
 SELECT * FROM t1 WHERE
@@ -1409,7 +1411,7 @@ GROUP BY f9;
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	Extra
 1	PRIMARY	NULL	NULL	NULL	NULL	NULL	NULL	NULL	Impossible WHERE
 3	SUBQUERY	NULL	NULL	NULL	NULL	NULL	NULL	NULL	Impossible WHERE noticed after reading const tables
-2	DEPENDENT SUBQUERY	t1	ALL	NULL	NULL	NULL	NULL	2	Using where
+2	DEPENDENT SUBQUERY	t1	ALL	NULL	NULL	NULL	NULL	2	
 SELECT COUNT(t2.f3),
 (SELECT COUNT(f3) FROM t1 WHERE t2.f1) AS f9
 FROM t2 JOIN t1 ON t1.f3
@@ -1425,7 +1427,7 @@ ORDER BY f9;
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	Extra
 1	PRIMARY	NULL	NULL	NULL	NULL	NULL	NULL	NULL	Impossible WHERE
 3	SUBQUERY	NULL	NULL	NULL	NULL	NULL	NULL	NULL	Impossible WHERE noticed after reading const tables
-2	DEPENDENT SUBQUERY	t1	ALL	NULL	NULL	NULL	NULL	2	Using where
+2	DEPENDENT SUBQUERY	t1	ALL	NULL	NULL	NULL	NULL	2	
 SELECT COUNT(t2.f3),
 (SELECT COUNT(f3) FROM t1 WHERE t2.f1) AS f9
 FROM t2 JOIN t1 ON t1.f3
@@ -2003,8 +2005,8 @@ FROM t2 JOIN t3 ON t3.f4 = t2.f4
 WHERE t3.f1 = 8
 GROUP BY 1, 2;
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	Extra
-1	PRIMARY	t3	system	NULL	NULL	NULL	NULL	1	Using filesort
-1	PRIMARY	t2	ALL	NULL	NULL	NULL	NULL	2	Using where
+1	PRIMARY	t3	system	NULL	NULL	NULL	NULL	1	
+1	PRIMARY	t2	ALL	NULL	NULL	NULL	NULL	2	Using where; Using filesort
 2	SUBQUERY	NULL	NULL	NULL	NULL	NULL	NULL	NULL	Impossible WHERE
 3	MATERIALIZED	NULL	NULL	NULL	NULL	NULL	NULL	NULL	no matching row in const table
 PREPARE st1 FROM "
@@ -2349,7 +2351,7 @@ id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	PRIMARY	t2	system	NULL	NULL	NULL	NULL	1	100.00	
 2	DEPENDENT SUBQUERY	t1	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
 Warnings:
-Note	1003	select 3 AS `f` from dual where (not(<expr_cache><3>(<in_optimizer>(3,<exists>(select `test`.`t1`.`b` from `test`.`t1` where (((`test`.`t1`.`c` = 'USA') or (`test`.`t1`.`c` <> 'USA')) and trigcond(((<cache>(3) = `test`.`t1`.`b`) or isnull(`test`.`t1`.`b`))) and (`test`.`t1`.`b` = `test`.`t1`.`a`)) having trigcond(<is_not_null_test>(`test`.`t1`.`b`)))))))
+Note	1003	select 3 AS `f` from dual where !<expr_cache><3>(<in_optimizer>(3,<exists>(select `test`.`t1`.`b` from `test`.`t1` where `test`.`t1`.`b` = `test`.`t1`.`a` and (`test`.`t1`.`c` = 'USA' or `test`.`t1`.`c` <> 'USA') and trigcond(<cache>(3) = `test`.`t1`.`b` or `test`.`t1`.`b` is null) having trigcond(`test`.`t1`.`b` is null))))
 SELECT * FROM t2 
 WHERE f NOT IN (SELECT b FROM t1
 WHERE 0 OR (c IN ('USA') OR c NOT IN ('USA')) AND a = b);
@@ -2401,5 +2403,517 @@ SELECT x FROM t1 WHERE id > (SELECT MAX(id) - 1000 FROM t1) ORDER BY x LIMIT 1;
 x
 0
 drop table t1;
+#
+# MDEV-7691: Assertion `outer_context || !*from_field || *from_field == not_found_field' ...
+#
+set optimizer_switch=default;
+CREATE TABLE t1 (a INT) ENGINE=MyISAM;
+INSERT INTO t1 VALUES (4),(6);
+CREATE TABLE t2 (b INT) ENGINE=MyISAM;
+INSERT INTO t2 VALUES (1),(8);
+PREPARE stmt FROM "
+SELECT * FROM t2
+HAVING 0 IN (
+  SELECT a FROM t1
+  WHERE a IN ( 
+    SELECT a FROM t1
+    WHERE b = a
+  )
+)
+";
+EXECUTE stmt;
+b
+EXECUTE stmt;
+b
+# Alternative test case, without HAVING
+CREATE TABLE t3 (i INT) ENGINE=MyISAM;
+INSERT INTO t3 VALUES (4),(6);
+PREPARE stmt FROM "
+SELECT * FROM t3 AS t10
+WHERE EXISTS ( 
+  SELECT * FROM t3 AS t20 WHERE t10.i IN ( 
+    SELECT i FROM t3 
+  ) 
+)";
+EXECUTE stmt;
+i
+4
+6
+EXECUTE stmt;
+i
+4
+6
+drop table t1, t2, t3;
+#
+# MDEV-11078: NULL NOT IN (non-empty subquery) should never return results
+#
+create table t1(a int,b int);
+create table t2(a int,b int);
+insert into t1 value (1,2);
+select (NULL)  in (select 1 from t1);
+(NULL)  in (select 1 from t1)
+NULL
+select (null)  in (select 1 from t2);
+(null)  in (select 1 from t2)
+0
+select 1 in (select 1 from t1);
+1 in (select 1 from t1)
+1
+select 1 in (select 1 from t2);
+1 in (select 1 from t2)
+0
+select 1 from dual where null in (select 1 from t1);
+1
+select 1 from dual where null in (select 1 from t2);
+1
+select (null,null) in (select * from t1);
+(null,null) in (select * from t1)
+NULL
+select (null,null) in (select * from t2);
+(null,null) in (select * from t2)
+0
+select 1 from dual where null not in (select 1 from t1);
+1
+select 1 from dual where null not in (select 1 from t2);
+1
+1
+drop table t1,t2;
+#
+# MDEV-6486: Assertion `!table || (!table->read_set || bitmap_is_set(table->read_set, field_index))'
+# failed with SELECT SQ, TEXT field
+#
+CREATE TABLE t1 (a VARCHAR(8), KEY(a)) ENGINE=MyISAM;
+INSERT INTO t1 VALUES ('foo'),( 'bar');
+CREATE TABLE t2 (b VARCHAR(8), c TINYTEXT, KEY(b)) ENGINE=MyISAM;
+INSERT INTO t2 VALUES ('baz','baz'),('qux', 'qux');
+SELECT ( SELECT COUNT(*) FROM t1 WHERE a = c ) AS field, COUNT(DISTINCT c)
+FROM t2 WHERE b <= 'quux' GROUP BY field;
+field	COUNT(DISTINCT c)
+0	1
+drop table t1,t2;
+#
+# MDEV-15555: select from DUAL where false yielding wrong result when in a IN
+#
+explain 
+SELECT 2 IN (SELECT 2 from DUAL WHERE 1 != 1);
+id	select_type	table	type	possible_keys	key	key_len	ref	rows	Extra
+1	PRIMARY	NULL	NULL	NULL	NULL	NULL	NULL	NULL	No tables used
+2	SUBQUERY	NULL	NULL	NULL	NULL	NULL	NULL	NULL	Impossible WHERE
+SELECT 2 IN (SELECT 2 from DUAL WHERE 1 != 1);
+2 IN (SELECT 2 from DUAL WHERE 1 != 1)
+0
 SET optimizer_switch= @@global.optimizer_switch;
 set @@tmp_table_size= @@global.tmp_table_size;
+#
+# MDEV-14515: Wrong results for tableless query with subquery in WHERE
+#             and implicit aggregation
+#
+create table t1 (i1 int, i2 int);
+insert into t1 values (1314, 1084),(1330, 1084),(1401, 1084),(580, 1084);
+create table t2 (cd int);
+insert into t2 values
+(1330), (1330), (1330), (1330), (1330), (1330), (1330), (1330),
+(1330), (1330), (1330), (1330), (1330), (1330), (1330), (1330);
+select max(10) from dual
+where exists (select 1 from t2 join t1 on t1.i1 = t2.cd  and t1.i2 = 345);
+max(10)
+NULL
+insert into t2 select * from t2;
+select max(10) from dual
+where exists (select 1 from t2 join t1 on t1.i1 = t2.cd  and t1.i2 = 345);
+max(10)
+NULL
+DROP TABLE t1,t2;
+#
+# MDEV-10232 Scalar result of subquery changes after adding an outer select stmt
+#
+create table t1(c1 int, c2 int, primary key(c2));
+insert into t1 values(2,1),(1,2);
+select (select c1 from t1 group by c1,c2 order by c1 limit 1) as x;
+x
+1
+(select c1 from t1 group by c1,c2 order by c1 limit 1);
+c1
+1
+drop table t1;
+#
+# MDEV-22498: SIGSEGV in Bitmap<64u>::merge on SELECT
+#
+set @save_sql_select_limit= @@sql_select_limit;
+SET sql_select_limit=0;
+CREATE TABLE t1(b INT, c INT);
+CREATE TABLE t2(a INT, b INT);
+INSERT INTO t1 VALUES (1,1),(2,2),(3,3);
+INSERT INTO t2 VALUES (1,1),(2,2),(3,3);
+EXPLAIN EXTENDED SELECT sum(a), t2.a, t2.b FROM t2 HAVING t2.a IN (SELECT t2.b FROM t1);
+id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
+1	PRIMARY	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	Zero limit
+2	DEPENDENT SUBQUERY	t1	ALL	NULL	NULL	NULL	NULL	3	100.00	
+Warnings:
+Note	1276	Field or reference 'test.t2.b' of SELECT #2 was resolved in SELECT #1
+Note	1276	Field or reference 'test.t2.b' of SELECT #2 was resolved in SELECT #1
+Note	1003	select sum(`test`.`t2`.`a`) AS `sum(a)`,`test`.`t2`.`a` AS `a`,`test`.`t2`.`b` AS `b` from `test`.`t2` having <in_optimizer>(`test`.`t2`.`a`,<exists>(select `test`.`t2`.`b` from `test`.`t1` where <cache>(`test`.`t2`.`a`) = `test`.`t2`.`b`))
+SELECT sum(a), t2.a, t2.b FROM t2 HAVING t2.a IN (SELECT t2.b FROM t1);
+sum(a)	a	b
+SET @@sql_select_limit= @save_sql_select_limit;
+EXPLAIN EXTENDED SELECT sum(a), t2.a, t2.b FROM t2 HAVING t2.a IN (SELECT t2.b FROM t1);
+id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
+1	PRIMARY	t2	ALL	NULL	NULL	NULL	NULL	3	100.00	
+2	DEPENDENT SUBQUERY	t1	ALL	NULL	NULL	NULL	NULL	3	100.00	
+Warnings:
+Note	1276	Field or reference 'test.t2.b' of SELECT #2 was resolved in SELECT #1
+Note	1276	Field or reference 'test.t2.b' of SELECT #2 was resolved in SELECT #1
+Note	1003	select sum(`test`.`t2`.`a`) AS `sum(a)`,`test`.`t2`.`a` AS `a`,`test`.`t2`.`b` AS `b` from `test`.`t2` having <expr_cache><`test`.`t2`.`a`,`test`.`t2`.`b`>(<in_optimizer>(`test`.`t2`.`a`,<exists>(select `test`.`t2`.`b` from `test`.`t1` where <cache>(`test`.`t2`.`a`) = `test`.`t2`.`b`)))
+SELECT sum(a), t2.a, t2.b FROM t2 HAVING t2.a IN (SELECT t2.b FROM t1);
+sum(a)	a	b
+6	1	1
+DROP TABLE t1,t2;
+#
+# MDEV-17606: Query returns wrong results (while using CHARACTER SET utf8)
+#
+CREATE TABLE t1(l1 varchar(10), i2 int);
+INSERT INTO t1 VALUES ('e',2),('o',6),('x',4);
+CREATE TABLE t2 (v1 varchar(10) CHARACTER SET utf8, KEY v1 (v1(3)));
+INSERT INTO t2 VALUES  ('k'),('rid'),('f'),('x');
+EXPLAIN EXTENDED SELECT * FROM t1 where  ( t1.l1 < ANY (SELECT MAX(t2.v1) FROM t2));
+id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
+1	PRIMARY	t1	ALL	NULL	NULL	NULL	NULL	3	100.00	Using where
+2	SUBQUERY	t2	ALL	NULL	NULL	NULL	NULL	4	100.00	
+Warnings:
+Note	1003	select `test`.`t1`.`l1` AS `l1`,`test`.`t1`.`i2` AS `i2` from `test`.`t1` where <nop>(<in_optimizer>(`test`.`t1`.`l1`,<max>(select max(`test`.`t2`.`v1`) from `test`.`t2`) > convert(<cache>(`test`.`t1`.`l1`) using utf8)))
+SELECT * FROM t1 where  ( t1.l1 < ANY (SELECT MAX(t2.v1) FROM t2));
+l1	i2
+e	2
+o	6
+DROP TABLE t1, t2;
+#
+# MDEV-19232: Floating point precision / value comparison problem
+#
+CREATE TABLE t1 (region varchar(60), area decimal(10,0), population decimal(11,0));
+INSERT INTO t1 VALUES ('Central America and the Caribbean',91,11797);
+INSERT INTO t1 VALUES ('Central America and the Caribbean',442,66422);
+SET @save_optimizer_switch=@@optimizer_switch;
+SET optimizer_switch='subquery_cache=on';
+SELECT
+population, area, population/area,
+cast(population/area as DECIMAL(20,9)) FROM t1 LIMIT 1;
+population	area	population/area	cast(population/area as DECIMAL(20,9))
+11797	91	129.6374	129.637362637
+SELECT * FROM t1 A
+WHERE population/area = (SELECT MAX(population/area) from t1 B where A.region = B.region);
+region	area	population
+Central America and the Caribbean	442	66422
+SET optimizer_switch='subquery_cache=off';
+SELECT * FROM t1 A
+WHERE population/area = (SELECT MAX(population/area) from t1 B where A.region = B.region);
+region	area	population
+Central America and the Caribbean	442	66422
+SET @@optimizer_switch= @save_optimizer_switch;
+DROP TABLE t1;
+#
+# MDEV-9513: Assertion `join->group_list || !join->is_in_subquery()' failed in create_sort_index
+#
+CREATE TABLE t1 (a INT);
+INSERT INTO t1 VALUES (1),(2);
+CREATE TABLE t2 (a INT);
+INSERT INTO t2 VALUES (2),(3);
+EXPLAIN
+SELECT t1.a FROM t1 WHERE t1.a IN ( SELECT A.a FROM t1 A UNION SELECT B.a FROM t2 B ORDER BY 1);
+id	select_type	table	type	possible_keys	key	key_len	ref	rows	Extra
+1	PRIMARY	t1	ALL	NULL	NULL	NULL	NULL	2	Using where
+2	DEPENDENT SUBQUERY	A	ALL	NULL	NULL	NULL	NULL	2	Using where
+3	DEPENDENT UNION	B	ALL	NULL	NULL	NULL	NULL	2	Using where
+NULL	UNION RESULT	<union2,3>	ALL	NULL	NULL	NULL	NULL	NULL	
+SELECT t1.a FROM t1 WHERE t1.a IN ( SELECT A.a FROM t1 A UNION SELECT B.a FROM t2 B ORDER BY 1);
+a
+1
+2
+EXPLAIN
+SELECT t1.a FROM t1 WHERE EXISTS (SELECT A.a FROM t1 A UNION SELECT B.a FROM t2 B ORDER BY 1);
+id	select_type	table	type	possible_keys	key	key_len	ref	rows	Extra
+1	PRIMARY	t1	ALL	NULL	NULL	NULL	NULL	2	
+2	SUBQUERY	A	ALL	NULL	NULL	NULL	NULL	2	
+3	UNION	B	ALL	NULL	NULL	NULL	NULL	2	
+NULL	UNION RESULT	<union2,3>	ALL	NULL	NULL	NULL	NULL	NULL	
+SELECT t1.a FROM t1 WHERE EXISTS (SELECT A.a FROM t1 A UNION SELECT B.a FROM t2 B ORDER BY 1);
+a
+1
+2
+EXPLAIN
+SELECT t1.a FROM t1 WHERE t1.a IN ( SELECT A.a FROM t1 A UNION ALL SELECT B.a FROM t2 B ORDER BY 1);
+id	select_type	table	type	possible_keys	key	key_len	ref	rows	Extra
+1	PRIMARY	t1	ALL	NULL	NULL	NULL	NULL	2	Using where
+2	DEPENDENT SUBQUERY	A	ALL	NULL	NULL	NULL	NULL	2	Using where
+3	DEPENDENT UNION	B	ALL	NULL	NULL	NULL	NULL	2	Using where
+SELECT t1.a FROM t1 WHERE t1.a IN ( SELECT A.a FROM t1 A UNION ALL SELECT B.a FROM t2 B ORDER BY 1);
+a
+1
+2
+DROP TABLE t1,t2;
+# end of 10.1 tests
+#
+# MDEV-22852: SIGSEGV in sortlength (optimized builds)
+#
+SET @save_optimizer_switch=@@optimizer_switch;
+SET optimizer_switch='subquery_cache=off';
+CREATE TABLE t1 (a INT,b INT);
+INSERT INTO t1 VALUES (0,0),(0,0);
+SELECT (SELECT DISTINCT t1i.b FROM t1 t1i GROUP BY t1i.a ORDER BY MAX(t1o.b)) FROM t1 AS t1o;
+(SELECT DISTINCT t1i.b FROM t1 t1i GROUP BY t1i.a ORDER BY MAX(t1o.b))
+0
+SET @@optimizer_switch= @save_optimizer_switch;
+DROP TABLE t1;
+#
+# MDEV-17066: Bytes lost or Assertion `status_var.local_memory_used == 0 after DELETE
+# with subquery with ROLLUP
+#
+CREATE TABLE t1 (i INT DEFAULT 0, c VARCHAR(2048));
+INSERT INTO t1  SELECT 0, seq FROM seq_1_to_6000;
+CREATE TABLE t2 (f VARCHAR(2048) DEFAULT '');
+INSERT INTO t2 VALUES ('1'),('bar');
+EXPLAIN
+SELECT * FROM t2 WHERE f IN ( SELECT MAX(c) FROM t1 GROUP BY c WITH ROLLUP);
+id	select_type	table	type	possible_keys	key	key_len	ref	rows	Extra
+1	PRIMARY	t2	ALL	NULL	NULL	NULL	NULL	2	Using where
+2	DEPENDENT SUBQUERY	t1	ALL	NULL	NULL	NULL	NULL	6000	Using filesort
+SELECT * FROM t2 WHERE f IN ( SELECT MAX(c) FROM t1 GROUP BY c WITH ROLLUP);
+f
+1
+SELECT * FROM t2;
+f
+1
+bar
+DELETE FROM t2 WHERE f IN ( SELECT MAX(c) FROM t1 GROUP BY c WITH ROLLUP );
+SELECT * FROM t2;
+f
+bar
+DROP TABLE t1, t2;
+#
+# MDEV-23449: alias do not exist and a query do not report an error
+#
+CREATE TABLE t1(a INT, b INT);
+INSERT INTO t1 VALUES (1,1), (2,2), (3,3), (4,4), (5,5);
+SELECT a, b FROM t1 WHERE a IN (SELECT A.a FROM t1 A GROUP BY s.id);
+ERROR 42S22: Unknown column 's.id' in 'group statement'
+DROP TABLE t1;
+#
+# MDEV-24519: Server crashes in Charset::set_charset upon SELECT
+#
+CREATE TABLE t1 (a VARBINARY(8));
+INSERT INTO t1 VALUES ('foo'),('bar');
+CREATE TABLE t2 (b VARBINARY(8));
+EXPLAIN
+SELECT a FROM t1 WHERE (a, a) IN (SELECT 'qux', 'qux') AND a = (SELECT MIN(b) FROM t2);
+id	select_type	table	type	possible_keys	key	key_len	ref	rows	Extra
+1	PRIMARY	NULL	NULL	NULL	NULL	NULL	NULL	NULL	Impossible WHERE
+3	SUBQUERY	NULL	NULL	NULL	NULL	NULL	NULL	NULL	no matching row in const table
+2	SUBQUERY	NULL	NULL	NULL	NULL	NULL	NULL	NULL	No tables used
+SELECT a FROM t1 WHERE (a, a) IN (SELECT 'qux', 'qux') AND a = (SELECT MIN(b) FROM t2);
+a
+DROP TABLE t1,t2;
+CREATE TABLE t1 (a INT);
+INSERT INTO t1 VALUES (1),(2);
+CREATE TABLE t2 (b VARBINARY(8));
+EXPLAIN
+SELECT a FROM t1 WHERE (a, a) IN (SELECT 1, 2) AND a = (SELECT MIN(b) FROM t2);
+id	select_type	table	type	possible_keys	key	key_len	ref	rows	Extra
+1	PRIMARY	t1	ALL	NULL	NULL	NULL	NULL	2	Using where
+3	SUBQUERY	NULL	NULL	NULL	NULL	NULL	NULL	NULL	no matching row in const table
+2	DEPENDENT SUBQUERY	NULL	NULL	NULL	NULL	NULL	NULL	NULL	No tables used
+SELECT a FROM t1 WHERE (a, a) IN (SELECT 1, 2) AND a = (SELECT MIN(b) FROM t2);
+a
+DROP TABLE t1,t2;
+#
+# MDEV-22462: Item_in_subselect::create_single_in_to_exists_cond(JOIN *, Item **, Item **): Assertion `false' failed.
+#
+select 1 from dual where 1 in (select 5 from dual where 1);
+1
+create table t1 (a int);
+insert into t1 values (1),(2),(3);
+update t1 set a = 2 where a in (select a from dual where a = a);
+drop table t1;
+#
+# MDEV-24925: Server crashes in Item_subselect::init_expr_cache_tracker
+#
+CREATE TABLE t1 (id INT PRIMARY KEY);
+INSERT INTO t1 VALUES (1),(2);
+SELECT
+1 IN (
+SELECT
+(SELECT COUNT(id)
+FROM t1
+WHERE t1_outer.id <> id
+) AS f
+FROM
+t1 AS t1_outer
+GROUP BY f
+);
+1 IN (
+SELECT
+(SELECT COUNT(id)
+FROM t1
+WHERE t1_outer.id <> id
+) AS f
+FROM
+t1 AS t1_outer
+GROUP BY f
+)
+1
+SELECT
+1 IN (
+SELECT
+(SELECT COUNT(id)
+FROM t1
+WHERE t1_outer.id <> id
+) AS f
+FROM
+t1 AS t1_outer
+GROUP BY 1
+);
+1 IN (
+SELECT
+(SELECT COUNT(id)
+FROM t1
+WHERE t1_outer.id <> id
+) AS f
+FROM
+t1 AS t1_outer
+GROUP BY 1
+)
+1
+DROP TABLE t1;
+#
+#  MDEV-24898: Server crashes in st_select_lex::next_select / Item_subselect::is_expensive
+#  (Testcase)
+#
+CREATE TABLE t1 (a INT);
+INSERT INTO t1 VALUES (1),(2);
+CREATE TABLE t2 (b INT);
+INSERT INTO t2 VALUES (3),(4);
+SELECT 1 IN (SELECT (SELECT a FROM t1) AS x FROM t2 GROUP BY x);
+ERROR 21000: Subquery returns more than 1 row
+drop table t1,t2;
+#
+# MDEV-25629: Crash in get_sort_by_table() in subquery with order by having outer ref
+#
+CREATE TABLE t1 (i1 int);
+insert into t1 values (1),(2);
+SELECT 1
+FROM (t1 JOIN t1 AS ref_t1 ON
+(t1.i1 > (SELECT ref_t1.i1 AS c0 FROM t1 b ORDER BY -c0)));
+ERROR 21000: Subquery returns more than 1 row
+DROP TABLE t1;
+#
+# MDEV-22377: Subquery in an UPDATE query uses full scan instead of range
+#
+CREATE TABLE t1 (
+key1 varchar(30) NOT NULL,
+col1 int(11) NOT NULL,
+filler char(100)
+);
+insert into t1 select seq, seq, seq from seq_1_to_100;
+CREATE TABLE t10 (
+key1 varchar(30) NOT NULL,
+col1 int,
+filler char(100),
+PRIMARY KEY (key1)
+);
+insert into t10 select seq, seq, seq from seq_1_to_1000;
+CREATE TABLE t11 (
+key1 varchar(30) NOT NULL,
+filler char(100),
+PRIMARY KEY (key1)
+);
+insert into t11 select seq, seq from seq_1_to_1000;
+set @tmp_os=@@optimizer_switch;
+set optimizer_switch='semijoin=off,materialization=off';
+# Must use range access (not full scan) for table tms:
+explain select * from t1 hist
+WHERE
+key1 IN ('1','2','3','4','5','6','7','8','9','10') AND
+hist.col1 NOT IN (SELECT tn.col1
+FROM t10 tn JOIN t11 tms ON tms.key1 = tn.key1
+WHERE tn.key1 IN ('1','2','3','4','5','6','7','8','9','10')
+);
+id	select_type	table	type	possible_keys	key	key_len	ref	rows	Extra
+1	PRIMARY	hist	ALL	NULL	NULL	NULL	NULL	100	Using where
+2	DEPENDENT SUBQUERY	tms	range	PRIMARY	PRIMARY	32	NULL	10	Using where; Using index
+2	DEPENDENT SUBQUERY	tn	eq_ref	PRIMARY	PRIMARY	32	test.tms.key1	1	Using where
+set optimizer_switch=@tmp_os;
+drop table t1, t10, t11;
+#
+# MDEV-28268: Server crashes in Expression_cache_tracker::fetch_current_stats
+#
+CREATE TABLE t1 (a INT, b INT);
+INSERT INTO t1 VALUES (1,2),(3,4);
+ANALYZE FORMAT=JSON
+SELECT DISTINCT
+(SELECT MIN(a) FROM t1 WHERE b <= ANY (SELECT a FROM t1)) AS f
+FROM t1;
+ANALYZE
+{
+  "query_block": {
+    "select_id": 1,
+    "r_loops": 1,
+    "r_total_time_ms": "REPLACED",
+    "duplicate_removal": {
+      "temporary_table": {
+        "table": {
+          "table_name": "t1",
+          "access_type": "ALL",
+          "r_loops": 1,
+          "rows": 2,
+          "r_rows": 2,
+          "r_total_time_ms": "REPLACED",
+          "filtered": 100,
+          "r_filtered": 100
+        },
+        "subqueries": [
+          {
+            "expression_cache": {
+              "state": "disabled",
+              "r_loops": 0,
+              "query_block": {
+                "select_id": 2,
+                "r_loops": 1,
+                "r_total_time_ms": "REPLACED",
+                "table": {
+                  "table_name": "t1",
+                  "access_type": "ALL",
+                  "r_loops": 1,
+                  "rows": 2,
+                  "r_rows": 2,
+                  "r_total_time_ms": "REPLACED",
+                  "filtered": 100,
+                  "r_filtered": 50,
+                  "attached_condition": "<nop>(<in_optimizer>(t1.b,(subquery#3) >= 4))"
+                },
+                "subqueries": [
+                  {
+                    "query_block": {
+                      "select_id": 3,
+                      "r_loops": 1,
+                      "r_total_time_ms": "REPLACED",
+                      "table": {
+                        "table_name": "t1",
+                        "access_type": "ALL",
+                        "r_loops": 1,
+                        "rows": 2,
+                        "r_rows": 2,
+                        "r_total_time_ms": "REPLACED",
+                        "filtered": 100,
+                        "r_filtered": 100
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}
+DROP TABLE t1;
+# End of 10.2 tests

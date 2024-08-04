@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #ifndef INCLUDE_LF_INCLUDED
 #define INCLUDE_LF_INCLUDED
@@ -68,11 +68,8 @@ typedef struct {
   void  *purgatory;
   uint32 purgatory_count;
   uint32 volatile link;
-/* we want sizeof(LF_PINS) to be 128 to avoid false sharing */
-  char pad[128-sizeof(uint32)*2
-              -sizeof(LF_PINBOX *)
-              -sizeof(void*)
-              -sizeof(void *)*(LF_PINBOX_PINS+1)];
+  /* avoid false sharing */
+  char pad[CPU_LEVEL1_DCACHE_LINESIZE];
 } LF_PINS;
 
 /* compile-time assert to make sure we have enough pins.  */

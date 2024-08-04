@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2006, 2011, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2006, 2016, Oracle and/or its affiliates. All Rights Reserved.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +12,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -54,7 +54,7 @@ buf_buddy_alloc(
 				       	storage was allocated from the
 					LRU list and buf_pool->LRU_list_mutex
 					was temporarily released */
-	__attribute__((malloc, nonnull));
+	MY_ATTRIBUTE((malloc, nonnull));
 
 /**********************************************************************//**
 Deallocate a block. */
@@ -68,7 +68,7 @@ buf_buddy_free(
 					be pointed to by the buffer pool */
 	ulint		size)		/*!< in: block size,
 					up to UNIV_PAGE_SIZE */
-	__attribute__((nonnull));
+	MY_ATTRIBUTE((nonnull));
 
 #ifndef UNIV_NONINL
 # include "buf0buddy.ic"

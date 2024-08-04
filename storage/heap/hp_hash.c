@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /* The hash functions used for saveing keys */
 
@@ -513,8 +513,6 @@ ulong hp_rec_hashnr(register HP_KEYDEF *keydef, register const uchar *rec)
     keydef		Key definition
     rec1		Record to compare
     rec2		Other record to compare
-    diff_if_only_endspace_difference
-			Different number of end space is significant    
 
   NOTES
     diff_if_only_endspace_difference is used to allow us to insert
@@ -525,8 +523,7 @@ ulong hp_rec_hashnr(register HP_KEYDEF *keydef, register const uchar *rec)
     <> 0 	Key differes
 */
 
-int hp_rec_key_cmp(HP_KEYDEF *keydef, const uchar *rec1, const uchar *rec2,
-                   my_bool diff_if_only_endspace_difference)
+int hp_rec_key_cmp(HP_KEYDEF *keydef, const uchar *rec1, const uchar *rec2)
 {
   HA_KEYSEG *seg,*endseg;
 
@@ -561,7 +558,7 @@ int hp_rec_key_cmp(HP_KEYDEF *keydef, const uchar *rec1, const uchar *rec2,
       }
       if (seg->charset->coll->strnncollsp(seg->charset,
       					  pos1,char_length1,
-					  pos2,char_length2, 0))
+					  pos2,char_length2))
 	return 1;
     }
     else if (seg->type == HA_KEYTYPE_VARTEXT1)  /* Any VARCHAR segments */
@@ -601,9 +598,7 @@ int hp_rec_key_cmp(HP_KEYDEF *keydef, const uchar *rec1, const uchar *rec2,
 
       if (cs->coll->strnncollsp(seg->charset,
                                 pos1, char_length1,
-                                pos2, char_length2,
-                                seg->flag & HA_END_SPACE_ARE_EQUAL ?
-                                0 : diff_if_only_endspace_difference))
+                                pos2, char_length2))
 	return 1;
     }
     else
@@ -671,7 +666,7 @@ int hp_key_cmp(HP_KEYDEF *keydef, const uchar *rec, const uchar *key)
       
       if (seg->charset->coll->strnncollsp(seg->charset,
 					  (uchar*) pos, char_length_rec,
-					  (uchar*) key, char_length_key, 0))
+					  (uchar*) key, char_length_key))
 	return 1;
     }
     else if (seg->type == HA_KEYTYPE_VARTEXT1)  /* Any VARCHAR segments */
@@ -699,7 +694,7 @@ int hp_key_cmp(HP_KEYDEF *keydef, const uchar *rec, const uchar *key)
 
       if (cs->coll->strnncollsp(seg->charset,
                                 (uchar*) pos, char_length_rec,
-                                (uchar*) key, char_length_key, 0))
+                                (uchar*) key, char_length_key))
 	return 1;
     }
     else
@@ -783,7 +778,6 @@ uint hp_rb_make_key(HP_KEYDEF *keydef, uchar *key,
       uchar *pos= (uchar*) rec + seg->start;
       DBUG_ASSERT(seg->type != HA_KEYTYPE_BIT);
 
-#ifdef HAVE_ISNAN
       if (seg->type == HA_KEYTYPE_FLOAT)
       {
 	float nr;
@@ -807,7 +801,6 @@ uint hp_rb_make_key(HP_KEYDEF *keydef, uchar *key,
 	  continue;
 	}
       }
-#endif
       pos+= length;
       while (length--)
       {
@@ -1011,7 +1004,7 @@ void heap_update_auto_increment(HP_INFO *info, const uchar *record)
 
   switch (info->s->auto_key_type) {
   case HA_KEYTYPE_INT8:
-    s_value= (longlong) *(char*)key;
+    s_value= (longlong) *(const signed char*) key;
     break;
   case HA_KEYTYPE_BINARY:
     value=(ulonglong)  *(uchar*) key;

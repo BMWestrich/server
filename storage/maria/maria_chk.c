@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 /* Describe, check and repair of MARIA tables */
 
@@ -89,7 +89,7 @@ static int sort_record_index(MARIA_SORT_PARAM *sort_param, MARIA_PAGE *page,
 			     uint sortkey, File new_file,
                              my_bool update_index);
 static my_bool write_log_record(HA_CHECK *param);
-static void my_exit(int exit_code) __attribute__ ((noreturn));
+ATTRIBUTE_NORETURN static void my_exit(int exit_code);
 
 HA_CHECK check_param;
 
@@ -384,13 +384,13 @@ static struct my_option my_long_options[] =
     &check_param.read_buffer_length,
     &check_param.read_buffer_length, 0, GET_ULONG, REQUIRED_ARG,
     (long) READ_BUFFER_INIT, (long) MALLOC_OVERHEAD,
-    (long) ~0L, (long) MALLOC_OVERHEAD, (long) 1L, 0},
+    ~0ULL, (long) MALLOC_OVERHEAD, (long) 1L, 0},
   { "write_buffer_size", OPT_WRITE_BUFFER_SIZE,
     "Write buffer size for sequential writes during repair of fixed size or dynamic size rows",
     &check_param.write_buffer_length,
     &check_param.write_buffer_length, 0, GET_ULONG, REQUIRED_ARG,
     (long) READ_BUFFER_INIT, (long) MALLOC_OVERHEAD,
-    (long) ~0L, (long) MALLOC_OVERHEAD, (long) 1L, 0},
+    ~0UL, (long) MALLOC_OVERHEAD, (long) 1L, 0},
   { "sort_buffer_size", OPT_SORT_BUFFER_SIZE,
     "Size of sort buffer. Used by --recover",
     &check_param.sort_buffer_length,
@@ -895,7 +895,7 @@ static void get_options(register int *argc,register char ***argv)
 {
   int ho_error;
 
-  load_defaults("my", load_default_groups, argc, argv);
+  load_defaults_or_exit("my", load_default_groups, argc, argv);
   default_argv= *argv;
   check_param.testflag= T_UPDATE_STATE;
   if (isatty(fileno(stdout)))
@@ -974,6 +974,7 @@ static int maria_chk(HA_CHECK *param, char *filename)
   int error,lock_type,recreate;
   uint warning_printed_by_chk_status;
   my_bool rep_quick= MY_TEST(param->testflag & (T_QUICK | T_FORCE_UNIQUENESS));
+  my_bool born_transactional;
   MARIA_HA *info;
   File datafile;
   char llbuff[22],llbuff2[22];
@@ -1120,7 +1121,7 @@ static int maria_chk(HA_CHECK *param, char *filename)
        maria_test_if_almost_full(info) ||
        info->s->state.header.file_version[3] != maria_file_magic[3] ||
        (set_collation &&
-        set_collation->number != share->state.header.language)))
+        set_collation->number != share->base.language)))
   {
     if (set_collation)
       param->language= set_collation->number;
@@ -1128,7 +1129,7 @@ static int maria_chk(HA_CHECK *param, char *filename)
     {
       fprintf(stderr, "Aria table '%s' is not fixed because of errors\n",
 	      filename);
-      return(-1);
+      DBUG_RETURN(-1);
     }
     recreate=1;
     if (!(param->testflag & T_REP_ANY))
@@ -1150,7 +1151,7 @@ static int maria_chk(HA_CHECK *param, char *filename)
     param->total_deleted+=info->state->del;
     descript(param, info, filename);
     maria_close(info);                          /* Should always succeed */
-    return(0);
+    DBUG_RETURN(0);
   }
 
   if (!stopwords_inited++)
@@ -1275,7 +1276,7 @@ static int maria_chk(HA_CHECK *param, char *filename)
         mysql_file_close(info->dfile.file, MYF(MY_WME)); /* Close new file */
         error|=maria_change_to_newfile(filename,MARIA_NAME_DEXT,DATA_TMP_EXT,
                                        0, MYF(0));
-        if (_ma_open_datafile(info,info->s, NullS, -1))
+        if (_ma_open_datafile(info, info->s))
           error=1;
         param->out_flag&= ~O_NEW_DATA; /* We are using new datafile */
         param->read_cache.file= info->dfile.file;
@@ -1416,6 +1417,7 @@ static int maria_chk(HA_CHECK *param, char *filename)
   maria_lock_database(info, F_UNLCK);
 
 end2:
+  born_transactional= share->base.born_transactional;
   if (maria_close(info))
   {
     _ma_check_print_error(param, default_close_errmsg, my_errno, filename);
@@ -1431,7 +1433,7 @@ end2:
                                       MYF(MY_REDEL_MAKE_BACKUP) : MYF(0)));
   }
   if (opt_transaction_logging &&
-      share->base.born_transactional && !error &&
+      born_transactional && !error &&
       (param->testflag & (T_REP_ANY | T_SORT_RECORDS | T_SORT_INDEX |
                           T_ZEROFILL)))
     error= write_log_record(param);
@@ -1507,8 +1509,8 @@ static void descript(HA_CHECK *param, register MARIA_HA *info, char *name)
   printf("Crashsafe:           %s\n",
          share->base.born_transactional ? "yes" : "no");
   printf("Character set:       %s (%d)\n",
-	 get_charset_name(share->state.header.language),
-	 share->state.header.language);
+	 get_charset_name(share->base.language),
+         (int) share->base.language);
 
   if (param->testflag & T_VERBOSE)
   {
@@ -1526,8 +1528,8 @@ static void descript(HA_CHECK *param, register MARIA_HA *info, char *name)
     }
     if (share->base.born_transactional)
     {
-      printf("LSNs:                create_rename (%lu,0x%lx),"
-             " state_horizon (%lu,0x%lx), skip_redo (%lu,0x%lx)\n",
+      printf("LSNs:                create_rename " LSN_FMT ","
+             " state_horizon " LSN_FMT ", skip_redo " LSN_FMT "\n",
              LSN_IN_PARTS(share->state.create_rename_lsn),
              LSN_IN_PARTS(share->state.is_of_horizon),
              LSN_IN_PARTS(share->state.skip_redo_lsn));
@@ -1699,8 +1701,8 @@ static void descript(HA_CHECK *param, register MARIA_HA *info, char *name)
 	null_bit[0]=null_pos[0]=0;
 	if (keyseg->null_bit)
 	{
-	  sprintf(null_bit,"%d",keyseg->null_bit);
-	  sprintf(null_pos,"%ld",(long) keyseg->null_pos+1);
+	  my_snprintf(null_bit, sizeof(null_bit), "%d", keyseg->null_bit);
+	  my_snprintf(null_pos, sizeof(null_pos), "%ld", (long) keyseg->null_pos+1);
 	}
 	printf("%-7ld%-5d%-9s%-10s%-30s\n",
 	       (long) keyseg->start+1,keyseg->length,

@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 #include "feedback.h"
 #include <sql_acl.h>
@@ -47,7 +47,7 @@ static int table_to_string(TABLE *table, String *result)
 
   res= table->file->ha_rnd_init(1);
 
-  dbug_tmp_use_all_columns(table, table->read_set);
+  dbug_tmp_use_all_columns(table, &table->read_set);
 
   while(!res && !table->file->ha_rnd_next(table->record[0]))
   {
@@ -89,9 +89,8 @@ static int prepare_for_fill(TABLE_LIST *tables)
     (every increment of global thread_id counts as a new connection
     in SHOW STATUS and we want to avoid skewing the statistics)
   */
-  thd->thread_id= thd->variables.pseudo_thread_id= thd_thread_id;
+  thd->variables.pseudo_thread_id= thd->thread_id;
   mysql_mutex_lock(&LOCK_thread_count);
-  thread_count++;
   threads.append(thd);
   mysql_mutex_unlock(&LOCK_thread_count);
   thd->thread_stack= (char*) &tables;
@@ -205,10 +204,10 @@ static void send_report(const char *when)
     /*
       otherwise, prepare the THD and TABLE_LIST,
       create and fill the temporary table with data just like
-      SELECT * FROM IFROEMATION_SCHEMA.feedback is doing,
+      SELECT * FROM INFORMATION_SCHEMA.FEEDBACK is doing,
       read and concatenate table data into a String.
     */
-    if (!(thd= new THD()))
+    if (!(thd= new THD(thd_thread_id)))
       return;
 
     if (prepare_for_fill(&tables))
@@ -239,7 +238,7 @@ static void send_report(const char *when)
       Url *url= todo[i];
 
       if (thd) // for nicer SHOW PROCESSLIST
-        thd->set_query(const_cast<char*>(url->url()), url->url_length());
+        thd->set_query(const_cast<char*>(url->url()), (uint) url->url_length());
 
       if (url->send(str.ptr(), str.length()))
         i++;
@@ -263,7 +262,6 @@ ret:
     */
     mysql_mutex_lock(&LOCK_thread_count);
     thd->set_status_var_init();
-    thread_count--;
     thd->killed= KILL_CONNECTION;
     thd->unlink();
     mysql_cond_broadcast(&COND_thread_count);

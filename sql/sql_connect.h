@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335  USA */
 
 #ifndef SQL_CONNECT_INCLUDED
 #define SQL_CONNECT_INCLUDED
@@ -52,7 +52,7 @@ public:
   void close_and_delete();
   void close_with_error(uint sql_errno,
                         const char *message, uint close_error);
-  THD *create_thd();
+  THD *create_thd(THD *thd);
 };
 
 

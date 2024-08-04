@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 
 /**
@@ -89,8 +89,7 @@ int readfrm(const char *name, const uchar **frmdata, size_t *len)
   error= 0;
   
  err:
-  if (file > 0)
-    (void) mysql_file_close(file, MYF(MY_WME));
+  (void) mysql_file_close(file, MYF(MY_WME));
   
  err_end:		      /* Here when no file */
   DBUG_RETURN (error);
@@ -199,14 +198,15 @@ int extension_based_table_discovery(MY_DIR *dirp, const char *ext_meta,
   end= cur + dirp->number_of_files;
   while (cur < end)
   {
-    char *octothorp= strrchr(cur->name + 1, '#');
+    char *octothorp= strchr(cur->name + 1, '#');
     char *ext= strchr(octothorp ? octothorp : cur->name, FN_EXTCHAR);
 
     if (ext)
     {
       size_t len= (octothorp ? octothorp : ext) - cur->name;
       if (from != cur &&
-          (my_strnncoll(cs, (uchar*)from->name, len, (uchar*)cur->name, len) ||
+          (strlen(from->name) <= len ||
+           my_strnncoll(cs, (uchar*)from->name, len, (uchar*)cur->name, len) ||
            (from->name[len] != FN_EXTCHAR && from->name[len] != '#')))
         advance(from, to, cur, skip);
 
@@ -229,7 +229,7 @@ int extension_based_table_discovery(MY_DIR *dirp, const char *ext_meta,
     cur++;
   }
   advance(from, to, cur, skip);
-  dirp->number_of_files= to - dirp->dir_entry;
+  dirp->number_of_files= (uint)(to - dirp->dir_entry);
   return 0;
 }
 

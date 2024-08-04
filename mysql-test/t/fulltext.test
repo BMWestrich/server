@@ -293,6 +293,7 @@ SELECT t, collation(t) FROM t1 WHERE MATCH t AGAINST ('Osnabr�ck');
 SELECT t, collation(t) FROM t1 WHERE MATCH t AGAINST ('Osnabrueck');
 SELECT t, collation(t),FORMAT(MATCH t AGAINST ('Osnabruck'),6) FROM t1 WHERE MATCH t AGAINST ('Osnabruck');
 #alter table t1 modify t text character set latin1 collate latin1_german2_ci not null;
+SET STATEMENT sql_mode = 'NO_ENGINE_SUBSTITUTION' FOR
 alter table t1 modify t varchar(200) collate latin1_german2_ci not null;
 SELECT t, collation(t) FROM t1 WHERE MATCH t AGAINST ('Osnabr�ck');
 SELECT t, collation(t) FROM t1 WHERE MATCH t AGAINST ('Osnabrueck');
@@ -682,6 +683,21 @@ SELECT * FROM t1 WHERE MATCH (txt1,txt2) AGAINST ('ööö1' IN BOOLEAN MODE);
 SELECT * FROM t1 WHERE MATCH (txt1,txt2) AGAINST ('ùùù2' IN BOOLEAN MODE);
 DROP TABLE t1;
 
+
+--echo #
+--echo # MDEV-14743: Server crashes in Item_func_match::init_search
+--echo #
+
+CREATE TABLE t1 (f VARCHAR(8));
+INSERT INTO t1 VALUES ('foo'),('bar');
+
+SELECT 'foo' IN (  SELECT f FROM t1 GROUP BY MATCH(f) AGAINST ( 'qux' IN BOOLEAN MODE ) );
+SELECT 'foo' IN (  SELECT f FROM t1 GROUP BY MATCH(f) AGAINST ( 'qux' IN BOOLEAN MODE )) as f1, MATCH(f) AGAINST ( 'qux' IN BOOLEAN MODE ) as f2 from t1 ;
+explain extended
+SELECT 'foo' IN (  SELECT f FROM t1 GROUP BY MATCH(f) AGAINST ( 'qux' IN BOOLEAN MODE )) as f1, MATCH(f) AGAINST ( 'qux' IN BOOLEAN MODE ) as f2 from t1 ;
+
+drop table t1;
+
 --echo #
 --echo # End of 5.5 tests
 --echo #
@@ -700,3 +716,17 @@ CREATE TABLE t1 (
 CREATE FULLTEXT INDEX IF NOT EXISTS ft1 ON t1(title);
 CREATE FULLTEXT INDEX IF NOT EXISTS ft1 ON t1(title);
 DROP TABLE t1;
+
+--echo #
+--echo # MDEV-22275 (Memory leak)
+--echo #
+
+CREATE TEMPORARY TABLE tmp (a TEXT) ENGINE=MyISAM;
+ALTER TABLE tmp ADD FULLTEXT (a);
+INSERT INTO tmp VALUES ('foo');
+DROP TABLE tmp;
+
+CREATE TEMPORARY TABLE tmp (a TEXT) ENGINE=Aria;
+ALTER TABLE tmp ADD FULLTEXT (a);
+INSERT INTO tmp VALUES ('foo');
+DROP TABLE tmp;

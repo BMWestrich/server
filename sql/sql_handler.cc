@@ -1,5 +1,5 @@
 /* Copyright (c) 2001, 2015, Oracle and/or its affiliates.
-   Copyright (c) 2011, 2015, MariaDB
+   Copyright (c) 2011, 2016, MariaDB Corporation
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA */
 
 
 /* HANDLER ... commands - direct access to ISAM */
@@ -155,10 +155,11 @@ static void mysql_ha_close_table(SQL_HANDLER *handler)
 {
   THD *thd= handler->thd;
   TABLE *table= handler->table;
+  DBUG_ENTER("mysql_ha_close_table");
 
   /* check if table was already closed */
   if (!table)
-    return;
+    DBUG_VOID_RETURN;
 
   if (!table->s->tmp_table)
   {
@@ -178,12 +179,12 @@ static void mysql_ha_close_table(SQL_HANDLER *handler)
   {
     /* Must be a temporary table */
     table->file->ha_index_or_rnd_end();
-    table->query_id= thd->query_id;
     table->open_by_handler= 0;
-    mark_tmp_table_for_reuse(table);
+    thd->mark_tmp_table_as_free_for_reuse(table);
   }
   my_free(handler->lock);
   handler->init();
+  DBUG_VOID_RETURN;
 }
 
 /*
@@ -283,7 +284,7 @@ bool mysql_ha_open(THD *thd, TABLE_LIST *tables, SQL_HANDLER *reopen)
     back-off for such locks.
   */
   tables->mdl_request.init(MDL_key::TABLE, tables->db, tables->table_name,
-                           MDL_SHARED, MDL_TRANSACTION);
+                           MDL_SHARED_READ, MDL_TRANSACTION);
   mdl_savepoint= thd->mdl_context.mdl_savepoint();
 
   /* for now HANDLER can be used only for real TABLES */
@@ -294,7 +295,7 @@ bool mysql_ha_open(THD *thd, TABLE_LIST *tables, SQL_HANDLER *reopen)
     open_ltable() or open_table() because we would like to be able
     to open a temporary table.
   */
-  error= (open_temporary_tables(thd, tables) ||
+  error= (thd->open_temporary_tables(tables) ||
           open_tables(thd, &tables, &counter, 0));
 
   if (error)
@@ -357,8 +358,6 @@ bool mysql_ha_open(THD *thd, TABLE_LIST *tables, SQL_HANDLER *reopen)
     sql_handler->reset();
   }    
   sql_handler->table= table;
-  memcpy(&sql_handler->mdl_request, &tables->mdl_request,
-         sizeof(tables->mdl_request));
 
   if (!(sql_handler->lock= get_lock_data(thd, &sql_handler->table, 1,
                                          GET_LOCK_STORE_LOCKS)))
@@ -371,6 +370,8 @@ bool mysql_ha_open(THD *thd, TABLE_LIST *tables, SQL_HANDLER *reopen)
 
   if (error)
     goto err;
+
+  sql_handler->mdl_request.move_from(tables->mdl_request);
 
   /* Always read all columns */
   table->read_set= &table->s->all_set;
@@ -389,8 +390,7 @@ bool mysql_ha_open(THD *thd, TABLE_LIST *tables, SQL_HANDLER *reopen)
   /*
     Assert that the above check prevents opening of views and merge tables.
     For temporary tables, TABLE::next can be set even if only one table
-    was opened for HANDLER as it is used to link them together
-    (see thd->temporary_tables).
+    was opened for HANDLER as it is used to link them together.
   */
   DBUG_ASSERT(sql_handler->table->next == NULL ||
               sql_handler->table->s->tmp_table);
@@ -400,9 +400,6 @@ bool mysql_ha_open(THD *thd, TABLE_LIST *tables, SQL_HANDLER *reopen)
     in asserts.
   */
   table->open_by_handler= 1;
-
-  /* Safety, cleanup the pointer to satisfy MDL assertions. */
-  tables->mdl_request.ticket= NULL;
 
   if (! reopen)
     my_ok(thd);
@@ -460,9 +457,10 @@ bool mysql_ha_close(THD *thd, TABLE_LIST *tables)
     my_error(ER_LOCK_OR_ACTIVE_TRANSACTION, MYF(0));
     DBUG_RETURN(TRUE);
   }
-  if ((handler= (SQL_HANDLER*) my_hash_search(&thd->handler_tables_hash,
-                                                 (uchar*) tables->alias,
-                                                 strlen(tables->alias) + 1)))
+  if ((my_hash_inited(&thd->handler_tables_hash)) &&
+      (handler= (SQL_HANDLER*) my_hash_search(&thd->handler_tables_hash,
+                                              (uchar*) tables->alias,
+                                              strlen(tables->alias) + 1)))
   {
     mysql_ha_close_table(handler);
     my_hash_delete(&thd->handler_tables_hash, (uchar*) handler);
@@ -488,56 +486,6 @@ bool mysql_ha_close(THD *thd, TABLE_LIST *tables)
 
 
 /**
-  A helper class to process an error from mysql_lock_tables().
-  HANDLER READ statement's attempt to lock the subject table
-  may get aborted if there is a pending DDL. In that case
-  we close the table, reopen it, and try to read again.
-  This is implicit and obscure, since HANDLER position
-  is lost in the process, but it's the legacy server
-  behaviour we should preserve.
-*/
-
-class Sql_handler_lock_error_handler: public Internal_error_handler
-{
-public:
-  virtual
-  bool handle_condition(THD *thd,
-                        uint sql_errno,
-                        const char *sqlstate,
-                        Sql_condition::enum_warning_level level,
-                        const char* msg,
-                        Sql_condition **cond_hdl);
-
-  bool need_reopen() const { return m_need_reopen; };
-  void init() { m_need_reopen= FALSE; };
-private:
-  bool m_need_reopen;
-};
-
-
-/**
-  Handle an error from mysql_lock_tables().
-  Ignore ER_LOCK_ABORTED errors.
-*/
-
-bool
-Sql_handler_lock_error_handler::
-handle_condition(THD *thd,
-                 uint sql_errno,
-                 const char *sqlstate,
-                 Sql_condition::enum_warning_level level,
-                 const char* msg,
-                 Sql_condition **cond_hdl)
-{
-  *cond_hdl= NULL;
-  if (sql_errno == ER_LOCK_ABORTED)
-    m_need_reopen= TRUE;
-
-  return m_need_reopen;
-}
-
-
-/**
    Finds an open HANDLER table.
 
    @params name		Name of handler to open
@@ -549,8 +497,10 @@ handle_condition(THD *thd,
 SQL_HANDLER *mysql_ha_find_handler(THD *thd, const char *name)
 {
   SQL_HANDLER *handler;
-  if ((handler= (SQL_HANDLER*) my_hash_search(&thd->handler_tables_hash,
-                                              (uchar*) name, strlen(name) + 1)))
+  if ((my_hash_inited(&thd->handler_tables_hash)) &&
+      (handler= (SQL_HANDLER*) my_hash_search(&thd->handler_tables_hash,
+                                              (uchar*) name,
+                                              strlen(name) + 1)))
   {
     DBUG_PRINT("info-in-hash",("'%s'.'%s' as '%s' table: %p",
                                handler->db.str,
@@ -650,7 +600,6 @@ mysql_ha_fix_cond_and_key(SQL_HANDLER *handler,
       }
       for (keypart_map= key_len=0 ; (item=it_ke++) ; key_part++)
       {
-        my_bitmap_map *old_map;
 	/* note that 'item' can be changed by fix_fields() call */
         if ((!item->fixed &&
              item->fix_fields(thd, it_ke.ref())) ||
@@ -663,9 +612,11 @@ mysql_ha_fix_cond_and_key(SQL_HANDLER *handler,
         }
         if (!in_prepare)
         {
-          old_map= dbug_tmp_use_all_columns(table, table->write_set);
-          (void) item->save_in_field(key_part->field, 1);
-          dbug_tmp_restore_column_map(table->write_set, old_map);
+          MY_BITMAP *old_map= dbug_tmp_use_all_columns(table, &table->write_set);
+          int res= item->save_in_field(key_part->field, 1);
+          dbug_tmp_restore_column_map(&table->write_set, old_map);
+          if (res)
+            return 1;
         }
         key_len+= key_part->store_length;
         keypart_map= (keypart_map << 1) | 1;
@@ -733,7 +684,7 @@ bool mysql_ha_read(THD *thd, TABLE_LIST *tables,
   int           error, keyno;
   uint          num_rows;
   uchar		*UNINIT_VAR(key);
-  Sql_handler_lock_error_handler sql_handler_lock_error;
+  MDL_deadlock_and_lock_abort_error_handler sql_handler_lock_error;
   DBUG_ENTER("mysql_ha_read");
   DBUG_PRINT("enter",("'%s'.'%s' as '%s'",
                       tables->db, tables->table_name, tables->alias));
@@ -748,15 +699,19 @@ retry:
   if (!(handler= mysql_ha_find_handler(thd, tables->alias)))
     goto err0;
 
+  if (thd->transaction.xid_state.check_has_uncommitted_xa())
+    goto err0;
+
   table= handler->table;
   tables->table= table;                         // This is used by fix_fields
   table->pos_in_table_list= tables;
 
-  if (handler->lock->lock_count > 0)
+  if (handler->lock->table_count > 0)
   {
     int lock_error;
 
-    handler->lock->locks[0]->type= handler->lock->locks[0]->org_type;
+    if (handler->lock->lock_count > 0)
+      handler->lock->locks[0]->type= handler->lock->locks[0]->org_type;
 
     /* save open_tables state */
     TABLE* backup_open_tables= thd->open_tables;
@@ -930,9 +885,6 @@ retry:
       }
       goto ok;
     }
-    /* Generate values for virtual fields */
-    if (table->vfield)
-      update_virtual_fields(thd, table);
     if (cond && !cond->val_int())
     {
       if (thd->is_error())
@@ -985,6 +937,7 @@ SQL_HANDLER *mysql_ha_read_prepare(THD *thd, TABLE_LIST *tables,
   if (!(handler= mysql_ha_find_handler(thd, tables->alias)))
     DBUG_RETURN(0);
   tables->table= handler->table;         // This is used by fix_fields
+  handler->table->pos_in_table_list= tables;
   if (mysql_ha_fix_cond_and_key(handler, mode, keyname, key_expr, cond, 1))
     DBUG_RETURN(0);
   DBUG_RETURN(handler);
@@ -1195,10 +1148,10 @@ void mysql_ha_set_explicit_lock_duration(THD *thd)
   Remove temporary tables from the HANDLER's hash table. The reason
   for having a separate function, rather than calling
   mysql_ha_rm_tables() is that it is not always feasible (e.g. in
-  close_temporary_tables) to obtain a TABLE_LIST containing the
+  THD::close_temporary_tables) to obtain a TABLE_LIST containing the
   temporary tables.
 
-  @See close_temporary_tables
+  @See THD::close_temporary_tables()
   @param thd Thread identifier.
 */
 void mysql_ha_rm_temporary_tables(THD *thd)

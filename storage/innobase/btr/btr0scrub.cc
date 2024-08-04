@@ -1,4 +1,5 @@
 // Copyright (c) 2014, Google Inc.
+// Copyright (c) 2017, 2021, MariaDB Corporation.
 
 /**************************************************//**
 @file btr/btr0scrub.cc
@@ -77,6 +78,7 @@ static
 void
 log_scrub_failure(
 /*===============*/
+	dict_index_t* index,     /*!< in: index */
 	btr_scrub_t* scrub_data, /*!< in: data to store statistics on */
 	buf_block_t* block,	 /*!< in: block */
 	dberr_t err)             /*!< in: error */
@@ -100,42 +102,55 @@ log_scrub_failure(
 		reason = "unknown";
 		scrub_data->scrub_stat.page_split_failures_unknown++;
 	}
-	fprintf(stderr,
-		"InnoDB: Warning: Failed to scrub page %lu in space %lu : %s\n",
-		buf_block_get_page_no(block),
-		buf_block_get_space(block),
-		reason);
+
+	ib::warn() << "Failed to scrub index " << index->name
+		   << " of table " << index->table->name
+		   << " page " << block->page.id << ": " << reason;
 }
 
 /****************************************************************
 Lock dict mutexes */
 static
 bool
-btr_scrub_lock_dict_func(ulint space, bool lock_to_close_table,
+btr_scrub_lock_dict_func(ulint space_id, bool lock_to_close_table,
 			 const char * file, uint line)
 {
-	uint start = time(0);
-	uint last = start;
+	time_t start = time(0);
+	time_t last = start;
 
-	while (mutex_enter_nowait_func(&(dict_sys->mutex), file, line)) {
+	/* FIXME: this is not the proper way of doing things. The
+	dict_sys->mutex should not be held by any thread for longer
+	than a few microseconds. It must not be held during I/O,
+	for example. So, what is the purpose for this busy-waiting?
+	This function should be rewritten as part of MDEV-8139:
+	Fix scrubbing tests. */
+
+	while (mutex_enter_nowait(&(dict_sys->mutex))) {
 		/* if we lock to close a table, we wait forever
 		* if we don't lock to close a table, we check if space
 		* is closing, and then instead give up
 		*/
-		if (lock_to_close_table == false) {
-			if (fil_crypt_is_closing(space)) {
+		if (lock_to_close_table) {
+		} else if (fil_space_t* space = fil_space_acquire(space_id)) {
+			bool stopping = space->is_stopping();
+			fil_space_release(space);
+			if (stopping) {
 				return false;
 			}
+		} else {
+			return false;
 		}
+
 		os_thread_sleep(250000);
 
-		uint now = time(0);
+		time_t now = time(0);
+
 		if (now >= last + 30) {
 			fprintf(stderr,
-				"WARNING: %s:%u waited %u seconds for"
-				" dict_sys lock, space: %lu"
-				" lock_to_close_table: %u\n",
-				file, line, now - start, space,
+				"WARNING: %s:%u waited %ld seconds for"
+				" dict_sys lock, space: " ULINTPF
+				" lock_to_close_table: %d\n",
+				file, line, long(now - start), space_id,
 				lock_to_close_table);
 
 			last = now;
@@ -181,16 +196,21 @@ void
 btr_scrub_table_close_for_thread(
 	btr_scrub_t *scrub_data)
 {
-	if (scrub_data->current_table == NULL)
+	if (scrub_data->current_table == NULL) {
 		return;
+	}
 
-	bool lock_for_close = true;
-	btr_scrub_lock_dict(scrub_data->space, lock_for_close);
-
-	/* perform the actual closing */
-	btr_scrub_table_close(scrub_data->current_table);
-
-	btr_scrub_unlock_dict();
+	if (fil_space_t* space = fil_space_acquire(scrub_data->space)) {
+		/* If tablespace is not marked as stopping perform
+		the actual close. */
+		if (!space->is_stopping()) {
+			mutex_enter(&dict_sys->mutex);
+			/* perform the actual closing */
+			btr_scrub_table_close(scrub_data->current_table);
+			mutex_exit(&dict_sys->mutex);
+		}
+		fil_space_release(space);
+	}
 
 	scrub_data->current_table = NULL;
 	scrub_data->current_index = NULL;
@@ -246,11 +266,10 @@ btr_page_needs_scrubbing(
 		return BTR_SCRUB_SKIP_PAGE_AND_CLOSE_TABLE;
 	}
 
-	page_t*	page = buf_block_get_frame(block);
-	uint type = fil_page_get_type(page);
+	const page_t*	page = buf_block_get_frame(block);
 
 	if (allocated == BTR_SCRUB_PAGE_ALLOCATED) {
-		if (type != FIL_PAGE_INDEX) {
+		if (fil_page_get_type(page) != FIL_PAGE_INDEX) {
 			/* this function is called from fil-crypt-threads.
 			* these threads iterate all pages of all tablespaces
 			* and don't know about fil_page_type.
@@ -267,7 +286,7 @@ btr_page_needs_scrubbing(
 			return BTR_SCRUB_SKIP_PAGE_AND_CLOSE_TABLE;
 		}
 
-		if (page_has_garbage(page) == false) {
+		if (!page_has_garbage(page)) {
 			/* no garbage (from deleted/shrunken records) */
 			return BTR_SCRUB_SKIP_PAGE_AND_CLOSE_TABLE;
 		}
@@ -275,11 +294,12 @@ btr_page_needs_scrubbing(
 	} else if (allocated == BTR_SCRUB_PAGE_FREE ||
 		   allocated == BTR_SCRUB_PAGE_ALLOCATION_UNKNOWN) {
 
-		if (! (type == FIL_PAGE_INDEX ||
-		       type == FIL_PAGE_TYPE_BLOB ||
-		       type == FIL_PAGE_TYPE_ZBLOB ||
-		       type == FIL_PAGE_TYPE_ZBLOB2)) {
-
+		switch (fil_page_get_type(page)) {
+		case FIL_PAGE_INDEX:
+		case FIL_PAGE_TYPE_ZBLOB:
+		case FIL_PAGE_TYPE_ZBLOB2:
+			break;
+		default:
 			/**
 			* If this is a dropped page, we also need to scrub
 			* BLOB pages
@@ -291,7 +311,8 @@ btr_page_needs_scrubbing(
 		}
 	}
 
-	if (btr_page_get_index_id(page) == IBUF_INDEX_ID) {
+	if (block->page.id.space() == TRX_SYS_SPACE
+	    && btr_page_get_index_id(page) == IBUF_INDEX_ID) {
 		/* skip ibuf */
 		return BTR_SCRUB_SKIP_PAGE_AND_CLOSE_TABLE;
 	}
@@ -344,16 +365,7 @@ btr_optimistic_scrub(
 	    page_get_n_recs(buf_block_get_frame(block)) > 2 &&
 	    (rand() % 100) < test_pessimistic_scrub_pct) {
 
-		fprintf(stderr,
-			"scrub: simulate btr_page_reorganize failed %lu:%lu "
-			" table: %llu:%s index: %llu:%s get_n_recs(): %lu\n",
-			buf_block_get_space(block),
-			buf_block_get_page_no(block),
-			(ulonglong)scrub_data->current_table->id,
-			scrub_data->current_table->name,
-			(ulonglong)scrub_data->current_index->id,
-			scrub_data->current_index->name,
-			page_get_n_recs(buf_block_get_frame(block)));
+		log_scrub_failure(index, scrub_data, block, DB_OVERFLOW);
 		return DB_OVERFLOW;
 	}
 #endif
@@ -368,12 +380,17 @@ btr_optimistic_scrub(
 
 	/* We play safe and reset the free bits */
 	if (!dict_index_is_clust(index) &&
-	    page_is_leaf(buf_block_get_frame(block))) {
+	    block != NULL) {
+		buf_frame_t* frame = buf_block_get_frame(block);
+		if (frame &&
+		    page_is_leaf(frame)) {
 
 			ibuf_reset_free_bits(block);
+		}
 	}
 
 	scrub_data->scrub_stat.page_reorganizations++;
+
 	return DB_SUCCESS;
 }
 
@@ -392,11 +409,12 @@ btr_pessimistic_scrub(
 	mtr_t* mtr)              /*!< in: mtr */
 {
 	page_t*	page = buf_block_get_frame(block);
+
 	if (page_get_n_recs(page) < 2) {
 		/**
 		* There is no way we can split a page with < 2 records
 		*/
-		log_scrub_failure(scrub_data, block, DB_UNDERFLOW);
+		log_scrub_failure(index, scrub_data, block, DB_UNDERFLOW);
 		return DB_UNDERFLOW;
 	}
 
@@ -407,17 +425,19 @@ btr_pessimistic_scrub(
 	ulint n_reserved = 0;
 	if (!fsp_reserve_free_extents(&n_reserved, index->space,
 				      n_extents, FSP_NORMAL, mtr)) {
-		log_scrub_failure(scrub_data, block,
+		log_scrub_failure(index, scrub_data, block,
 				  DB_OUT_OF_FILE_SPACE);
 		return DB_OUT_OF_FILE_SPACE;
 	}
 
 	/* read block variables */
-	ulint space = buf_block_get_space(block);
-	ulint page_no = buf_block_get_page_no(block);
-	ulint zip_size = buf_block_get_zip_size(block);
-	ulint left_page_no = btr_page_get_prev(page, mtr);
-	ulint right_page_no = btr_page_get_next(page, mtr);
+	const ulint page_no =  mach_read_from_4(page + FIL_PAGE_OFFSET);
+	const page_id_t page_id(dict_index_get_space(index), page_no);
+	const uint32_t left_page_no = btr_page_get_prev(page);
+	const uint32_t right_page_no = btr_page_get_next(page);
+	const page_id_t lpage_id(dict_index_get_space(index), left_page_no);
+	const page_id_t rpage_id(dict_index_get_space(index), right_page_no);
+	const page_size_t page_size(dict_table_page_size(index->table));
 
 	/**
 	* When splitting page, we need X-latches on left/right brothers
@@ -430,19 +450,17 @@ btr_pessimistic_scrub(
 		* and re-lock. We still have x-lock on index
 		* so this should be safe
 		*/
-		mtr_release_buf_page_at_savepoint(mtr, scrub_data->savepoint,
-						  block);
+		mtr->release_block_at_savepoint(scrub_data->savepoint, block);
 
-		buf_block_t* get_block = btr_block_get(
-			space, zip_size, left_page_no,
+		buf_block_t* get_block __attribute__((unused)) = btr_block_get(
+			lpage_id, page_size,
 			RW_X_LATCH, index, mtr);
-		get_block->check_index_page_at_flush = TRUE;
 
 		/**
 		* Refetch block and re-initialize page
 		*/
 		block = btr_block_get(
-			space, zip_size, page_no,
+			page_id, page_size,
 			RW_X_LATCH, index, mtr);
 
 		page = buf_block_get_frame(block);
@@ -450,21 +468,20 @@ btr_pessimistic_scrub(
 		/**
 		* structure should be unchanged
 		*/
-		ut_a(left_page_no == btr_page_get_prev(page, mtr));
-		ut_a(right_page_no == btr_page_get_next(page, mtr));
+		ut_a(left_page_no == btr_page_get_prev(page));
+		ut_a(right_page_no == btr_page_get_next(page));
 	}
 
 	if (right_page_no != FIL_NULL) {
-		buf_block_t* get_block = btr_block_get(
-			space, zip_size, right_page_no,
+		buf_block_t* get_block __attribute__((unused))= btr_block_get(
+			rpage_id, page_size,
 			RW_X_LATCH, index, mtr);
-		get_block->check_index_page_at_flush = TRUE;
 	}
 
 	/* arguments to btr_page_split_and_insert */
 	mem_heap_t* heap = NULL;
 	dtuple_t* entry = NULL;
-	ulint* offsets = NULL;
+	rec_offs* offsets = NULL;
 	ulint n_ext = 0;
 	ulint flags = BTR_MODIFY_TREE;
 
@@ -478,7 +495,7 @@ btr_pessimistic_scrub(
 	/**
 	* call split page with NULL as argument for entry to insert
 	*/
-	if (dict_index_get_page(index) == buf_block_get_page_no(block)) {
+	if (dict_index_get_page(index) == page_no) {
 		/* The page is the root page
 		* NOTE: ibuf_reset_free_bits is called inside
 		* btr_root_raise_and_insert */
@@ -488,9 +505,13 @@ btr_pessimistic_scrub(
 		/* We play safe and reset the free bits
 		* NOTE: need to call this prior to btr_page_split_and_insert */
 		if (!dict_index_is_clust(index) &&
-		    page_is_leaf(buf_block_get_frame(block))) {
+		    block != NULL) {
+			buf_frame_t* frame = buf_block_get_frame(block);
+			if (frame &&
+			    page_is_leaf(frame)) {
 
-			ibuf_reset_free_bits(block);
+				ibuf_reset_free_bits(block);
+			}
 		}
 
 		rec = btr_page_split_and_insert(
@@ -551,7 +572,7 @@ btr_scrub_table_needs_scrubbing(
 		return false;
 	}
 
-	if (table->corrupted) {
+	if (!table->is_readable()) {
 		return false;
 	}
 
@@ -611,13 +632,8 @@ btr_scrub_get_table_and_index(
 		scrub_data->current_table = NULL;
 	}
 
-	/* argument to dict_table_open_on_index_id */
-	bool dict_locked = true;
-
 	/* open table based on index_id */
-	dict_table_t* table = dict_table_open_on_index_id(
-		index_id,
-		dict_locked);
+	dict_table_t* table = dict_table_open_on_index_id(index_id);
 
 	if (table != NULL) {
 		/* mark table as being scrubbed */
@@ -659,8 +675,9 @@ btr_scrub_free_page(
 				FIL_PAGE_TYPE_ALLOCATED);
 	}
 
-	ulint compact = 1;
-	page_create(block, mtr, compact);
+	page_create(block, mtr,
+		    dict_table_is_comp(scrub_data->current_table),
+		    dict_index_is_spatial(scrub_data->current_index));
 
 	mtr_commit(mtr);
 
@@ -788,11 +805,8 @@ btr_scrub_page(
 		return BTR_SCRUB_SKIP_PAGE_AND_CLOSE_TABLE;
 	}
 
-	buf_frame_t* frame = NULL;
+	buf_frame_t* frame = buf_block_get_frame(block);
 
-	if (block) {
-		frame = buf_block_get_frame(block);
-	}
 	if (!frame || btr_page_get_index_id(frame) !=
 	    scrub_data->current_index->id) {
 		/* page has been reallocated to new index */
@@ -821,18 +835,12 @@ btr_scrub_page(
 
 /**************************************************************//**
 Start iterating a space */
-UNIV_INTERN
-bool
-btr_scrub_start_space(
-/*===================*/
-	ulint space,             /*!< in: space */
-	btr_scrub_t* scrub_data) /*!< in/out: scrub data */
+bool btr_scrub_start_space(const fil_space_t &space, btr_scrub_t *scrub_data)
 {
-	scrub_data->space = space;
+	scrub_data->space = space.id;
 	scrub_data->current_table = NULL;
 	scrub_data->current_index = NULL;
-
-	scrub_data->compressed = fil_space_get_zip_size(space) > 0;
+	scrub_data->compressed = FSP_FLAGS_GET_ZIP_SSIZE(space.flags) != 0;
 	scrub_data->scrubbing = check_scrub_setting(scrub_data);
 	return scrub_data->scrubbing;
 }
@@ -862,17 +870,15 @@ btr_scrub_update_total_stat(btr_scrub_t *scrub_data)
 	memset(&scrub_data->scrub_stat, 0, sizeof(scrub_data->scrub_stat));
 }
 
-/**************************************************************//**
-Complete iterating a space */
+/** Complete iterating a space.
+@param[in,out]	scrub_data	 scrub data */
 UNIV_INTERN
-bool
-btr_scrub_complete_space(
-/*=====================*/
-	btr_scrub_t* scrub_data) /*!< in/out: scrub data */
+void
+btr_scrub_complete_space(btr_scrub_t* scrub_data)
 {
+	ut_ad(scrub_data->scrubbing);
 	btr_scrub_table_close_for_thread(scrub_data);
 	btr_scrub_update_total_stat(scrub_data);
-	return scrub_data->scrubbing;
 }
 
 /*********************************************************************
@@ -891,8 +897,7 @@ UNIV_INTERN
 void
 btr_scrub_init()
 {
-	mutex_create(scrub_stat_mutex_key,
-		     &scrub_stat_mutex, SYNC_NO_ORDER_CHECK);
+	mutex_create(LATCH_ID_SCRUB_STAT_MUTEX, &scrub_stat_mutex);
 
 	memset(&scrub_stat, 0, sizeof(scrub_stat));
 }
@@ -905,3 +910,4 @@ btr_scrub_cleanup()
 {
 	mutex_free(&scrub_stat_mutex);
 }
+

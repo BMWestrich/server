@@ -1,6 +1,6 @@
 /* -*- c-basic-offset: 2 -*- */
 /*
-  Copyright(C) 2013-2014 Brazil
+  Copyright(C) 2013-2017 Brazil
 
   This library is free software; you can redistribute it and/or
   modify it under the terms of the GNU Lesser General Public
@@ -13,11 +13,10 @@
 
   You should have received a copy of the GNU Lesser General Public
   License along with this library; if not, write to the Free Software
-  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA
 */
 
-#ifndef GRN_MRB_H
-#define GRN_MRB_H
+#pragma once
 
 #include "grn.h"
 #include "grn_ctx.h"
@@ -33,14 +32,11 @@ extern "C" {
 void grn_mrb_init_from_env(void);
 
 #ifdef GRN_WITH_MRUBY
-GRN_API mrb_value grn_mrb_eval(grn_ctx *ctx, const char *script, int script_length);
 GRN_API mrb_value grn_mrb_load(grn_ctx *ctx, const char *path);
-GRN_API grn_rc grn_mrb_to_grn(grn_ctx *ctx, mrb_value mrb_object, grn_obj *grn_object);
 GRN_API const char *grn_mrb_get_system_ruby_scripts_dir(grn_ctx *ctx);
+grn_bool grn_mrb_is_order_by_estimated_size_enabled(void);
 #endif
 
 #ifdef __cplusplus
 }
 #endif
-
-#endif /* GRN_MRB_H */

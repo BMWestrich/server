@@ -40,7 +40,6 @@
 
 #ifdef HAVE_CHARSET_tis620
 
-#define BUFFER_MULTIPLY 4
 #define M  L_MIDDLE
 #define U  L_UPPER
 #define L  L_LOWER
@@ -450,7 +449,7 @@ static const uchar sort_order_tis620[]=
 static size_t thai2sortable(uchar *tstr, size_t len)
 {
   uchar	*p;
-  int	tlen;
+  size_t	tlen;
   uchar	l2bias;
 
   tlen= len;
@@ -525,7 +524,7 @@ int my_strnncoll_tis620(CHARSET_INFO *cs __attribute__((unused)),
 
   tc1= buf;
   if ((len1 + len2 +2) > (int) sizeof(buf))
-    tc1= (uchar*) my_str_malloc(len1+len2+2);
+    tc1= (uchar*) my_malloc(len1+len2+2, MYF(MY_FAE));
   tc2= tc1 + len1+1;
   memcpy((char*) tc1, (char*) s1, len1);
   tc1[len1]= 0;		/* if length(s1)> len1, need to put 'end of string' */
@@ -535,33 +534,30 @@ int my_strnncoll_tis620(CHARSET_INFO *cs __attribute__((unused)),
   thai2sortable(tc2, len2);
   i= strcmp((char*)tc1, (char*)tc2);
   if (tc1 != buf)
-    my_str_free(tc1);
+    my_free(tc1);
   return i;
 }
 
 
 static
 int my_strnncollsp_tis620(CHARSET_INFO * cs __attribute__((unused)),
-			  const uchar *a0, size_t a_length, 
-			  const uchar *b0, size_t b_length,
-                          my_bool diff_if_only_endspace_difference)
+			  const uchar *a0, size_t a_length,
+			  const uchar *b0, size_t b_length)
 {
   uchar	buf[80], *end, *a, *b, *alloced= NULL;
   size_t length;
   int res= 0;
 
-#ifndef VARCHAR_WITH_DIFF_ENDSPACE_ARE_DIFFERENT_FOR_UNIQUE
-  diff_if_only_endspace_difference= 0;
-#endif
-  
   a= buf;
   if ((a_length + b_length +2) > (int) sizeof(buf))
-    alloced= a= (uchar*) my_str_malloc(a_length+b_length+2);
+    alloced= a= (uchar*) my_malloc(a_length+b_length+2, MYF(MY_FAE));
   
   b= a + a_length+1;
-  memcpy((char*) a, (char*) a0, a_length);
+  if (a_length)
+    memcpy((char*) a, (char*) a0, a_length);
   a[a_length]= 0;	/* if length(a0)> len1, need to put 'end of string' */
-  memcpy((char *)b, (char *)b0, b_length);
+  if (b_length)
+    memcpy((char *)b, (char *)b0, b_length);
   b[b_length]= 0;	/* put end of string */
   a_length= thai2sortable(a, a_length);
   b_length= thai2sortable(b, b_length);
@@ -575,41 +571,27 @@ int my_strnncollsp_tis620(CHARSET_INFO * cs __attribute__((unused)),
       goto ret;
     }
   }
-  if (a_length != b_length)
-  {
-    int swap= 1;
-    if (diff_if_only_endspace_difference)
-      res= 1;                                   /* Assume 'a' is bigger */
-    /*
-      Check the next not space character of the longer key. If it's < ' ',
-      then it's smaller than the other key.
-    */
-    if (a_length < b_length)
-    {
-      /* put shorter key in s */
-      a_length= b_length;
-      a= b;
-      swap= -1;					/* swap sign of result */
-      res= -res;
-    }
-    for (end= a + a_length-length; a < end ; a++)
-    {
-      if (*a != ' ')
-      {
-	res= (*a < ' ') ? -swap : swap;
-	goto ret;
-      }
-    }
-  }
-  
+
+  res= a_length == b_length ? 0 :
+       a_length < b_length  ?
+         -my_strnncollsp_padspace_bin(b, b_length - length) :
+         my_strnncollsp_padspace_bin(a, a_length - length);
+
 ret:
   
   if (alloced)
-    my_str_free(alloced);
+    my_free(alloced);
   return res;
 }
 
 
+static
+int my_strnncollsp_tis620_nopad(CHARSET_INFO * cs __attribute__((unused)),
+			        const uchar *a0, size_t a_length,
+			        const uchar *b0, size_t b_length)
+{
+  return my_strnncoll_tis620(cs, a0, a_length, b0, b_length, FALSE);
+}
 /*
   strnxfrm replacment, convert Thai string to sortable string
 
@@ -623,17 +605,40 @@ my_strnxfrm_tis620(CHARSET_INFO *cs,
                    const uchar *src, size_t srclen, uint flags)
 {
   size_t len, dstlen0= dstlen;
-  len= (uint) (strmake((char*) dst, (char*) src, MY_MIN(dstlen, srclen)) -
-	               (char*) dst);
+  len= MY_MIN(dstlen, srclen);
+  memcpy(dst, src, len);
   len= thai2sortable(dst, len);
   set_if_smaller(dstlen, nweights);
   set_if_smaller(len, dstlen); 
   len= my_strxfrm_pad_desc_and_reverse(cs, dst, dst + len, dst + dstlen,
-                                       dstlen - len, flags, 0);
+                                       (uint)(dstlen - len), flags, 0);
   if ((flags & MY_STRXFRM_PAD_TO_MAXLEN) && len < dstlen0)
   {
-    uint fill_length= dstlen0 - len;
+    size_t fill_length= dstlen0 - len;
     cs->cset->fill(cs, (char*) dst + len, fill_length, cs->pad_char);
+    len= dstlen0;
+  }
+  return len;
+}
+
+
+static size_t
+my_strnxfrm_tis620_nopad(CHARSET_INFO *cs,
+                         uchar *dst, size_t dstlen, uint nweights,
+                         const uchar *src, size_t srclen, uint flags)
+{
+  size_t len, dstlen0= dstlen;
+  len= MY_MIN(dstlen, srclen);
+  memcpy(dst, src, len);
+  len= thai2sortable(dst, len);
+  set_if_smaller(dstlen, nweights);
+  set_if_smaller(len, dstlen);
+  len= my_strxfrm_pad_desc_and_reverse_nopad(cs, dst, dst + len, dst + dstlen,
+                                             (uint)(dstlen - len), flags, 0);
+  if ((flags & MY_STRXFRM_PAD_TO_MAXLEN) && len < dstlen0)
+  {
+    size_t fill_length= dstlen0 - len;
+    memset(dst + len, 0x00, fill_length);
     len= dstlen0;
   }
   return len;
@@ -857,14 +862,26 @@ static MY_COLLATION_HANDLER my_collation_ci_handler =
     my_propagate_simple
 };
 
+static MY_COLLATION_HANDLER my_collation_nopad_ci_handler =
+{
+    NULL,		/* init */
+    my_strnncoll_tis620,
+    my_strnncollsp_tis620_nopad,
+    my_strnxfrm_tis620_nopad,
+    my_strnxfrmlen_simple,
+    my_like_range_simple,
+    my_wildcmp_8bit,	/* wildcmp   */
+    my_strcasecmp_8bit,
+    my_instr_simple,				/* QQ: To be fixed */
+    my_hash_sort_simple_nopad,
+    my_propagate_simple
+};
+
 static MY_CHARSET_HANDLER my_charset_handler=
 {
     NULL,		/* init */
-    NULL,		/* ismbchar  */
-    my_mbcharlen_8bit,	/* mbcharlen */
     my_numchars_8bit,
     my_charpos_8bit,
-    my_well_formed_len_8bit,
     my_lengthsp_8bit,
     my_numcells_8bit,
     my_mb_wc_tis620,	/* mb_wc     */
@@ -956,6 +973,72 @@ struct charset_info_st my_charset_tis620_bin=
     1,                  /* levels_for_order   */
     &my_charset_handler,
     &my_collation_8bit_bin_handler
+};
+
+
+struct charset_info_st my_charset_tis620_thai_nopad_ci=
+{
+    MY_NOPAD_ID(18),0,0,   /* number           */
+    MY_CS_COMPILED|MY_CS_STRNXFRM|MY_CS_NON1TO1|MY_CS_NOPAD, /* state */
+    "tis620",              /* cs name          */
+    "tis620_thai_nopad_ci",/* name             */
+    "",                    /* comment          */
+    NULL,                  /* tailoring        */
+    ctype_tis620,
+    to_lower_tis620,
+    to_upper_tis620,
+    sort_order_tis620,
+    NULL,                  /* uca              */
+    NULL,                  /* tab_to_uni       */
+    NULL,                  /* tab_from_uni     */
+    &my_unicase_default,   /* caseinfo         */
+    NULL,                  /* state_map        */
+    NULL,                  /* ident_map        */
+    4,                     /* strxfrm_multiply */
+    1,                     /* caseup_multiply  */
+    1,                     /* casedn_multiply  */
+    1,                     /* mbminlen         */
+    1,                     /* mbmaxlen         */
+    0,                     /* min_sort_char    */
+    255,                   /* max_sort_char    */
+    ' ',                   /* pad char         */
+    0,                     /* escape_with_backslash_is_dangerous */
+    1,                     /* levels_for_order */
+    &my_charset_handler,
+    &my_collation_nopad_ci_handler
+};
+
+
+struct charset_info_st my_charset_tis620_nopad_bin=
+{
+    MY_NOPAD_ID(89),0,0,   /* number           */
+    MY_CS_COMPILED|MY_CS_BINSORT|MY_CS_NOPAD, /* state */
+    "tis620",              /* cs name          */
+    "tis620_nopad_bin",    /* name             */
+    "",                    /* comment          */
+    NULL,                  /* tailoring        */
+    ctype_tis620,
+    to_lower_tis620,
+    to_upper_tis620,
+    NULL,                  /* sort_order       */
+    NULL,                  /* uca              */
+    NULL,                  /* tab_to_uni       */
+    NULL,                  /* tab_from_uni     */
+    &my_unicase_default,   /* caseinfo         */
+    NULL,                  /* state_map        */
+    NULL,                  /* ident_map        */
+    1,                     /* strxfrm_multiply */
+    1,                     /* caseup_multiply  */
+    1,                     /* casedn_multiply  */
+    1,                     /* mbminlen         */
+    1,                     /* mbmaxlen         */
+    0,                     /* min_sort_char    */
+    255,                   /* max_sort_char    */
+    ' ',                   /* pad char         */
+    0,                     /* escape_with_backslash_is_dangerous */
+    1,                     /* levels_for_order */
+    &my_charset_handler,
+    &my_collation_8bit_nopad_bin_handler
 };
 
 

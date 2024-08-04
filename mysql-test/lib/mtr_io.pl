@@ -13,7 +13,7 @@
 # 
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335  USA
 
 # This is a library file used by the Perl version of mysql-test-run,
 # and is part of the translation of the Bourne shell script with the
@@ -21,6 +21,7 @@
 
 use strict;
 use Carp;
+use My::Platform;
 
 sub mtr_fromfile ($);
 sub mtr_tofile ($@);
@@ -45,10 +46,10 @@ sub mtr_fromfile ($) {
 
 sub mtr_tofile ($@) {
   my $file=  shift;
-
-  open(FILE,">>",$file) or mtr_error("can't open file \"$file\": $!");
-  print FILE join("", @_);
-  close FILE;
+  my $fh= open_for_append $file;
+  mtr_error("can't open file \"$file\": $!") unless defined($fh);
+  print $fh join("", @_);
+  close $fh;
 }
 
 

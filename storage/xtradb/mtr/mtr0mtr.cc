@@ -1,6 +1,7 @@
 /*****************************************************************************
 
-Copyright (c) 1995, 2013, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1995, 2016, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2020, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +13,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -59,7 +60,7 @@ mtr_block_dirtied(
 
 /*****************************************************************//**
 Releases the item in the slot given. */
-static __attribute__((nonnull))
+static MY_ATTRIBUTE((nonnull))
 void
 mtr_memo_slot_release_func(
 /*=======================*/
@@ -88,6 +89,15 @@ mtr_memo_slot_release_func(
 	case MTR_MEMO_X_LOCK:
 		rw_lock_x_unlock((prio_rw_lock_t*) object);
 		break;
+	case MTR_MEMO_SPACE_X_LOCK:
+		{
+			fil_space_t* space = reinterpret_cast<fil_space_t*>(
+				static_cast<char*>(object)
+				- my_offsetof(fil_space_t, latch));
+			space->committed_size = space->size;
+			rw_lock_x_unlock(&space->latch);
+		}
+		break;
 #ifdef UNIV_DEBUG
 	default:
 		ut_ad(slot->type == MTR_MEMO_MODIFY);
@@ -106,7 +116,7 @@ mtr_memo_slot_release_func(
 Releases the mlocks and other objects stored in an mtr memo.
 They are released in the order opposite to which they were pushed
 to the memo. */
-static __attribute__((nonnull))
+static MY_ATTRIBUTE((nonnull))
 void
 mtr_memo_pop_all(
 /*=============*/
@@ -312,7 +322,6 @@ mtr_commit(
 /*=======*/
 	mtr_t*	mtr)	/*!< in: mini-transaction */
 {
-	ut_ad(mtr);
 	ut_ad(mtr->magic_n == MTR_MAGIC_N);
 	ut_ad(mtr->state == MTR_ACTIVE);
 	ut_ad(!mtr->inside_ibuf);
@@ -398,7 +407,7 @@ mtr_read_ulint(
 /*===========*/
 	const byte*	ptr,	/*!< in: pointer from where to read */
 	ulint		type,	/*!< in: MLOG_1BYTE, MLOG_2BYTES, MLOG_4BYTES */
-	mtr_t*		mtr __attribute__((unused)))
+	mtr_t*		mtr MY_ATTRIBUTE((unused)))
 				/*!< in: mini-transaction handle */
 {
 	ut_ad(mtr->state == MTR_ACTIVE);

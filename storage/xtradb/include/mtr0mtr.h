@@ -1,7 +1,8 @@
 /*****************************************************************************
 
-Copyright (c) 1995, 2013, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1995, 2016, Oracle and/or its affiliates. All Rights Reserved.
 Copyright (c) 2012, Facebook Inc.
+Copyright (c) 2013, 2020, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -13,7 +14,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -35,7 +36,6 @@ Created 11/26/1995 Heikki Tuuri
 #include "ut0byte.h"
 #include "mtr0types.h"
 #include "page0types.h"
-#include "trx0types.h"
 
 /* Logging modes for a mini-transaction */
 #define MTR_LOG_ALL		21	/* default mode: log all operations
@@ -58,6 +58,7 @@ first 3 values must be RW_S_LATCH, RW_X_LATCH, RW_NO_LATCH */
 #endif /* UNIV_DEBUG */
 #define	MTR_MEMO_S_LOCK		55
 #define	MTR_MEMO_X_LOCK		56
+#define	MTR_MEMO_SPACE_X_LOCK	57
 
 /** @name Log item types
 The log items are declared 'byte' so that the compiler can warn if val
@@ -213,30 +214,17 @@ functions).  The page number parameter was originally written as 0. @{ */
 Starts a mini-transaction. */
 UNIV_INLINE
 void
-mtr_start_trx(
-/*======*/
-	mtr_t*	mtr,	/*!< out: mini-transaction */
-	trx_t*	trx)	/*!< in: transaction */
-	__attribute__((nonnull (1)));
-/***************************************************************//**
-Starts a mini-transaction. */
-UNIV_INLINE
-void
 mtr_start(
 /*======*/
 	mtr_t*	mtr)	/*!< out: mini-transaction */
-{
-	mtr_start_trx(mtr, NULL);
-}
-	__attribute__((nonnull))
+	MY_ATTRIBUTE((nonnull));
 /***************************************************************//**
 Commits a mini-transaction. */
 UNIV_INTERN
 void
 mtr_commit(
 /*=======*/
-	mtr_t*	mtr)	/*!< in/out: mini-transaction */
-	__attribute__((nonnull));
+	mtr_t*	mtr);	/*!< in/out: mini-transaction */
 /**********************************************************//**
 Sets and returns a savepoint in mtr.
 @return	savepoint */
@@ -307,6 +295,8 @@ This macro locks an rw-lock in s-mode. */
 This macro locks an rw-lock in x-mode. */
 #define mtr_x_lock(B, MTR)	mtr_x_lock_func((B), __FILE__, __LINE__,\
 						(MTR))
+#define mtr_x_space_lock(B, MTR) mtr_x_space_lock_func(B, __FILE__, __LINE__,\
+						       MTR)
 /*********************************************************************//**
 NOTE! Use the macro above!
 Locks a lock in s-mode. */
@@ -329,6 +319,14 @@ mtr_x_lock_func(
 	const char*	file,	/*!< in: file name */
 	ulint		line,	/*!< in: line number */
 	mtr_t*		mtr);	/*!< in: mtr */
+
+/** Acquire exclusive tablespace latch.
+@param lock   fil_space_t::latch
+@param file   source code file name of the caller
+@param line   source code line number of the caller
+@param mtr    mini-transaction */
+inline void mtr_x_space_lock_func(prio_rw_lock_t *lock,
+                                  const char *file, ulint line, mtr_t *mtr);
 #endif /* !UNIV_HOTBACKUP */
 
 /***************************************************//**
@@ -341,7 +339,7 @@ mtr_memo_release(
 	mtr_t*	mtr,	/*!< in/out: mini-transaction */
 	void*	object,	/*!< in: object */
 	ulint	type)	/*!< in: object type: MTR_MEMO_S_LOCK, ... */
-	__attribute__((nonnull));
+	MY_ATTRIBUTE((nonnull));
 #ifdef UNIV_DEBUG
 # ifndef UNIV_HOTBACKUP
 /**********************************************************//**
@@ -354,7 +352,7 @@ mtr_memo_contains(
 	mtr_t*		mtr,	/*!< in: mtr */
 	const void*	object,	/*!< in: object to search */
 	ulint		type)	/*!< in: type of object */
-	__attribute__((warn_unused_result, nonnull));
+	MY_ATTRIBUTE((warn_unused_result));
 
 /**********************************************************//**
 Checks if memo contains the given page.
@@ -436,7 +434,6 @@ struct mtr_t{
 #ifdef UNIV_DEBUG
 	ulint		magic_n;
 #endif /* UNIV_DEBUG */
-	trx_t*		trx;	/*!< transaction */
 };
 
 #ifdef UNIV_DEBUG

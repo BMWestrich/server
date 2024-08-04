@@ -27,7 +27,8 @@ set @my_thread_cache_size         =@@global.thread_cache_size;
 set @my_max_allowed_packet        =@@global.max_allowed_packet;
 set @my_delay_key_write           =@@global.delay_key_write;
 set @my_join_buffer_size          =@@global.join_buffer_size;
-set @my_log_warnings               =@@global.log_warnings;
+set @my_log_warnings              =@@global.log_warnings;
+set @my_local_infile              =@@global.local_infile;
 set @`test`=1;
 select @test, @`test`, @TEST, @`TEST`, @"teSt";
 @test	@`test`	@TEST	@`TEST`	@"teSt"
@@ -77,7 +78,7 @@ explain extended select @t1:=(@t2:=1)+@t3:=4,@t1,@t2,@t3;
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	No tables used
 Warnings:
-Note	1003	select (@t1:=((@t2:=1) + (@t3:=4))) AS `@t1:=(@t2:=1)+@t3:=4`,(@`t1`) AS `@t1`,(@`t2`) AS `@t2`,(@`t3`) AS `@t3`
+Note	1003	select @t1:=(@t2:=1) + (@t3:=4) AS `@t1:=(@t2:=1)+@t3:=4`,@`t1` AS `@t1`,@`t2` AS `@t2`,@`t3` AS `@t3`
 select @t5;
 @t5
 1.23456
@@ -189,7 +190,7 @@ select @@concurrent_insert;
 AUTO
 set global timed_mutexes=ON;
 Warnings:
-Warning	1287	'@@timed_mutexes' is deprecated and will be removed in a future release.
+Warning	1287	'@@timed_mutexes' is deprecated and will be removed in a future release
 show variables like 'timed_mutexes';
 Variable_name	Value
 timed_mutexes	ON
@@ -198,7 +199,7 @@ VARIABLE_NAME	VARIABLE_VALUE
 TIMED_MUTEXES	ON
 set global timed_mutexes=0;
 Warnings:
-Warning	1287	'@@timed_mutexes' is deprecated and will be removed in a future release.
+Warning	1287	'@@timed_mutexes' is deprecated and will be removed in a future release
 show variables like 'timed_mutexes';
 Variable_name	Value
 timed_mutexes	OFF
@@ -522,9 +523,6 @@ Warning	1292	Truncated incorrect max_heap_table_size value: '100'
 set max_join_size=100;
 set max_sort_length=100;
 set global max_user_connections=100;
-select @@max_user_connections;
-@@max_user_connections
-100
 set global max_write_lock_count=100;
 set myisam_sort_buffer_size=100;
 Warnings:
@@ -568,6 +566,7 @@ set sql_safe_updates=1;
 set sql_select_limit=1;
 set sql_select_limit=default;
 set sql_warnings=1;
+set @save_table_open_cache=@@table_open_cache;
 set global table_open_cache=100;
 set default_storage_engine=myisam;
 set global thread_cache_size=100;
@@ -647,13 +646,14 @@ select * from information_schema.global_variables where variable_name like 'myis
 VARIABLE_NAME	VARIABLE_VALUE
 MYISAM_MAX_SORT_FILE_SIZE	MAX_FILE_SIZE
 set global myisam_max_sort_file_size=default;
+set @@global.max_user_connections=10, @@local.max_join_size=1000;
 select @@global.max_user_connections,@@local.max_join_size;
 @@global.max_user_connections	@@local.max_join_size
-100	100
+10	1000
 set @svc=@@global.max_user_connections, @svj=@@local.max_join_size;
 select @@global.max_user_connections,@@local.max_join_size;
 @@global.max_user_connections	@@local.max_join_size
-100	100
+10	1000
 set @@global.max_user_connections=111,@@local.max_join_size=222;
 select @@global.max_user_connections,@@local.max_join_size;
 @@global.max_user_connections	@@local.max_join_size
@@ -665,12 +665,13 @@ select @@global.max_user_connections,@@local.max_join_size;
 set @@global.max_user_connections=@svc, @@local.max_join_size=@svj;
 select @@global.max_user_connections,@@local.max_join_size;
 @@global.max_user_connections	@@local.max_join_size
-100	100
+10	1000
 set @a=1, @b=2;
 set @a=@b, @b=@a;
 select @a, @b;
 @a	@b
 2	1
+set @@global.max_user_connections=@my_max_user_connections;
 set @@global.global.key_buffer_size= 1;
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'key_buffer_size= 1' at line 1
 set GLOBAL global.key_buffer_size= 1;
@@ -731,8 +732,8 @@ show create table t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
   `c1` bigint(20) DEFAULT NULL,
-  `c2` decimal(65,30) DEFAULT NULL,
-  `c3` longtext,
+  `c2` decimal(65,38) DEFAULT NULL,
+  `c3` longtext DEFAULT NULL,
   `c4` double DEFAULT NULL
 ) ENGINE=MyISAM DEFAULT CHARSET=latin1
 drop table t1;
@@ -748,11 +749,11 @@ Warnings:
 Warning	1292	Truncated incorrect table_open_cache value: '-1'
 SHOW VARIABLES LIKE 'table_open_cache';
 Variable_name	Value
-table_open_cache	1
+table_open_cache	10
 SELECT * FROM INFORMATION_SCHEMA.SESSION_VARIABLES WHERE VARIABLE_NAME LIKE 'table_open_cache';
 VARIABLE_NAME	VARIABLE_VALUE
-TABLE_OPEN_CACHE	1
-SET GLOBAL table_open_cache=DEFAULT;
+TABLE_OPEN_CACHE	10
+SET GLOBAL table_open_cache=@save_table_open_cache;
 set character_set_results=NULL;
 select ifnull(@@character_set_results,"really null");
 ifnull(@@character_set_results,"really null")
@@ -822,7 +823,8 @@ set @@global.lc_time_names=fr_FR;
 select @@global.lc_time_names, @@lc_time_names;
 @@global.lc_time_names	@@lc_time_names
 fr_FR	en_US
-New connection
+connect  con1,localhost,root,,;
+connection con1;
 select @@global.lc_time_names, @@lc_time_names;
 @@global.lc_time_names	@@lc_time_names
 fr_FR	fr_FR
@@ -830,7 +832,8 @@ set @@lc_time_names=ru_RU;
 select @@global.lc_time_names, @@lc_time_names;
 @@global.lc_time_names	@@lc_time_names
 fr_FR	ru_RU
-Returnung to default connection
+disconnect con1;
+connection default;
 select @@global.lc_time_names, @@lc_time_names;
 @@global.lc_time_names	@@lc_time_names
 fr_FR	en_US
@@ -1058,12 +1061,13 @@ set global net_write_timeout         =@my_net_write_timeout;
 set global net_read_timeout          =@my_net_read_timeout;
 set global server_id                 =@my_server_id;
 set global slow_launch_time          =@my_slow_launch_time;
-set global default_storage_engine            =@my_storage_engine;
+set global default_storage_engine    =@my_storage_engine;
 set global thread_cache_size         =@my_thread_cache_size;
-set global max_allowed_packet        = default;
+set global max_allowed_packet        =@my_max_allowed_packet;
 set global delay_key_write           =@my_delay_key_write;
 set global join_buffer_size          =@my_join_buffer_size;
 set global log_warnings              =@my_log_warnings;
+set global local_infile              =@my_local_infile;
 show global variables where Variable_name='table_definition_cache';
 Variable_name	Value
 table_definition_cache	#
@@ -1133,12 +1137,12 @@ ERROR HY000: Variable 'ft_stopword_file' is a read only variable
 #
 SHOW VARIABLES like 'back_log';
 Variable_name	Value
-back_log	80
+back_log	#
 SELECT @@session.back_log;
 ERROR HY000: Variable 'back_log' is a GLOBAL variable
-SELECT @@global.back_log;
-@@global.back_log
-80
+SELECT @@global.back_log > 0;
+@@global.back_log > 0
+1
 SET @@session.back_log= 7;
 ERROR HY000: Variable 'back_log' is a read only variable
 SET @@global.back_log= 7;
@@ -1276,12 +1280,12 @@ ERROR HY000: Variable 'lower_case_table_names' is a read only variable
 #
 SHOW VARIABLES like 'myisam_recover_options';
 Variable_name	Value
-myisam_recover_options	DEFAULT
+myisam_recover_options	BACKUP,QUICK
 SELECT @@session.myisam_recover_options;
 ERROR HY000: Variable 'myisam_recover_options' is a GLOBAL variable
 SELECT @@global.myisam_recover_options;
 @@global.myisam_recover_options
-DEFAULT
+BACKUP,QUICK
 SET @@session.myisam_recover_options= 'x';
 ERROR HY000: Variable 'myisam_recover_options' is a read only variable
 SET @@global.myisam_recover_options= 'x';
@@ -1443,7 +1447,7 @@ Warnings:
 Warning	1292	Truncated incorrect auto_increment_offset value: '0'
 select @@default_storage_engine;
 Catalog	Database	Table	Table_alias	Column	Column_alias	Type	Length	Max length	Is_null	Flags	Decimals	Charsetnr
-def					@@default_storage_engine	253	6	6	Y	0	31	8
+def					@@default_storage_engine	253	6	6	Y	0	39	8
 @@default_storage_engine
 MyISAM
 SET @old_server_id = @@GLOBAL.server_id;
@@ -1464,15 +1468,17 @@ SELECT @@GLOBAL.server_id;
 @@GLOBAL.server_id
 4294967295
 SET GLOBAL server_id = 0;
+Warnings:
+Warning	1292	Truncated incorrect server_id value: '0'
 SELECT @@GLOBAL.server_id;
 @@GLOBAL.server_id
-0
+1
 SET GLOBAL server_id = -1;
 Warnings:
 Warning	1292	Truncated incorrect server_id value: '-1'
 SELECT @@GLOBAL.server_id;
 @@GLOBAL.server_id
-0
+1
 SET GLOBAL server_id = @old_server_id;
 #
 # BUG#10206 - InnoDB: Transaction requiring Max_BinLog_Cache_size > 4GB always rollsback
@@ -1487,12 +1493,12 @@ SET GLOBAL max_binlog_cache_size = @old_max_binlog_cache_size;
 #
 # Bug #37168 : Missing variable - skip_name_resolve
 #
-SELECT @@skip_name_resolve;
-@@skip_name_resolve
-0
+SELECT @@skip_name_resolve >= 0;
+@@skip_name_resolve >= 0
+1
 SHOW VARIABLES LIKE 'skip_name_resolve';
 Variable_name	Value
-skip_name_resolve	OFF
+skip_name_resolve	#
 #
 # Bug #43233 : Some server variables are clipped during "update,"
 #              not "check" stage
@@ -1526,9 +1532,9 @@ SET @@global.max_binlog_cache_size=DEFAULT;
 SET @@global.max_join_size=DEFAULT;
 SET @@global.key_buffer_size=@kbs;
 SET @@global.key_cache_block_size=@kcbs;
-select @@max_long_data_size;
-@@max_long_data_size
-4194304
+select @@max_long_data_size > 0;
+@@max_long_data_size > 0
+1
 #
 # Bug#11766424  59527:
 # Assert in DECIMAL_BIN_SIZE: 
@@ -1544,7 +1550,7 @@ one
 1
 explain SELECT 1 as 'one' FROM t1 GROUP BY @a:= (SELECT ROUND(f1) FROM t1 WHERE f1 = 0);
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	Extra
-1	PRIMARY	t1	ALL	NULL	NULL	NULL	NULL	2	Using temporary; Using filesort
+1	PRIMARY	t1	ALL	NULL	NULL	NULL	NULL	2	
 2	SUBQUERY	t1	ALL	NULL	NULL	NULL	NULL	2	Using where
 SELECT 1 as 'one' FROM t1 GROUP BY @a:= (SELECT ROUND(f1) FROM t1 WHERE f1 = 0);
 one
@@ -1555,7 +1561,7 @@ one
 set sql_buffer_result=1;
 explain SELECT 1 as 'one' FROM t1 GROUP BY @a:= (SELECT ROUND(f1) FROM t1 WHERE f1 = 0);
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	Extra
-1	PRIMARY	t1	ALL	NULL	NULL	NULL	NULL	2	Using temporary; Using filesort
+1	PRIMARY	t1	ALL	NULL	NULL	NULL	NULL	2	Using temporary
 2	SUBQUERY	t1	ALL	NULL	NULL	NULL	NULL	2	Using where
 SELECT 1 as 'one' FROM t1 GROUP BY @a:= (SELECT ROUND(f1) FROM t1 WHERE f1 = 0);
 one
@@ -1797,3 +1803,23 @@ select * from information_schema.session_variables where variable_name='sql_mode
 VARIABLE_NAME	VARIABLE_VALUE
 SQL_MODE	ANSI_QUOTES
 End of 5.5 tests
+explain extended select @@VERsion from dual where rand() > @@verSION;
+id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
+1	SIMPLE	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	No tables used
+Warnings:
+Note	1003	select @@VERsion AS "@@VERsion" from DUAL  where rand() > @@version
+explain extended select @@SESsion.SQL_mode from dual where rand() > @@sesSION.sql_MODE;
+id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
+1	SIMPLE	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	No tables used
+Warnings:
+Note	1003	select @@SESsion.SQL_mode AS "@@SESsion.SQL_mode" from DUAL  where rand() > @@sql_mode
+explain extended select @@GLObal.COLLATION_connection from dual where rand() > @@gloBAL.collation_CONNECTION;
+id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
+1	SIMPLE	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	No tables used
+Warnings:
+Note	1003	select @@GLObal.COLLATION_connection AS "@@GLObal.COLLATION_connection" from DUAL  where rand() > @@global.collation_connection
+explain extended select @@FOObar.KEY_BUFfer_size from dual where rand() > @@fooBAR.key_bufFER_SIZE;
+id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
+1	SIMPLE	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	No tables used
+Warnings:
+Note	1003	select @@FOObar.KEY_BUFfer_size AS "@@FOObar.KEY_BUFfer_size" from DUAL  where rand() > @@fooBAR.key_buffer_size

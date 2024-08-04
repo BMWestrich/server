@@ -15,7 +15,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA */
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA */
 
 
 #include <mysql_version.h>                      /* FRM_VER */
@@ -43,18 +43,19 @@
 #define PLUGINDIR	"lib/plugin"
 #endif
 
-#define CURRENT_THD_ERRMSGS current_thd->variables.errmsgs
-#define DEFAULT_ERRMSGS     my_default_lc_messages->errmsgs->errmsgs
+#define MAX_ERROR_RANGES 4  /* 1000-2000, 2000-3000, 3000-4000, 4000-5000 */
+#define ERRORS_PER_RANGE 1000
 
-#define ER(X)         CURRENT_THD_ERRMSGS[(X) - ER_ERROR_FIRST]
-#define ER_DEFAULT(X) DEFAULT_ERRMSGS[(X) - ER_ERROR_FIRST]
-#define ER_SAFE(X) (((X) >= ER_ERROR_FIRST && (X) <= ER_ERROR_LAST) ? ER(X) : "Invalid error code")
-#define ER_SAFE_THD(T,X) (((X) >= ER_ERROR_FIRST && (X) <= ER_ERROR_LAST) ? ER_THD(T,X) : "Invalid error code")
-#define ER_THD(thd,X) ((thd)->variables.errmsgs[(X) - ER_ERROR_FIRST])
-#define ER_THD_OR_DEFAULT(thd,X) ((thd) ? ER_THD(thd, X) : ER_DEFAULT(X))
+#define DEFAULT_ERRMSGS           my_default_lc_messages->errmsgs->errmsgs
+#define CURRENT_THD_ERRMSGS       (current_thd)->variables.errmsgs
 
-#define ME_INFO (ME_HOLDTANG+ME_OLDWIN+ME_NOREFRESH)
-#define ME_ERROR (ME_BELL+ME_OLDWIN+ME_NOREFRESH)
+#define ER_DEFAULT(X) DEFAULT_ERRMSGS[((X)-ER_ERROR_FIRST) / ERRORS_PER_RANGE][(X)% ERRORS_PER_RANGE]
+#define ER_THD(thd,X) ((thd)->variables.errmsgs[((X)-ER_ERROR_FIRST) / ERRORS_PER_RANGE][(X) % ERRORS_PER_RANGE])
+#define ER(X)         ER_THD(current_thd, (X))
+#define ER_THD_OR_DEFAULT(thd,X) ((thd) ? ER_THD(thd, (X)) : ER_DEFAULT(X))
+
+#define ME_INFO (ME_HOLDTANG | ME_NOREFRESH)
+#define ME_ERROR (ME_BELL | ME_NOREFRESH)
 #define MYF_RW MYF(MY_WME+MY_NABP)		/* Vid my_read & my_write */
 
 #define SPECIAL_USE_LOCKS	1		/* Lock used databases */
@@ -77,73 +78,59 @@
 #define cmp_record(A,B) memcmp((A)->record[0],(A)->B,(size_t) (A)->s->reclength)
 #define empty_record(A) { \
                           restore_record((A),s->default_values); \
-                          bfill((A)->null_flags,(A)->s->null_bytes,255);\
+                          if ((A)->s->null_bytes) \
+                            bfill((A)->null_flags,(A)->s->null_bytes,255); \
                         }
 
 	/* Defines for use with openfrm, openprt and openfrd */
 
-#define READ_ALL		1	/* openfrm: Read all parameters */
-#define CHANGE_FRM		2	/* openfrm: open .frm as O_RDWR */
-#define READ_KEYINFO		4	/* L{s nyckeldata fr}n filen */
-#define EXTRA_RECORD		8	/* Reserve space for an extra record */
-#define DONT_OPEN_TABLES	8	/* Don't open database-files (frd) */
-#define DONT_OPEN_MASTER_REG	16	/* Don't open first reg-file (prt) */
-#define EXTRA_LONG_RECORD	16	/* Plats f|r dubbel s|k-record */
-#define COMPUTE_TYPES		32	/* Kontrollera type f|r f{ltena */
-#define SEARCH_PRG		64	/* S|k efter registret i 'prg_dev' */
-#define READ_USED_NAMES		128	/* L{s anv{nda formul{rnamn */
-#define DONT_GIVE_ERROR		256	/* Don't do frm_error on openfrm  */
-#define READ_SCREENS		1024	/* Read screens, info and helpfile */
-#define DELAYED_OPEN		4096	/* Open table later */
-#define OPEN_VIEW		8192	/* Allow open on view */
-#define OPEN_VIEW_NO_PARSE     16384    /* Open frm only if it's a view,
-                                           but do not parse view itself */
+#define READ_ALL               (1 <<  0) /* openfrm: Read all parameters */
+#define EXTRA_RECORD           (1 <<  3) /* Reserve space for an extra record */
+#define DELAYED_OPEN           (1 << 12) /* Open table later */
+#define OPEN_VIEW_NO_PARSE     (1 << 14) /* Open frm only if it's a view,
+                                            but do not parse view itself */
 /**
   This flag is used in function get_all_tables() which fills
   I_S tables with data which are retrieved from frm files and storage engine
   The flag means that we need to open FRM file only to get necessary data.
 */
-#define OPEN_FRM_FILE_ONLY     32768
+#define OPEN_FRM_FILE_ONLY     (1 << 15)
 /**
   This flag is used in function get_all_tables() which fills
   I_S tables with data which are retrieved from frm files and storage engine
   The flag means that we need to process tables only to get necessary data.
   Views are not processed.
 */
-#define OPEN_TABLE_ONLY        (OPEN_FRM_FILE_ONLY*2)
+#define OPEN_TABLE_ONLY        (1 << 16)
 /**
   This flag is used in function get_all_tables() which fills
   I_S tables with data which are retrieved from frm files and storage engine
   The flag means that we need to process views only to get necessary data.
   Tables are not processed.
 */
-#define OPEN_VIEW_ONLY         (OPEN_TABLE_ONLY*2)
+#define OPEN_VIEW_ONLY         (1 << 17)
 /**
   This flag is used in function get_all_tables() which fills
   I_S tables with data which are retrieved from frm files and storage engine.
   The flag means that we need to open a view using
   open_normal_and_derived_tables() function.
 */
-#define OPEN_VIEW_FULL         (OPEN_VIEW_ONLY*2)
+#define OPEN_VIEW_FULL         (1 << 18)
 /**
   This flag is used in function get_all_tables() which fills
   I_S tables with data which are retrieved from frm files and storage engine.
   The flag means that I_S table uses optimization algorithm.
 */
-#define OPTIMIZE_I_S_TABLE     (OPEN_VIEW_FULL*2)
+#define OPTIMIZE_I_S_TABLE     (1 << 19)
 /**
   This flag is used to instruct tdc_open_view() to check metadata version.
 */
-#define CHECK_METADATA_VERSION (OPEN_TRIGGER_ONLY*2)
+#define CHECK_METADATA_VERSION (1 << 20)
 
 /*
   The flag means that we need to process trigger files only.
 */
-#define OPEN_TRIGGER_ONLY      (OPTIMIZE_I_S_TABLE*2)
-
-#define SC_INFO_LENGTH 4		/* Form format constant */
-#define TE_INFO_LENGTH 3
-#define MTYP_NOEMPTY_BIT 128
+#define OPEN_TRIGGER_ONLY      (1 << 21)
 
 /*
   Minimum length pattern before Turbo Boyer-Moore is used
@@ -203,14 +190,14 @@ LEX_CUSTRING build_frm_image(THD *thd, const char *table,
 
 #define FRM_HEADER_SIZE 64
 #define FRM_FORMINFO_SIZE 288
-#define FRM_MAX_SIZE (512*1024)
+#define FRM_MAX_SIZE (1024*1024)
 
 static inline bool is_binary_frm_header(uchar *head)
 {
   return head[0] == 254
       && head[1] == 1
       && head[2] >= FRM_VER
-      && head[2] <= FRM_VER+4;
+      && head[2] <= FRM_VER_CURRENT;
 }
 
 #endif

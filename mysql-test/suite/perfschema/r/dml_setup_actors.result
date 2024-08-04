@@ -24,13 +24,13 @@ server1	%	%
 localhost	Joe	%
 update performance_schema.setup_actors
 set user='ILLEGAL';
-ERROR HY000: Invalid performance_schema usage.
+ERROR HY000: Invalid performance_schema usage
 update performance_schema.setup_actors
 set host='ILLEGAL';
-ERROR HY000: Invalid performance_schema usage.
+ERROR HY000: Invalid performance_schema usage
 update performance_schema.setup_actors
 set role='ILLEGAL';
-ERROR HY000: Invalid performance_schema usage.
+ERROR HY000: Invalid performance_schema usage
 select * from performance_schema.setup_actors
 order by USER, HOST;
 HOST	USER	ROLE
@@ -58,3 +58,13 @@ truncate table performance_schema.setup_actors;
 insert into performance_schema.setup_actors
 select * from test.setup_actors;
 drop table test.setup_actors;
+#
+# MDEV-25325 column_comment for performance_schema tables
+#
+select column_name, column_comment 
+from information_schema.columns 
+where table_schema='performance_schema' and table_name='setup_actors';
+column_name	column_comment
+HOST	Host name, either a literal, or the % wildcard representing any host.
+USER	User name, either a literal or the % wildcard representing any name.
+ROLE	Unused

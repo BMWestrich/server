@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License along
    with this program; if not, write to the Free Software Foundation, Inc.,
-   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA. */
+   51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA. */
 
 #ifndef WSREP_UTILS_H
 #define WSREP_UTILS_H
@@ -19,8 +19,11 @@
 #include "wsrep_priv.h"
 #include "wsrep_mysqld.h"
 
-unsigned int wsrep_check_ip (const char* addr, bool *is_ipv6);
+unsigned int wsrep_check_ip (const char* const addr, bool *is_ipv6);
 size_t wsrep_guess_ip (char* buf, size_t buf_len);
+
+/* returns the length of the host part of the address string */
+size_t wsrep_host_len(const char* addr, size_t addr_len);
 
 namespace wsp {
 
@@ -105,7 +108,8 @@ private:
           /* Hostname with port (host:port) */
           start= addr_in;
           end= colon;
-          parse_port(colon + 1);
+          if (parse_port(colon + 1))
+            return;                             /* Error: invalid port */
           break;
         default:
           /* IPv6 address */
@@ -155,6 +159,7 @@ private:
   }
 
   bool parse_port(const char *port) {
+    errno= 0;                                   /* Reset the errno */
     m_port= strtol(port, NULL, 10);
     if (errno == EINVAL || errno == ERANGE)
     {
@@ -233,7 +238,7 @@ private:
 
 } /* namespace wsp */
 
-extern wsp::Config_state wsrep_config_state;
+extern wsp::Config_state *wsrep_config_state;
 
 namespace wsp {
 /* a class to manage env vars array */
@@ -293,7 +298,7 @@ class thd
 
 public:
 
-  thd(my_bool wsrep_on);
+  thd(my_bool wsrep_on, bool system_thread=false);
   ~thd();
   THD* const ptr;
 };

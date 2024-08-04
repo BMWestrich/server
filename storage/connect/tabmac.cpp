@@ -3,16 +3,16 @@
 /*  From the article and sample code by Khalid Shaikh.                 */
 /*  TABMAC: virtual table to get the list of MAC addresses.            */
 /***********************************************************************/
-#if defined(__WIN__)
+#if defined(_WIN32)
 #include "my_global.h"
 //#include <iphlpapi.h>
-#else   // !__WIN__
+#else   // !_WIN32
 #error This is a WINDOWS only table type
-#endif  // !__WIN__
+#endif  // !_WIN32
 #include "global.h"
 #include "plgdbsem.h"
 //#include "catalog.h"
-#include "reldef.h"
+//#include "reldef.h"
 #include "xtable.h"
 #include "colblk.h"
 #include "tabmac.h"
@@ -329,7 +329,7 @@ void MACCOL::ReadColumn(PGLOBAL g)
         n = 0;
         break;
       default:
-        p = "";
+        p = PlugDup(g, "");
       } // endswitch Flag
 
   } else switch (Flag) {
@@ -367,13 +367,13 @@ void MACCOL::ReadColumn(PGLOBAL g)
     case 11:                    // Description
       if ((p = strstr(adp->Description, " - Packet Scheduler Miniport"))) {
         strncpy(buf, adp->Description, p - adp->Description);
-        i = p - adp->Description;
+        i = (int)(p - adp->Description);
         strncpy(buf, adp->Description, i);
         buf[i] = 0;
         p = buf;
       } else if ((p = strstr(adp->Description,
                   " - Miniport d'ordonnancement de paquets"))) {
-        i = p - adp->Description;
+        i = (int)(p - adp->Description);
         strncpy(buf, adp->Description, i);
         buf[i] = 0;
         p = buf;

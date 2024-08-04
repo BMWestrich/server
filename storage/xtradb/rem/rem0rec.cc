@@ -1,6 +1,7 @@
 /*****************************************************************************
 
-Copyright (c) 1994, 2013, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1994, 2016, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2017, 2019, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +13,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -244,7 +245,7 @@ rec_get_n_extern_new(
 Determine the offset to each field in a leaf-page record
 in ROW_FORMAT=COMPACT.  This is a special case of
 rec_init_offsets() and rec_get_offsets_func(). */
-UNIV_INLINE __attribute__((nonnull))
+UNIV_INLINE MY_ATTRIBUTE((nonnull))
 void
 rec_init_offsets_comp_ordinary(
 /*===========================*/
@@ -555,10 +556,6 @@ rec_get_offsets_func(
 	ulint	n;
 	ulint	size;
 
-	ut_ad(rec);
-	ut_ad(index);
-	ut_ad(heap);
-
 	if (dict_table_is_comp(index->table)) {
 		switch (UNIV_EXPECT(rec_get_status(rec),
 				    REC_STATUS_ORDINARY)) {
@@ -636,9 +633,6 @@ rec_get_offsets_reverse(
 	ulint		null_mask;
 	ulint		n_node_ptr_field;
 
-	ut_ad(extra);
-	ut_ad(index);
-	ut_ad(offsets);
 	ut_ad(dict_table_is_comp(index->table));
 
 	if (UNIV_UNLIKELY(node_ptr)) {
@@ -747,8 +741,6 @@ rec_get_nth_field_offs_old(
 	ulint	os;
 	ulint	next_os;
 
-	ut_ad(len);
-	ut_a(rec);
 	ut_a(n < rec_get_n_fields_old(rec));
 
 	if (rec_get_1byte_offs_flag(rec)) {
@@ -788,7 +780,7 @@ rec_get_nth_field_offs_old(
 /**********************************************************//**
 Determines the size of a data tuple prefix in ROW_FORMAT=COMPACT.
 @return	total size */
-UNIV_INLINE __attribute__((warn_unused_result, nonnull(1,2)))
+UNIV_INLINE MY_ATTRIBUTE((warn_unused_result))
 ulint
 rec_get_converted_size_comp_prefix_low(
 /*===================================*/
@@ -844,8 +836,11 @@ rec_get_converted_size_comp_prefix_low(
 			continue;
 		}
 
-		ut_ad(len <= col->len || col->mtype == DATA_BLOB
-			|| (col->len == 0 && col->mtype == DATA_VARCHAR));
+		ut_ad(len <= col->len || col->mtype == DATA_BLOB ||
+		  ((col->mtype == DATA_VARCHAR || col->mtype == DATA_BINARY
+		   || col->mtype == DATA_VARMYSQL)
+		   && (col->len == 0
+		       || len <= col->len)));
 
 		fixed_len = field->fixed_len;
 		if (temp && fixed_len
@@ -861,13 +856,10 @@ rec_get_converted_size_comp_prefix_low(
 
 		if (fixed_len) {
 #ifdef UNIV_DEBUG
-			ulint	mbminlen = DATA_MBMINLEN(col->mbminmaxlen);
-			ulint	mbmaxlen = DATA_MBMAXLEN(col->mbminmaxlen);
-
 			ut_ad(len <= fixed_len);
 
-			ut_ad(!mbmaxlen || len >= mbminlen
-			      * (fixed_len / mbmaxlen));
+			ut_ad(!col->mbmaxlen || len >= col->mbminlen
+			      * (fixed_len / col->mbmaxlen));
 
 			/* dict_index_add_col() should guarantee this */
 			ut_ad(!field->prefix_len
@@ -877,7 +869,8 @@ rec_get_converted_size_comp_prefix_low(
 			ut_ad(col->len >= 256 || col->mtype == DATA_BLOB);
 			extra_size += 2;
 		} else if (len < 128
-			   || (col->len < 256 && col->mtype != DATA_BLOB)) {
+			   || (col->len < 256
+			       && col->mtype != DATA_BLOB)) {
 			extra_size++;
 		} else {
 			/* For variable-length columns, we look up the
@@ -1133,7 +1126,7 @@ rec_convert_dtuple_to_rec_old(
 
 /*********************************************************//**
 Builds a ROW_FORMAT=COMPACT record out of a data tuple. */
-UNIV_INLINE __attribute__((nonnull))
+UNIV_INLINE MY_ATTRIBUTE((nonnull))
 void
 rec_convert_dtuple_to_rec_comp(
 /*===========================*/
@@ -1254,14 +1247,10 @@ rec_convert_dtuple_to_rec_comp(
 		it is 128 or more, or when the field is stored externally. */
 		if (fixed_len) {
 #ifdef UNIV_DEBUG
-			ulint	mbminlen = DATA_MBMINLEN(
-				ifield->col->mbminmaxlen);
-			ulint	mbmaxlen = DATA_MBMAXLEN(
-				ifield->col->mbminmaxlen);
-
 			ut_ad(len <= fixed_len);
-			ut_ad(!mbmaxlen || len >= mbminlen
-			      * (fixed_len / mbmaxlen));
+			ut_ad(!ifield->col->mbmaxlen
+			      || len >= ifield->col->mbminlen
+			      * (fixed_len / ifield->col->mbmaxlen));
 			ut_ad(!dfield_is_ext(field));
 #endif /* UNIV_DEBUG */
 		} else if (dfield_is_ext(field)) {
@@ -1288,8 +1277,10 @@ rec_convert_dtuple_to_rec_comp(
 			}
 		}
 
-		memcpy(end, dfield_get_data(field), len);
-		end += len;
+		if (len) {
+			memcpy(end, dfield_get_data(field), len);
+			end += len;
+		}
 	}
 }
 
@@ -1341,7 +1332,9 @@ rec_convert_dtuple_to_rec(
 {
 	rec_t*	rec;
 
-	ut_ad(buf && index && dtuple);
+	ut_ad(buf != NULL);
+	ut_ad(index != NULL);
+	ut_ad(dtuple != NULL);
 	ut_ad(dtuple_validate(dtuple));
 	ut_ad(dtuple_check_typed(dtuple));
 
@@ -1715,7 +1708,6 @@ rec_validate(
 	ulint		sum		= 0;
 	ulint		i;
 
-	ut_a(rec);
 	n_fields = rec_offs_n_fields(offsets);
 
 	if ((n_fields == 0) || (n_fields > REC_MAX_N_FIELDS)) {
@@ -1778,8 +1770,6 @@ rec_print_old(
 	ulint		len;
 	ulint		n;
 	ulint		i;
-
-	ut_ad(rec);
 
 	n = rec_get_n_fields_old(rec);
 
@@ -1874,8 +1864,6 @@ rec_print_new(
 	const rec_t*	rec,	/*!< in: physical record */
 	const ulint*	offsets)/*!< in: array returned by rec_get_offsets() */
 {
-	ut_ad(rec);
-	ut_ad(offsets);
 	ut_ad(rec_offs_validate(rec, NULL, offsets));
 
 	if (!rec_offs_comp(offsets)) {
@@ -1902,8 +1890,6 @@ rec_print(
 	const rec_t*		rec,	/*!< in: physical record */
 	const dict_index_t*	index)	/*!< in: record descriptor */
 {
-	ut_ad(index);
-
 	if (!dict_table_is_comp(index->table)) {
 		rec_print_old(file, rec);
 		return;

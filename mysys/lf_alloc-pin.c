@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /*
   wait-free concurrent allocator based on pinning addresses
@@ -103,6 +103,12 @@
 #include <my_sys.h>
 #include <lf.h>
 
+/*
+  when using alloca() leave at least that many bytes of the stack -
+  for functions we might be calling from within this stack frame
+*/
+#define ALLOCA_SAFETY_MARGIN 8192
+
 #define LF_PINBOX_MAX_PINS 65536
 
 static void lf_pinbox_real_free(LF_PINS *pins);
@@ -115,7 +121,6 @@ void lf_pinbox_init(LF_PINBOX *pinbox, uint free_ptr_offset,
                     lf_pinbox_free_func *free_func, void *free_func_arg)
 {
   DBUG_ASSERT(free_ptr_offset % sizeof(void *) == 0);
-  compile_time_assert(sizeof(LF_PINS) == 128);
   lf_dynarray_init(&pinbox->pinarray, sizeof(LF_PINS));
   pinbox->pinstack_top_ver= 0;
   pinbox->pins_in_array= 0;
@@ -133,7 +138,7 @@ void lf_pinbox_destroy(LF_PINBOX *pinbox)
   Get pins from a pinbox. Usually called via lf_alloc_get_pins() or
   lf_hash_get_pins().
 
-  SYNOPSYS
+  SYNOPSIS
     pinbox      -
 
   DESCRIPTION
@@ -251,8 +256,9 @@ static int ptr_cmp(void **a, void **b)
 #define add_to_purgatory(PINS, ADDR)                                    \
   do                                                                    \
   {                                                                     \
-    *(void **)((char *)(ADDR)+(PINS)->pinbox->free_ptr_offset)=         \
-      (PINS)->purgatory;                                                \
+    my_atomic_storeptr_explicit(                                        \
+      (void **)((char *)(ADDR)+(PINS)->pinbox->free_ptr_offset),        \
+      (PINS)->purgatory, MY_MEMORY_ORDER_RELEASE);                      \
     (PINS)->purgatory= (ADDR);                                          \
     (PINS)->purgatory_count++;                                          \
   } while (0)
@@ -318,12 +324,6 @@ static int match_pins(LF_PINS *el, void *addr)
   return 0;
 }
 
-#if STACK_DIRECTION < 0
-#define available_stack_size(CUR,END) (long) ((char*)(CUR) - (char*)(END))
-#else
-#define available_stack_size(CUR,END) (long) ((char*)(END) - (char*)(CUR))
-#endif
-
 #define next_node(P, X) (*((uchar * volatile *)(((uchar *)(X)) + (P)->free_ptr_offset)))
 #define anext_node(X) next_node(&allocator->pinbox, (X))
 
@@ -345,7 +345,8 @@ static void lf_pinbox_real_free(LF_PINS *pins)
   {
     int alloca_size= sizeof(void *)*LF_PINBOX_PINS*npins;
     /* create a sorted list of pinned addresses, to speed up searches */
-    if (available_stack_size(&pinbox, *pins->stack_ends_here) > alloca_size)
+    if (available_stack_size(&pinbox, *pins->stack_ends_here) >
+        alloca_size + ALLOCA_SAFETY_MARGIN)
     {
       struct st_harvester hv;
       addr= (void **) alloca(alloca_size);
@@ -355,7 +356,7 @@ static void lf_pinbox_real_free(LF_PINS *pins)
      lf_dynarray_iterate(&pinbox->pinarray,
                            (lf_dynarray_func)harvest_pins, &hv);
 
-      npins= hv.granary-addr;
+      npins= (int)(hv.granary-addr);
       /* and sort them */
       if (npins)
         qsort(addr, npins, sizeof(void *), (qsort_cmp)ptr_cmp);
@@ -436,7 +437,7 @@ static void alloc_free(uchar *first,
 /*
   initialize lock-free allocator
 
-  SYNOPSYS
+  SYNOPSIS
     allocator           -
     size                a size of an object to allocate
     free_ptr_offset     an offset inside the object to a sizeof(void *)

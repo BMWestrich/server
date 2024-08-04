@@ -1,4 +1,5 @@
 --source include/have_innodb.inc
+--source include/have_partition.inc
 
 #
 # Check and select innodb lock type
@@ -12,26 +13,15 @@ select @@innodb_table_locks;
 # Testing of explicit table locks with enforced table locks
 #
 
-connect (con1,localhost,root,,);
-connect (con2,localhost,root,,);
-
---disable_warnings
-drop table if exists t1;
---enable_warnings
-
-#
-# Testing of explicit table locks with enforced table locks
-#
-
 set @@innodb_table_locks=1;
 
-connection con1;
+connect (con1,localhost,root,,);
 create table t1 (id integer, x integer) engine=INNODB;
 insert into t1 values(0, 0);
 set autocommit=0;
 SELECT * from t1 where id = 0 FOR UPDATE;
 
-connection con2;
+connect (con2,localhost,root,,);
 set autocommit=0;
 
 # The following statement should hang because con1 is locking the page
@@ -60,8 +50,11 @@ drop table t1;
 --echo # Old lock method (where LOCK TABLE was ignored by InnoDB) no longer
 --echo # works when LOCK TABLE ... WRITE is used due to fix for bugs #46272
 --echo # "MySQL 5.4.4, new MDL: unnecessary and bug #37346 "innodb does not
---echo # detect deadlock between update and alter table". But it still works
---echo # for LOCK TABLE ... READ.
+--echo # detect deadlock between update and alter table".
+--echo # After WL#6671 "Improve scalability by not using thr_lock.c locks
+--echo # for InnoDB tables" was implemented it no longer works for LOCK TABLES
+--echo # ,,, READ as well.
+--echo # LOCK TABLES locks are now completely handled by MDL subsystem.
 --echo #
 
 set @@innodb_table_locks=0;
@@ -71,7 +64,6 @@ insert into t1 values(0, 0),(1,1),(2,2);
 commit;
 SELECT * from t1 where id = 0 FOR UPDATE;
 
---echo # Connection 'con2'.
 connection con2;
 set autocommit=0;
 set @@innodb_table_locks=0;
@@ -82,7 +74,6 @@ set @@innodb_table_locks=0;
 --echo # Sending:
 --send lock table t1 write;
 
---echo # Connection 'con1'.
 connection con1;
 --echo # Wait until LOCK TABLE is blocked on SQL-level lock.
 let $wait_condition=
@@ -96,33 +87,41 @@ select * from t1;
 --echo # Unblock LOCK TABLE.
 commit;
 
---echo # Connection 'con2'.
 connection con2;
 --echo # Reap LOCK TABLE.
 --reap
 unlock tables;
 
---echo # Connection 'con1'.
 connection con1;
 
 select * from t1 where id = 0 for update;
 
---echo # Connection 'con2'.
 connection con2;
---echo # The below statement should not be blocked as LOCK TABLES ... READ
---echo # does not take strong SQL-level lock on t1. SELECTs which do not
---echo # conflict with transaction in the first connections should not be
---echo # blocked.
-lock table t1 read;
+--echo # The following statement should block because SQL-level lock
+--echo # is taken on t1 which will wait until concurrent transaction
+--echo # is commited.
+--echo # Sending:
+--send lock table t1 read;
+
+connection con1;
+--echo # Wait until LOCK TABLE is blocked on SQL-level lock.
+let $wait_condition=
+  select count(*) = 1 from information_schema.processlist
+  where state = "Waiting for table metadata lock" and
+        info = "lock table t1 read";
+--source include/wait_condition.inc
+--echo # We should be able to do UPDATEs and SELECTs within transaction.
+update t1 set x=2 where id = 0;
 select * from t1;
-select * from t1 where id = 1 lock in share mode;
-unlock tables;
-select * from t1;
+--echo # Unblock LOCK TABLE.
 commit;
 
---echo # Connection 'con1'.
-connection con1;
-commit;
+connection con2;
+--echo # Reap LOCK TABLE.
+--reap
+unlock tables;
+
+connection default;
 
 drop table t1;
 
@@ -157,14 +156,66 @@ let $wait_condition=
   where state = 'Sending data' and
         info = 'SELECT * FROM t1 FOR UPDATE';
 --source include/wait_condition.inc
+disconnect con2;
 
 connection default;
 COMMIT;
 connection con1;
 reap;
 COMMIT;
-disconnect con1;
-disconnect con2;
-
 connection default;
 DROP TABLE t1;
+
+--echo #
+--echo # MDEV-11080 InnoDB: Failing assertion:
+--echo # table->n_waiting_or_granted_auto_inc_locks > 0
+--echo #
+
+CREATE TABLE t1 (pk INTEGER AUTO_INCREMENT PRIMARY KEY) ENGINE=InnoDB;
+INSERT INTO t1 VALUES (NULL),(NULL);
+CREATE TABLE t2 LIKE t1;
+
+BEGIN;
+
+connection con1;
+BEGIN;
+DELETE FROM t2;
+connection default;
+--send LOCK TABLE t2 READ;
+connection con1;
+SET innodb_lock_wait_timeout= 1, lock_wait_timeout= 2;
+--error 0,ER_LOCK_WAIT_TIMEOUT
+INSERT INTO t2 SELECT * FROM t1;
+COMMIT;
+
+connection default;
+reap;
+UNLOCK TABLES;
+DROP TABLE t1, t2;
+
+--echo #
+--echo # MDEV-16709 InnoDB: Error: trx already had an AUTO-INC lock
+--echo #
+
+CREATE TABLE t1 (pk INT AUTO_INCREMENT PRIMARY KEY) ENGINE=InnoDB
+PARTITION BY key (pk) PARTITIONS 2;
+
+CREATE TABLE t2 (a INT) ENGINE=InnoDB;
+INSERT INTO t2 VALUES (1),(2),(3),(4),(5),(6);
+
+CREATE TABLE t3 (b INT) ENGINE=InnoDB;
+INSERT INTO t3 VALUES (1),(2),(3),(4),(5),(6),(7),(8),(9);
+
+connection con1;
+send INSERT t1 SELECT NULL FROM t2;
+
+connection default;
+--error 0,ER_DUP_ENTRY,ER_LOCK_DEADLOCK
+INSERT t1 SELECT NULL FROM t3;
+
+connection con1;
+--error 0,ER_DUP_ENTRY,ER_LOCK_DEADLOCK
+reap;
+disconnect con1;
+connection default;
+DROP TABLE t1, t2, t3;

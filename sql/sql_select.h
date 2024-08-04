@@ -2,7 +2,7 @@
 #define SQL_SELECT_INCLUDED
 
 /* Copyright (c) 2000, 2013, Oracle and/or its affiliates.
-   Copyright (c) 2008, 2015, MariaDB
+   Copyright (c) 2008, 2020, MariaDB Corporation.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -15,7 +15,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /**
   @file
@@ -32,11 +32,13 @@
 #include "sql_array.h"                        /* Array */
 #include "records.h"                          /* READ_RECORD */
 #include "opt_range.h"                /* SQL_SELECT, QUICK_SELECT_I */
+#include "filesort.h"
 
+typedef struct st_join_table JOIN_TAB;
 /* Values in optimize */
-#define KEY_OPTIMIZE_EXISTS		1
-#define KEY_OPTIMIZE_REF_OR_NULL	2
-#define KEY_OPTIMIZE_EQ	                4
+#define KEY_OPTIMIZE_EXISTS		1U
+#define KEY_OPTIMIZE_REF_OR_NULL	2U
+#define KEY_OPTIMIZE_EQ	                4U
 
 inline uint get_hash_join_key_no() { return MAX_KEY; }
 
@@ -176,17 +178,17 @@ enum sj_strategy_enum
 };
 
 /* Values for JOIN_TAB::packed_info */
-#define TAB_INFO_HAVE_VALUE 1
-#define TAB_INFO_USING_INDEX 2
-#define TAB_INFO_USING_WHERE 4
-#define TAB_INFO_FULL_SCAN_ON_NULL 8
+#define TAB_INFO_HAVE_VALUE 1U
+#define TAB_INFO_USING_INDEX 2U
+#define TAB_INFO_USING_WHERE 4U
+#define TAB_INFO_FULL_SCAN_ON_NULL 8U
 
 typedef enum_nested_loop_state
 (*Next_select_func)(JOIN *, struct st_join_table *, bool);
-Next_select_func setup_end_select_func(JOIN *join);
+Next_select_func setup_end_select_func(JOIN *join, JOIN_TAB *tab);
 int rr_sequential(READ_RECORD *info);
 int rr_sequential_and_unpack(READ_RECORD *info);
-
+Item *remove_pushed_top_conjuncts(THD *thd, Item *cond);
 
 #include "sql_explain.h"
 
@@ -197,10 +199,12 @@ int rr_sequential_and_unpack(READ_RECORD *info);
 class JOIN_CACHE;
 class SJ_TMP_TABLE;
 class JOIN_TAB_RANGE;
+class AGGR_OP;
+class Filesort;
 
 typedef struct st_join_table {
-  st_join_table() {}                          /* Remove gcc warning */
   TABLE		*table;
+  TABLE_LIST    *tab_list;
   KEYUSE	*keyuse;			/**< pointer to first used key */
   KEY           *hj_key;       /**< descriptor of the used best hash join key
 				    not supported by any index                 */
@@ -259,6 +263,7 @@ typedef struct st_join_table {
   */
   uint          packed_info;
 
+  //  READ_RECORD::Setup_func materialize_table;
   READ_RECORD::Setup_func read_first_record;
   Next_select_func next_select;
   READ_RECORD	read_record;
@@ -345,6 +350,7 @@ typedef struct st_join_table {
   */
   Item          *cache_idx_cond;
   SQL_SELECT    *cache_select;
+  AGGR_OP       *aggr;
   JOIN		*join;
   /*
     Embedding SJ-nest (may be not the direct parent), or NULL if none.
@@ -411,6 +417,46 @@ typedef struct st_join_table {
   /* NestedOuterJoins: Bitmap of nested joins this table is part of */
   nested_join_map embedding_map;
 
+  /* Tmp table info */
+  TMP_TABLE_PARAM *tmp_table_param;
+
+  /* Sorting related info */
+  Filesort *filesort;
+  SORT_INFO *filesort_result;
+  
+  /*
+    Non-NULL value means this join_tab must do window function computation
+    before reading.
+  */
+  Window_funcs_computation* window_funcs_step;
+
+  /**
+    List of topmost expressions in the select list. The *next* JOIN TAB
+    in the plan should use it to obtain correct values. Same applicable to
+    all_fields. These lists are needed because after tmp tables functions
+    will be turned to fields. These variables are pointing to
+    tmp_fields_list[123]. Valid only for tmp tables and the last non-tmp
+    table in the query plan.
+    @see JOIN::make_aggr_tables_info()
+  */
+  List<Item> *fields;
+  /** List of all expressions in the select list */
+  List<Item> *all_fields;
+  /*
+    Pointer to the ref array slice which to switch to before sending
+    records. Valid only for tmp tables.
+  */
+  Ref_ptr_array *ref_array;
+
+  /** Number of records saved in tmp table */
+  ha_rows send_records;
+
+  /** HAVING condition for checking prior saving a record into tmp table*/
+  Item *having;
+
+  /** TRUE <=> remove duplicates on this table. */
+  bool distinct;
+
   /*
     Semi-join strategy to be used for this join table. This is a copy of
     POSITION::sj_strategy field. This field is set up by the
@@ -425,9 +471,9 @@ typedef struct st_join_table {
   void cleanup();
   inline bool is_using_loose_index_scan()
   {
-    return (select && select->quick &&
-            (select->quick->get_type() ==
-             QUICK_SELECT_I::QS_TYPE_GROUP_MIN_MAX));
+    const SQL_SELECT *sel= filesort ? filesort->select : select;
+    return (sel && sel->quick &&
+            (sel->quick->get_type() == QUICK_SELECT_I::QS_TYPE_GROUP_MIN_MAX));
   }
   bool is_using_agg_loose_index_scan ()
   {
@@ -557,21 +603,29 @@ typedef struct st_join_table {
             !(used_sjm_lookup_tables & ~emb_sj_nest->sj_inner_tables));
   }
 
+  bool keyuse_is_valid_for_access_in_chosen_plan(JOIN *join, KEYUSE *keyuse);
+
   void remove_redundant_bnl_scan_conds();
 
   void save_explain_data(Explain_table_access *eta, table_map prefix_tables, 
                          bool distinct, struct st_join_table *first_top_tab);
 
-  void update_explain_data(uint idx);
+  bool use_order() const; ///< Use ordering provided by chosen index?
+  bool sort_table();
+  bool remove_duplicates();
+  void partial_cleanup();
 } JOIN_TAB;
 
 
 #include "sql_join_cache.h"
 
-enum_nested_loop_state sub_select_cache(JOIN *join, JOIN_TAB *join_tab, bool
-                                        end_of_records);
-enum_nested_loop_state sub_select(JOIN *join,JOIN_TAB *join_tab, bool
-                                  end_of_records);
+enum_nested_loop_state
+sub_select_cache(JOIN *join, JOIN_TAB *join_tab, bool end_of_records);
+enum_nested_loop_state 
+sub_select(JOIN *join, JOIN_TAB *join_tab, bool end_of_records);
+enum_nested_loop_state
+sub_select_postjoin_aggr(JOIN *join, JOIN_TAB *join_tab, bool end_of_records);
+
 enum_nested_loop_state
 end_send_group(JOIN *join, JOIN_TAB *join_tab __attribute__((unused)),
 	       bool end_of_records);
@@ -738,6 +792,7 @@ public:
   friend void best_access_path(JOIN      *join,
                                JOIN_TAB  *s,
                                table_map remaining_tables,
+                               const struct st_position *join_positions,
                                uint      idx,
                                bool      disable_jbuf,
                                double    record_count,
@@ -866,12 +921,14 @@ typedef struct st_position
   Sj_materialization_picker sjmat_picker;
 } POSITION;
 
+typedef Bounds_checked_array<Item_null_result*> Item_null_array;
+
 typedef struct st_rollup
 {
   enum State { STATE_NONE, STATE_INITED, STATE_READY };
   State state;
-  Item_null_result **null_items;
-  Item ***ref_pointer_arrays;
+  Item_null_array null_items;
+  Ref_ptr_array *ref_pointer_arrays;
   List<Item> *fields;
 } ROLLUP;
 
@@ -884,6 +941,56 @@ public:
 };
 
 class Pushdown_query;
+
+/**
+  @brief
+    Class to perform postjoin aggregation operations
+
+  @details
+    The result records are obtained on the put_record() call.
+    The aggrgation process is determined by the write_func, it could be:
+      end_write          Simply store all records in tmp table.
+      end_write_group    Perform grouping using join->group_fields,
+                         records are expected to be sorted.
+      end_update         Perform grouping using the key generated on tmp
+                         table. Input records aren't expected to be sorted.
+                         Tmp table uses the heap engine
+      end_update_unique  Same as above, but the engine is myisam.
+
+    Lazy table initialization is used - the table will be instantiated and
+    rnd/index scan started on the first put_record() call.
+
+*/
+
+class AGGR_OP :public Sql_alloc
+{
+public:
+  JOIN_TAB *join_tab;
+
+  AGGR_OP(JOIN_TAB *tab) : join_tab(tab), write_func(NULL)
+  {};
+
+  enum_nested_loop_state put_record() { return put_record(false); };
+  /*
+    Send the result of operation further (to a next operation/client)
+    This function is called after all records were put into tmp table.
+
+    @return return one of enum_nested_loop_state values.
+  */
+  enum_nested_loop_state end_send();
+  /** write_func setter */
+  void set_write_func(Next_select_func new_write_func)
+  {
+    write_func= new_write_func;
+  }
+
+private:
+  /** Write function that would be used for saving records in tmp table. */
+  Next_select_func write_func;
+  enum_nested_loop_state put_record(bool end_of_records);
+  bool prepare_tmp_table();
+};
+
 
 class JOIN :public Sql_alloc
 {
@@ -938,7 +1045,7 @@ protected:
   enum enum_reopt_result {
     REOPT_NEW_PLAN, /* there is a new reoptimized plan */
     REOPT_OLD_PLAN, /* no new improved plan can be found, use the old one */
-    REOPT_ERROR,    /* an irrecovarable error occured during reoptimization */
+    REOPT_ERROR,    /* an irrecovarable error occurred during reoptimization */
     REOPT_NONE      /* not yet reoptimized */
   };
 
@@ -950,36 +1057,15 @@ protected:
   void restore_query_plan(Join_plan_state *restore_from);
   /* Choose a subquery plan for a table-less subquery. */
   bool choose_tableless_subquery_plan();
+  void handle_implicit_grouping_with_window_funcs();
 
 public:
   JOIN_TAB *join_tab, **best_ref;
-  
-  /* 
-    Saved join_tab for pre_sorting. create_sort_index() will save here.. 
-  */
-  JOIN_TAB *pre_sort_join_tab;
-  uint pre_sort_index;
-  Item *pre_sort_idx_pushed_cond;
-  void clean_pre_sort_join_tab();
 
   /* List of fields that aren't under an aggregate function */
   List<Item_field> non_agg_fields;
 
-  /*
-    For "Using temporary+Using filesort" queries, JOIN::join_tab can point to
-    either: 
-    1. array of join tabs describing how to run the select, or
-    2. array of single join tab describing read from the temporary table.
-
-    SHOW EXPLAIN code needs to read/show #1. This is why two next members are
-    there for saving it.
-  */
-  JOIN_TAB *table_access_tabs;
-  uint     top_table_access_tabs_count;
-  
   JOIN_TAB **map2table;    ///< mapping between table indexes and JOIN_TABs
-  JOIN_TAB *join_tab_save; ///< saved join_tab for subquery reexecution
-
   List<JOIN_TAB_RANGE> join_tab_ranges;
   
   /*
@@ -1010,13 +1096,8 @@ public:
     We keep it here so that it is saved/restored with JOIN::restore_tmp.
   */
   uint     top_join_tab_count;
+  uint     aggr_tables;     ///< Number of post-join tmp tables 
   uint	   send_group_parts;
-  /*
-    This counts how many times do_select() was invoked for this JOIN.
-    It's used to restrict Pushdown_query::execute() only to the first
-    do_select() invocation.
-  */
-  uint     do_select_call_count;
   /*
     True if the query has GROUP BY.
     (that is, if group_by != NULL. when DISTINCT is converted into GROUP BY, it
@@ -1042,6 +1123,11 @@ public:
     to materialize and access by lookups
   */
   table_map sjm_lookup_tables;
+  /** 
+    Bitmap of semijoin tables that the chosen plan decided
+    to materialize to scan the results of materialization
+  */
+  table_map sjm_scan_tables;
   /*
     Constant tables for which we have found a row (as opposed to those for
     which we didn't).
@@ -1071,6 +1157,10 @@ public:
     (if sql_calc_found_rows is used, LIMIT is ignored)
   */
   ha_rows select_limit;
+  /*
+    Number of duplicate rows found in UNION.
+  */
+  ha_rows duplicate_rows;
   /**
     Used to fetch no more than given amount of rows per one
     fetch operation of server side cursor.
@@ -1113,6 +1203,7 @@ public:
   */
   table_map cur_sj_inner_tables;
   
+  uint dbug_join_tab_array_size;
   /* We also maintain a stack of join optimization states in * join->positions[] */
 /******* Join optimization state members end *******/
 
@@ -1122,6 +1213,7 @@ public:
   */
   table_map complex_firstmatch_tables;
 
+  Next_select_func first_select;
   /*
     The cost of best complete join plan found so far during optimization,
     after optimization phase - cost of picked join order (not taking into
@@ -1137,9 +1229,6 @@ public:
   double   join_record_count;
   List<Item> *fields;
   List<Cached_item> group_fields, group_fields_cache;
-  TABLE    *tmp_table;
-  /// used to store 2 possible tmp table of SELECT
-  TABLE    *exec_tmp_table1, *exec_tmp_table2;
   THD	   *thd;
   Item_sum  **sum_funcs, ***sum_funcs_end;
   /** second copy of sumfuncs (for queries with 2 temporary tables */
@@ -1148,6 +1237,8 @@ public:
   Item	    *having;
   Item      *tmp_having; ///< To store having when processed temporary table
   Item      *having_history; ///< Store having for explain
+  ORDER     *group_list_for_estimates;
+  bool      having_is_correlated;
   ulonglong  select_options;
   /* 
     Bitmap of allowed types of the join caches that
@@ -1186,26 +1277,6 @@ public:
   */
   bool filesort_found_rows;
   
-  /**
-    Copy of this JOIN to be used with temporary tables.
-
-    tmp_join is used when the JOIN needs to be "reusable" (e.g. in a
-    subquery that gets re-executed several times) and we know will use
-    temporary tables for materialization. The materialization to a
-    temporary table overwrites the JOIN structure to point to the
-    temporary table after the materialization is done. This is where
-    tmp_join is used : it's a copy of the JOIN before the
-    materialization and is used in restoring before re-execution by
-    overwriting the current JOIN structure with the saved copy.
-    Because of this we should pay extra care of not freeing up helper
-    structures that are referenced by the original contents of the
-    JOIN. We can check for this by making sure the "current" join is
-    not the temporary copy, e.g.  !tmp_join || tmp_join != join
- 
-    We should free these sub-structures at JOIN::destroy() if the
-    "current" join has a copy is not that copy.
-  */
-  JOIN *tmp_join;
   ROLLUP rollup;				///< Used with rollup
   
   bool mixed_implicit_grouping;
@@ -1227,6 +1298,19 @@ public:
     GROUP/ORDER BY.
   */
   bool simple_order, simple_group;
+
+  /*
+    ordered_index_usage is set if an ordered index access
+    should be used instead of a filesort when computing 
+    ORDER/GROUP BY.
+  */
+  enum
+  {
+    ordered_index_void,       // No ordered index avail.
+    ordered_index_group_by,   // Use index for GROUP BY
+    ordered_index_order_by    // Use index for ORDER BY
+  } ordered_index_usage;
+
   /**
     Is set only in case if we have a GROUP BY clause
     and no ORDER BY after constant elimination of 'order'.
@@ -1279,10 +1363,19 @@ public:
   List<Item> exec_const_order_group_cond;
   SQL_SELECT *select;                ///<created in optimisation phase
   JOIN_TAB *return_tab;              ///<used only for outer joins
-  Item **ref_pointer_array; ///<used pointer reference for this select
-  // Copy of above to be used with different lists
-  Item **items0, **items1, **items2, **items3, **current_ref_pointer_array;
-  uint ref_pointer_array_size; ///< size of above in bytes
+
+  /*
+    Used pointer reference for this select.
+    select_lex->ref_pointer_array contains five "slices" of the same length:
+    |========|========|========|========|========|
+     ref_ptrs items0   items1   items2   items3
+   */
+  Ref_ptr_array ref_ptrs;
+  // Copy of the initial slice above, to be used with different lists
+  Ref_ptr_array items0, items1, items2, items3;
+  // Used by rollup, to restore ref_ptrs after overwriting it.
+  Ref_ptr_array current_ref_ptrs;
+
   const char *zero_result_cause; ///< not 0 if exec must return zero result
   
   bool union_part; ///< this subselect is part of union 
@@ -1290,7 +1383,8 @@ public:
   enum join_optimization_state { NOT_OPTIMIZED=0,
                                  OPTIMIZATION_IN_PROGRESS=1,
                                  OPTIMIZATION_DONE=2};
-  bool optimized; ///< flag to avoid double optimization in EXPLAIN
+  // state of JOIN optimization
+  enum join_optimization_state optimization_state;
   bool initialized; ///< flag to avoid double init_execution calls
 
   Explain_select *explain;
@@ -1309,20 +1403,12 @@ public:
   /* SJM nests that are executed with SJ-Materialization strategy */
   List<SJ_MATERIALIZATION_INFO> sjm_info_list;
 
-  /* 
-    storage for caching buffers allocated during query execution. 
-    These buffers allocations need to be cached as the thread memory pool is
-    cleared only at the end of the execution of the whole query and not caching
-    allocations that occur in repetition at execution time will result in 
-    excessive memory usage.
-    Note: make_simple_join always creates an execution plan that accesses
-    a single table, thus it is sufficient to have a one-element array for
-    table_reexec.
-  */  
-  SORT_FIELD *sortorder;                        // make_unireg_sortorder()
-  TABLE *table_reexec[1];                       // make_simple_join()
-  JOIN_TAB *join_tab_reexec;                    // make_simple_join()
-  /* end of allocation caching storage */
+  /** TRUE <=> ref_pointer_array is set to items3. */
+  bool set_group_rpa;
+  /** Exec time only: TRUE <=> current group has been sent */
+  bool group_sent;
+
+  JOIN_TAB *sort_and_group_aggr_tab;
 
   JOIN(THD *thd_arg, List<Item> &fields_arg, ulonglong select_options_arg,
        select_result *result_arg)
@@ -1334,40 +1420,37 @@ public:
   void init(THD *thd_arg, List<Item> &fields_arg, ulonglong select_options_arg,
        select_result *result_arg)
   {
-    join_tab= join_tab_save= 0;
+    join_tab= 0;
     table= 0;
     table_count= 0;
     top_join_tab_count= 0;
     const_tables= 0;
     const_table_map= 0;
+    aggr_tables= 0;
     eliminated_tables= 0;
     join_list= 0;
     implicit_grouping= FALSE;
     sort_and_group= 0;
     first_record= 0;
     do_send_rows= 1;
-    send_records= 0;
+    duplicate_rows= send_records= 0;
     found_records= 0;
     fetch_limit= HA_POS_ERROR;
-    join_examined_rows= 0;
-    exec_tmp_table1= 0;
-    exec_tmp_table2= 0;
-    sortorder= 0;
-    table_reexec[0]= 0;
-    join_tab_reexec= 0;
     thd= thd_arg;
     sum_funcs= sum_funcs2= 0;
     procedure= 0;
     having= tmp_having= having_history= 0;
+    having_is_correlated= false;
+    group_list_for_estimates= 0;
     select_options= select_options_arg;
     result= result_arg;
     lock= thd_arg->lock;
     select_lex= 0; //for safety
-    tmp_join= 0;
     select_distinct= MY_TEST(select_options & SELECT_DISTINCT);
     no_order= 0;
     simple_order= 0;
     simple_group= 0;
+    ordered_index_usage= ordered_index_void;
     need_distinct= 0;
     skip_sort_order= 0;
     need_tmp= 0;
@@ -1375,10 +1458,13 @@ public:
     error= 0;
     select= 0;
     return_tab= 0;
-    ref_pointer_array= items0= items1= items2= items3= 0;
-    ref_pointer_array_size= 0;
+    ref_ptrs.reset();
+    items0.reset();
+    items1.reset();
+    items2.reset();
+    items3.reset();
     zero_result_cause= 0;
-    optimized= 0;
+    optimization_state= JOIN::NOT_OPTIMIZED;
     have_query_plan= QEP_NOT_PRESENT_YET;
     initialized= 0;
     cleaned= 0;
@@ -1390,8 +1476,6 @@ public:
     positions= best_positions= 0;
     pushdown_query= 0;
     original_join_tab= 0;
-    do_select_call_count= 0;
-
     explain= NULL;
 
     all_fields= fields_arg;
@@ -1404,22 +1488,33 @@ public:
     rollup.state= ROLLUP::STATE_NONE;
 
     no_const_tables= FALSE;
+    first_select= sub_select;
+    set_group_rpa= false;
+    group_sent= 0;
+
     outer_ref_cond= pseudo_bits_cond= NULL;
     in_to_exists_where= NULL;
     in_to_exists_having= NULL;
-    pre_sort_join_tab= NULL;
     emb_sjm_nest= NULL;
     sjm_lookup_tables= 0;
-
-    /* 
-      The following is needed because JOIN::cleanup(true) may be called for 
-      joins for which JOIN::optimize was aborted with an error before a proper
-      query plan was produced
-    */
-    table_access_tabs= NULL; 
+    sjm_scan_tables= 0;
   }
 
-  int prepare(Item ***rref_pointer_array, TABLE_LIST *tables, uint wind_num,
+  /* True if the plan guarantees that it will be returned zero or one row */
+  bool only_const_tables()  { return const_tables == table_count; }
+  /* Number of tables actually joined at the top level */
+  uint exec_join_tab_cnt() { return tables_list ? top_join_tab_count : 0; }
+
+  /*
+    Number of tables in the join which also includes the temporary tables
+    created for GROUP BY, DISTINCT , WINDOW FUNCTION etc.
+  */
+  uint total_join_tab_cnt()
+  {
+    return exec_join_tab_cnt() + aggr_tables - 1;
+  }
+
+  int prepare(TABLE_LIST *tables, uint wind_num,
 	      COND *conds, uint og_num, ORDER *order, bool skip_order_by,
               ORDER *group, Item *having, ORDER *proc_param, SELECT_LEX *select,
 	      SELECT_LEX_UNIT *unit);
@@ -1429,26 +1524,58 @@ public:
   int reinit();
   int init_execution();
   void exec();
+
   void exec_inner();
+  bool prepare_result(List<Item> **columns_list);
   int destroy();
   void restore_tmp();
   bool alloc_func_list();
   bool flatten_subqueries();
   bool optimize_unflattened_subqueries();
   bool optimize_constant_subqueries();
+  int init_join_caches();
   bool make_sum_func_list(List<Item> &all_fields, List<Item> &send_fields,
 			  bool before_group_by, bool recompute= FALSE);
 
-  inline void set_items_ref_array(Item **ptr)
+  /// Initialzes a slice, see comments for ref_ptrs above.
+  Ref_ptr_array ref_ptr_array_slice(size_t slice_num)
   {
-    memcpy((char*) ref_pointer_array, (char*) ptr, ref_pointer_array_size);
-    current_ref_pointer_array= ptr;
+    size_t slice_sz= select_lex->ref_pointer_array.size() / 5U;
+    DBUG_ASSERT(select_lex->ref_pointer_array.size() % 5 == 0);
+    DBUG_ASSERT(slice_num < 5U);
+    return Ref_ptr_array(&select_lex->ref_pointer_array[slice_num * slice_sz],
+                         slice_sz);
   }
-  inline void init_items_ref_array()
+
+  /**
+     Overwrites one slice with the contents of another slice.
+     In the normal case, dst and src have the same size().
+     However: the rollup slices may have smaller size than slice_sz.
+   */
+  void copy_ref_ptr_array(Ref_ptr_array dst_arr, Ref_ptr_array src_arr)
   {
-    items0= ref_pointer_array + all_fields.elements;
-    memcpy(items0, ref_pointer_array, ref_pointer_array_size);
-    current_ref_pointer_array= items0;
+    DBUG_ASSERT(dst_arr.size() >= src_arr.size());
+    if (src_arr.size() == 0)
+      return;
+
+    void *dest= dst_arr.array();
+    const void *src= src_arr.array();
+    memcpy(dest, src, src_arr.size() * src_arr.element_size());
+  }
+
+  /// Overwrites 'ref_ptrs' and remembers the the source as 'current'.
+  void set_items_ref_array(Ref_ptr_array src_arr)
+  {
+    copy_ref_ptr_array(ref_ptrs, src_arr);
+    current_ref_ptrs= src_arr;
+  }
+
+  /// Initializes 'items0' and remembers that it is 'current'.
+  void init_items_ref_array()
+  {
+    items0= ref_ptr_array_slice(1);
+    copy_ref_ptr_array(items0, ref_ptrs);
+    current_ref_ptrs= items0;
   }
 
   bool rollup_init();
@@ -1456,19 +1583,11 @@ public:
   bool rollup_make_fields(List<Item> &all_fields, List<Item> &fields,
 			  Item_sum ***func);
   int rollup_send_data(uint idx);
-  int rollup_write_data(uint idx, TABLE *table);
-  /**
-    Release memory and, if possible, the open tables held by this execution
-    plan (and nested plans). It's used to release some tables before
-    the end of execution in order to increase concurrency and reduce
-    memory consumption.
-  */
+  int rollup_write_data(uint idx, TMP_TABLE_PARAM *tmp_table_param, TABLE *table);
   void join_free();
   /** Cleanup this JOIN, possibly for reuse */
   void cleanup(bool full);
   void clear();
-  bool save_join_tab();
-  bool init_save_join_tab();
   bool send_row_on_empty_set()
   {
     return (do_send_rows && implicit_grouping && !group_optimized_away &&
@@ -1487,6 +1606,8 @@ public:
     return (table_map(1) << table_count) - 1;
   }
   void drop_unused_derived_keys();
+  bool get_best_combination();
+  bool add_sorting_to_table(JOIN_TAB *tab, ORDER *order);
   inline void eval_select_list_used_tables();
   /* 
     Return the table for which an index scan can be used to satisfy 
@@ -1516,6 +1637,7 @@ public:
     - We are using an ORDER BY or GROUP BY on fields not in the first table
     - We are using different ORDER BY and GROUP BY orders
     - The user wants us to buffer the result.
+    - We are using WINDOW functions.
     When the WITH ROLLUP modifier is present, we cannot skip temporary table
     creation for the DISTINCT clause just because there are only const tables.
   */
@@ -1525,7 +1647,8 @@ public:
 	    ((select_distinct || !simple_order || !simple_group) ||
 	     (group_list && order) ||
              MY_TEST(select_options & OPTION_BUFFER_RESULT))) ||
-            (rollup.state != ROLLUP::STATE_NONE && select_distinct));
+            (rollup.state != ROLLUP::STATE_NONE && select_distinct) ||
+            select_lex->have_window_funcs());
   }
   bool choose_subquery_plan(table_map join_tables);
   void get_partial_cost_and_fanout(int end_tab_idx,
@@ -1548,16 +1671,45 @@ public:
   int save_explain_data_intern(Explain_query *output, bool need_tmp_table,
                                bool need_order, bool distinct,
                                const char *message);
-  JOIN_TAB *first_breadth_first_optimization_tab() { return table_access_tabs; }
-  JOIN_TAB *first_breadth_first_execution_tab() { return join_tab; }
+  JOIN_TAB *first_breadth_first_tab() { return join_tab; }
 private:
+  /**
+    Create a temporary table to be used for processing DISTINCT/ORDER
+    BY/GROUP BY.
+
+    @note Will modify JOIN object wrt sort/group attributes
+
+    @param tab              the JOIN_TAB object to attach created table to
+    @param tmp_table_fields List of items that will be used to define
+                            column types of the table.
+    @param tmp_table_group  Group key to use for temporary table, NULL if none.
+    @param save_sum_fields  If true, do not replace Item_sum items in 
+                            @c tmp_fields list with Item_field items referring 
+                            to fields in temporary table.
+
+    @returns false on success, true on failure
+  */
+  bool create_postjoin_aggr_table(JOIN_TAB *tab, List<Item> *tmp_table_fields,
+                                  ORDER *tmp_table_group,
+                                  bool save_sum_fields,
+                                  bool distinct,
+                                  bool keep_row_ordermake);
+  /**
+    Optimize distinct when used on a subset of the tables.
+
+    E.g.,: SELECT DISTINCT t1.a FROM t1,t2 WHERE t1.b=t2.b
+    In this case we can stop scanning t2 when we have found one t1.a
+  */
+  void optimize_distinct();
+
   /**
     TRUE if the query contains an aggregate function but has no GROUP
     BY clause. 
   */
   bool implicit_grouping; 
-  bool make_simple_join(JOIN *join, TABLE *tmp_table);
   void cleanup_item_list(List<Item> &items) const;
+  bool add_having_as_table_cond(JOIN_TAB *tab);
+  bool make_aggr_tables_info();
 };
 
 enum enum_with_bush_roots { WITH_BUSH_ROOTS, WITHOUT_BUSH_ROOTS};
@@ -1582,7 +1734,7 @@ extern const char *join_type_str[];
 void count_field_types(SELECT_LEX *select_lex, TMP_TABLE_PARAM *param, 
                        List<Item> &fields, bool reset_with_sum_func);
 bool setup_copy_fields(THD *thd, TMP_TABLE_PARAM *param,
-		       Item **ref_pointer_array,
+		       Ref_ptr_array ref_pointer_array,
 		       List<Item> &new_list1, List<Item> &new_list2,
 		       uint elements, List<Item> &fields);
 void copy_fields(TMP_TABLE_PARAM *param);
@@ -1590,8 +1742,8 @@ bool copy_funcs(Item **func_ptr, const THD *thd);
 uint find_shortest_key(TABLE *table, const key_map *usable_keys);
 Field* create_tmp_field_from_field(THD *thd, Field* org_field,
                                    const char *name, TABLE *table,
-                                   Item_field *item, uint convert_blob_length);
-                                                                      
+                                   Item_field *item);
+
 bool is_indexed_agg_distinct(JOIN *join, List<Item_field> *out_args);
 
 /* functions from opt_sum.cc */
@@ -1637,7 +1789,7 @@ public:
     enum store_key_result result;
     THD *thd= to_field->table->in_use;
     enum_check_fields saved_count_cuted_fields= thd->count_cuted_fields;
-    ulonglong sql_mode= thd->variables.sql_mode;
+    sql_mode_t orig_sql_mode= thd->variables.sql_mode;
     thd->variables.sql_mode&= ~(MODE_NO_ZERO_IN_DATE | MODE_NO_ZERO_DATE);
     thd->variables.sql_mode|= MODE_INVALID_DATES;
 
@@ -1646,7 +1798,7 @@ public:
     result= copy_inner();
 
     thd->count_cuted_fields= saved_count_cuted_fields;
-    thd->variables.sql_mode= sql_mode;
+    thd->variables.sql_mode= orig_sql_mode;
 
     return result;
   }
@@ -1691,8 +1843,8 @@ class store_key_field: public store_key
   enum store_key_result copy_inner()
   {
     TABLE *table= copy_field.to_field->table;
-    my_bitmap_map *old_map= dbug_tmp_use_all_columns(table,
-                                                     table->write_set);
+    MY_BITMAP *old_map= dbug_tmp_use_all_columns(table,
+                                                 &table->write_set);
 
     /* 
       It looks like the next statement is needed only for a simplified
@@ -1703,7 +1855,7 @@ class store_key_field: public store_key
     bzero(copy_field.to_ptr,copy_field.to_length);
 
     copy_field.do_copy(&copy_field);
-    dbug_tmp_restore_column_map(table->write_set, old_map);
+    dbug_tmp_restore_column_map(&table->write_set, old_map);
     null_key= to_field->is_null();
     return err != 0 ? STORE_KEY_FATAL : STORE_KEY_OK;
   }
@@ -1738,8 +1890,8 @@ public:
   enum store_key_result copy_inner()
   {
     TABLE *table= to_field->table;
-    my_bitmap_map *old_map= dbug_tmp_use_all_columns(table,
-                                                     table->write_set);
+    MY_BITMAP *old_map= dbug_tmp_use_all_columns(table,
+                                                 &table->write_set);
     int res= FALSE;
 
     /* 
@@ -1760,7 +1912,7 @@ public:
     */
     if (!res && table->in_use->is_error())
       res= 1; /* STORE_KEY_FATAL */
-    dbug_tmp_restore_column_map(table->write_set, old_map);
+    dbug_tmp_restore_column_map(&table->write_set, old_map);
     null_key= to_field->is_null() || item->null_value;
     return ((err != 0 || res < 0 || res > 2) ? STORE_KEY_FATAL : 
             (store_key_result) res);
@@ -1796,8 +1948,8 @@ protected:
     {
       inited=1;
       TABLE *table= to_field->table;
-      my_bitmap_map *old_map= dbug_tmp_use_all_columns(table,
-                                                       table->write_set);
+      MY_BITMAP *old_map= dbug_tmp_use_all_columns(table,
+                                                   &table->write_set);
       if ((res= item->save_in_field(to_field, 1)))
       {       
         if (!err)
@@ -1809,33 +1961,37 @@ protected:
         */
       if (!err && to_field->table->in_use->is_error())
         err= 1; /* STORE_KEY_FATAL */
-      dbug_tmp_restore_column_map(table->write_set, old_map);
+      dbug_tmp_restore_column_map(&table->write_set, old_map);
     }
     null_key= to_field->is_null() || item->null_value;
     return (err > 2 ? STORE_KEY_FATAL : (store_key_result) err);
   }
 };
 
+void best_access_path(JOIN *join, JOIN_TAB *s,
+                      table_map remaining_tables,
+                      const POSITION *join_positions, uint idx,
+                      bool disable_jbuf, double record_count,
+                      POSITION *pos, POSITION *loose_scan_pos);
 bool cp_buffer_from_ref(THD *thd, TABLE *table, TABLE_REF *ref);
 bool error_if_full_join(JOIN *join);
 int report_error(TABLE *table, int error);
 int safe_index_read(JOIN_TAB *tab);
 int get_quick_record(SQL_SELECT *select);
-SORT_FIELD * make_unireg_sortorder(THD *thd, ORDER *order, uint *length,
-                                  SORT_FIELD *sortorder);
-int setup_order(THD *thd, Item **ref_pointer_array, TABLE_LIST *tables,
-		List<Item> &fields, List <Item> &all_fields, ORDER *order);
-int setup_group(THD *thd, Item **ref_pointer_array, TABLE_LIST *tables,
+int setup_order(THD *thd, Ref_ptr_array ref_pointer_array, TABLE_LIST *tables,
+                List<Item> &fields, List <Item> &all_fields, ORDER *order,
+                bool from_window_spec= false);
+int setup_group(THD *thd,  Ref_ptr_array ref_pointer_array, TABLE_LIST *tables,
 		List<Item> &fields, List<Item> &all_fields, ORDER *order,
-		bool *hidden_group_fields);
+		bool *hidden_group_fields, bool from_window_spec= false);
 bool fix_inner_refs(THD *thd, List<Item> &all_fields, SELECT_LEX *select,
-                   Item **ref_pointer_array);
+                    Ref_ptr_array ref_pointer_array);
 int join_read_key2(THD *thd, struct st_join_table *tab, TABLE *table,
                    struct st_table_ref *table_ref);
 
 bool handle_select(THD *thd, LEX *lex, select_result *result,
                    ulong setup_tables_done_option);
-bool mysql_select(THD *thd, Item ***rref_pointer_array,
+bool mysql_select(THD *thd,
                   TABLE_LIST *tables, uint wild_num,  List<Item> &list,
                   COND *conds, uint og_num, ORDER *order, ORDER *group,
                   Item *having, ORDER *proc_param, ulonglong select_type, 
@@ -1849,8 +2005,7 @@ Field *create_tmp_field(THD *thd, TABLE *table,Item *item, Item::Type type,
                         Field **def_field,
 			bool group, bool modify_item,
 			bool table_cant_handle_bit_fields,
-                        bool make_copy_field,
-                        uint convert_blob_length);
+                        bool make_copy_field);
 
 /*
   General routine to change field->ptr of a NULL-terminated array of Field
@@ -1870,7 +2025,7 @@ class Virtual_tmp_table: public TABLE
 
     This is needed to avoid memory leaks, as some fields can be BLOB
     variants and thus can have String onboard. Strings must be destructed
-    as they store data not the heap (not on MEM_ROOT).
+    as they store data on the heap (not on MEM_ROOT).
   */
   void destruct_fields()
   {
@@ -1902,17 +2057,19 @@ public:
     @param thd         - Current thread.
   */
   static void *operator new(size_t size, THD *thd) throw();
+  static void operator delete(void *ptr, size_t size) {TRASH_FREE(ptr, size);}
 
-  Virtual_tmp_table(THD *thd)
+  Virtual_tmp_table(THD *thd) : m_alloced_field_count(0)
   {
-    bzero(this, sizeof(*this));
+    reset();
     temp_pool_slot= MY_BIT_NONE;
     in_use= thd;
   }
 
   ~Virtual_tmp_table()
   {
-    destruct_fields();
+    if (s)
+      destruct_fields();
   }
 
   /**
@@ -1997,6 +2154,17 @@ create_virtual_tmp_table(THD *thd, List<Column_definition> &field_list)
   Virtual_tmp_table *table;
   if (!(table= new(thd) Virtual_tmp_table(thd)))
     return NULL;
+
+  /*
+    If "simulate_create_virtual_tmp_table_out_of_memory" debug option
+    is enabled, we now enable "simulate_out_of_memory". This effectively
+    makes table->init() fail on OOM inside multi_alloc_root().
+    This is done to test that ~Virtual_tmp_table() called from the "delete"
+    below correcly handles OOM.
+  */
+  DBUG_EXECUTE_IF("simulate_create_virtual_tmp_table_out_of_memory",
+                  DBUG_SET("+d,simulate_out_of_memory"););
+
   if (table->init(field_list.elements) ||
       table->add(field_list) ||
       table->open())
@@ -2116,9 +2284,13 @@ bool create_internal_tmp_table(TABLE *table, KEY *keyinfo,
                                TMP_ENGINE_COLUMNDEF *start_recinfo,
                                TMP_ENGINE_COLUMNDEF **recinfo, 
                                ulonglong options);
+bool instantiate_tmp_table(TABLE *table, KEY *keyinfo, 
+                           TMP_ENGINE_COLUMNDEF *start_recinfo,
+                           TMP_ENGINE_COLUMNDEF **recinfo,
+                           ulonglong options);
 bool open_tmp_table(TABLE *table);
 void setup_tmp_table_column_bitmaps(TABLE *table, uchar *bitmaps);
-double prev_record_reads(POSITION *positions, uint idx, table_map found_ref);
+double prev_record_reads(const POSITION *positions, uint idx, table_map found_ref);
 void fix_list_after_tbl_changes(SELECT_LEX *new_parent, List<TABLE_LIST> *tlist);
 
 struct st_cond_statistic
@@ -2151,5 +2323,14 @@ public:
   /* Function that calls the above scan functions */
   int execute(JOIN *join);
 };
+
+bool test_if_order_compatible(SQL_I_List<ORDER> &a, SQL_I_List<ORDER> &b);
+int test_if_group_changed(List<Cached_item> &list);
+int create_sort_index(THD *thd, JOIN *join, JOIN_TAB *tab, Filesort *fsort);
+
+JOIN_TAB *first_explain_order_tab(JOIN* join);
+JOIN_TAB *next_explain_order_tab(JOIN* join, JOIN_TAB* tab);
+
+bool is_eliminated_table(table_map eliminated_tables, TABLE_LIST *tbl);
 
 #endif /* SQL_SELECT_INCLUDED */

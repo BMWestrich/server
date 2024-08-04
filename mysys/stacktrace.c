@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #include <my_global.h>
 #include <my_stacktrace.h>
@@ -34,121 +34,47 @@
 #include <execinfo.h>
 #endif
 
-#define PTR_SANE(p) ((p) && (char*)(p) >= heap_start && (char*)(p) <= heap_end)
+/*
+  Attempt to print a char * pointer as a string.
 
-static char *heap_start;
+  SYNOPSIS
+    Prints until  max_len characters have been printed.
 
-#ifdef HAVE_BSS_START
-extern char *__bss_start;
-#endif
+  RETURN VALUE
+    0  Pointer was within the heap address space.
+       The string was printed fully, or until the end of the heap address space.
+    1  Pointer is outside the heap address space. Printed as invalid.
 
-void my_init_stacktrace()
-{
-#ifdef HAVE_BSS_START
-  heap_start = (char*) &__bss_start;
-#endif
-}
-
-#ifdef __linux__
-
-static void print_buffer(char *buffer, size_t count)
-{
-  const char s[]= " ";
-  for (; count && *buffer; --count)
-  {
-    my_write_stderr(isprint(*buffer) ? buffer : s, 1);
-    ++buffer;
-  }
-}
-
-/**
-  Access the pages of this process through /proc/self/task/<tid>/mem
-  in order to safely print the contents of a memory address range.
-
-  @param  addr      The address at the start of the memory region.
-  @param  max_len   The length of the memory region.
-
-  @return Zero on success.
+  NOTE
+    On some systems, we can have valid pointers outside the heap address space.
+    This is through the use of mmap inside malloc calls. When this function
+    returns 1, it does not mean 100% that the pointer is corrupted.
 */
-static int safe_print_str(const char *addr, int max_len)
+
+int my_safe_print_str(const char* val, int max_len)
 {
-  int fd;
-  pid_t tid;
-  off_t offset;
-  ssize_t nbytes= 0;
-  size_t total, count;
-  char buf[256];
-
-  tid= (pid_t) syscall(SYS_gettid);
-
-  sprintf(buf, "/proc/self/task/%d/mem", tid);
-
-  if ((fd= open(buf, O_RDONLY)) < 0)
-    return -1;
-
-  /* Ensure that off_t can hold a pointer. */
-  compile_time_assert(sizeof(off_t) >= sizeof(intptr));
-
-  total= max_len;
-  offset= (intptr) addr;
-
-  /* Read up to the maximum number of bytes. */
-  while (total)
+  const char *orig_val= val;
+  if (!val)
   {
-    count= MY_MIN(sizeof(buf), total);
-
-    if ((nbytes= pread(fd, buf, count, offset)) < 0)
-    {
-      /* Just in case... */
-      if (errno == EINTR)
-        continue;
-      else
-        break;
-    }
-
-    /* Advance offset into memory. */
-    total-= nbytes;
-    offset+= nbytes;
-    addr+= nbytes;
-
-    /* Output the printable characters. */
-    print_buffer(buf, nbytes);
-
-    /* Break if less than requested... */
-    if ((count - nbytes))
-      break;
+    my_safe_printf_stderr("%s", "(null)");
+    return 1;
   }
 
-  if (nbytes == -1)
-    my_safe_printf_stderr("Can't read from address %p", addr);
-
-  close(fd);
+  for (; max_len; --max_len)
+  {
+    if (my_write_stderr((val++), 1) != 1)
+    {
+      if ((errno == EFAULT) &&(val == orig_val + 1))
+      {
+        // We can not read the address from very beginning
+        my_safe_printf_stderr("Can't access address %p", orig_val);
+      }
+      break;
+    }
+  }
+  my_safe_printf_stderr("%s", "\n");
 
   return 0;
-}
-
-#endif
-
-void my_safe_print_str(const char* val, int max_len)
-{
-  char *heap_end;
-
-#ifdef __linux__
-  if (!safe_print_str(val, max_len))
-    return;
-#endif
-
-  heap_end= (char*) sbrk(0);
-
-  if (!PTR_SANE(val))
-  {
-    my_safe_printf_stderr("%s", "is an invalid pointer");
-    return;
-  }
-
-  for (; max_len && PTR_SANE(val) && *val; --max_len)
-    my_write_stderr((val++), 1);
-  my_safe_printf_stderr("%s", "\n");
 }
 
 #if defined(HAVE_PRINTSTACK)
@@ -462,7 +388,18 @@ void my_write_core(int sig)
 
 #else /* __WIN__*/
 
+#ifdef _MSC_VER
+/* Silence warning in OS header dbghelp.h */
+#pragma warning(push)
+#pragma warning(disable : 4091)
+#endif
+
 #include <dbghelp.h>
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
+
 #include <tlhelp32.h>
 #include <my_sys.h>
 #if _MSC_VER
@@ -473,11 +410,6 @@ static EXCEPTION_POINTERS *exception_ptrs;
 
 #define MODULE64_SIZE_WINXP 576
 #define STACKWALK_MAX_FRAMES 64
-
-void my_init_stacktrace()
-{
-}
-
 
 void my_set_exception_pointers(EXCEPTION_POINTERS *ep)
 {
@@ -727,7 +659,7 @@ void my_write_core(int unused)
 }
 
 
-void my_safe_print_str(const char *val, int len)
+int my_safe_print_str(const char *val, int len)
 {
   __try
   {
@@ -737,13 +669,14 @@ void my_safe_print_str(const char *val, int len)
   {
     my_safe_printf_stderr("%s", "is an invalid string pointer");
   }
+  return 0;
 }
 #endif /*__WIN__*/
 
 
 size_t my_write_stderr(const void *buf, size_t count)
 {
-  return (size_t) write(STDERR_FILENO, buf, count);
+  return (size_t) write(fileno(stderr), buf, count);
 }
 
 

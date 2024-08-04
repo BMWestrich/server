@@ -13,7 +13,7 @@
 
   You should have received a copy of the GNU Lesser General Public
   License along with this library; if not, write to the Free Software
-  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1335  USA
 */
 #include "grn.h"
 #include <groonga/tokenizer.h>
@@ -134,7 +134,7 @@ grn_tokenizer_query_open(grn_ctx *ctx, int num_args, grn_obj **args,
 
     {
       grn_obj * const table = args[0];
-      grn_obj_flags table_flags;
+      grn_table_flags table_flags;
       grn_encoding table_encoding;
       unsigned int query_length = GRN_TEXT_LEN(query_str);
       char *query_buf = (char *)GRN_PLUGIN_MALLOC(ctx, query_length + 1);

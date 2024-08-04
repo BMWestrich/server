@@ -70,6 +70,7 @@ select group_concat(c1 order by c1) from t1 group by c1 collate utf8_croatian_ci
 select group_concat(c1 order by c1) from t1 group by c1 collate utf8_german2_ci;
 select group_concat(c1 order by c1) from t1 group by c1 collate utf8_unicode_520_ci;
 select group_concat(c1 order by c1) from t1 group by c1 collate utf8_vietnamese_ci;
+select group_concat(c1 order by c1) from t1 group by c1 collate utf8_thai_520_w2;
 
 ALTER TABLE t1 CONVERT TO CHARACTER SET ucs2 COLLATE ucs2_bin;
 SELECT GROUP_CONCAT(c1 ORDER BY c1) FROM t1 GROUP BY c1 COLLATE ucs2_unicode_ci;
@@ -618,6 +619,24 @@ EXPLAIN EXTENDED SELECT * FROM t1 WHERE a='oe' COLLATE utf8_german2_ci AND a='oe
 DROP TABLE t1;
 
 --echo #
+--echo # MDEV-17064 LIKE function has error behavior on the fields in which the collation is xxx_unicode_xx
+--echo #
+
+CREATE TABLE t1 (name VARCHAR(20) CHARACTER SET utf8 COLLATE utf8_unicode_ci);
+INSERT INTO t1 VALUES ('radio! test');
+SELECT * FROM t1 WHERE name LIKE '%!!%' ESCAPE '!';
+ALTER TABLE t1 CHANGE COLUMN name name VARCHAR(20) CHARACTER SET 'utf8' COLLATE 'utf8_general_ci';
+SELECT * FROM t1 WHERE name LIKE '%!!%' ESCAPE '!';
+DROP TABLE t1;
+
+CREATE TABLE t1 (name VARCHAR(20) CHARACTER SET utf8 COLLATE utf8_unicode_ci);
+INSERT INTO t1 VALUES ('radio! test');
+SELECT name LIKE '%!!%' ESCAPE '!' AS c1,
+       name LIKE '%!!%' COLLATE utf8_general_ci ESCAPE '!' AS c2
+FROM t1;
+DROP TABLE t1;
+
+--echo #
 --echo # End of MariaDB-10.0 tests
 --echo #
 
@@ -641,7 +660,16 @@ SELECT * FROM t1 WHERE a=_utf8'a';
 # Make sure this does not return "Illegal mix of collations"
 SELECT * FROM t1 WHERE a='a' AND a=_utf8'a';
 DROP TABLE t1;
+
+
+SET NAMES utf8 COLLATE utf8_thai_520_w2;
+--source include/ctype_uca_w2.inc
+--source include/ctype_thai.inc
+
 SET NAMES utf8;
+SET collation_connection=ucs2_thai_520_w2;
+--source include/ctype_uca_w2.inc
+--source include/ctype_thai.inc
 
 --echo #
 --echo # End of MariaDB-10.1 tests

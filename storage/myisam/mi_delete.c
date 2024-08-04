@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /* Remove a row from a MyISAM table */
 
@@ -326,7 +326,7 @@ static int d_search(register MI_INFO *info, register MI_KEYDEF *keyinfo,
     {
       DBUG_PRINT("error",("Didn't find key"));
       mi_print_error(info->s, HA_ERR_CRASHED);
-      my_errno=HA_ERR_CRASHED;		/* This should newer happend */
+      my_errno=HA_ERR_CRASHED;		/* This should never happen */
       goto err;
     }
     save_flag=0;
@@ -410,8 +410,8 @@ static int del(register MI_INFO *info, register MI_KEYDEF *keyinfo, uchar *key,
   MYISAM_SHARE *share=info->s;
   MI_KEY_PARAM s_temp;
   DBUG_ENTER("del");
-  DBUG_PRINT("enter",("leaf_page: %ld  keypos: 0x%lx", (long) leaf_page,
-		      (ulong) keypos));
+  DBUG_PRINT("enter",("leaf_page: %lld  keypos: %p", leaf_page,
+		      keypos));
   DBUG_DUMP("leaf_buff",(uchar*) leaf_buff,mi_getint(leaf_buff));
 
   endpos=leaf_buff+mi_getint(leaf_buff);
@@ -516,8 +516,8 @@ static int underflow(register MI_INFO *info, register MI_KEYDEF *keyinfo,
   MI_KEY_PARAM s_temp;
   MYISAM_SHARE *share=info->s;
   DBUG_ENTER("underflow");
-  DBUG_PRINT("enter",("leaf_page: %ld  keypos: 0x%lx",(long) leaf_page,
-		      (ulong) keypos));
+  DBUG_PRINT("enter",("leaf_page: %lld  keypos: %p",leaf_page,
+		      keypos));
   DBUG_DUMP("anc_buff",(uchar*) anc_buff,mi_getint(anc_buff));
   DBUG_DUMP("leaf_buff",(uchar*) leaf_buff,mi_getint(leaf_buff));
 
@@ -597,8 +597,8 @@ static int underflow(register MI_INFO *info, register MI_KEYDEF *keyinfo,
     else
     {						/* Page is full */
       endpos=anc_buff+anc_length;
-      DBUG_PRINT("test",("anc_buff: 0x%lx  endpos: 0x%lx",
-                         (long) anc_buff, (long) endpos));
+      DBUG_PRINT("test",("anc_buff: %p  endpos: %p",
+                         anc_buff, endpos));
       if (keypos != anc_buff+2+key_reflength &&
 	  !_mi_get_last_key(info,keyinfo,anc_buff,anc_key,keypos,&length))
 	goto err;
@@ -767,6 +767,10 @@ err:
 	  returns how many chars was removed or 0 on error
 	*/
 
+#if defined(_MSC_VER) && defined(_M_X64) && _MSC_VER >= 1930
+#pragma optimize("g", off)
+#endif
+
 static uint remove_key(MI_KEYDEF *keyinfo, uint nod_flag,
 		       uchar *keypos,	/* Where key starts */
 		       uchar *lastkey,	/* key to be removed */
@@ -776,7 +780,7 @@ static uint remove_key(MI_KEYDEF *keyinfo, uint nod_flag,
   int s_length;
   uchar *start;
   DBUG_ENTER("remove_key");
-  DBUG_PRINT("enter",("keypos: 0x%lx  page_end: 0x%lx",(long) keypos, (long) page_end));
+  DBUG_PRINT("enter",("keypos: %p  page_end: %p",keypos, page_end));
 
   start=keypos;
   if (!(keyinfo->flag &
@@ -891,3 +895,7 @@ static uint remove_key(MI_KEYDEF *keyinfo, uint nod_flag,
 	(uint) (page_end-start-s_length));
   DBUG_RETURN((uint) s_length);
 } /* remove_key */
+
+#if defined(_MSC_VER) && defined(_M_X64) && _MSC_VER >= 1930
+#pragma optimize("",on)
+#endif

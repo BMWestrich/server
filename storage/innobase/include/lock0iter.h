@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2007, 2009, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2007, 2014, Oracle and/or its affiliates. All Rights Reserved.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +12,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -26,7 +26,6 @@ Created July 16, 2007 Vasil Dimov
 #ifndef lock0iter_h
 #define lock0iter_h
 
-#include "univ.i"
 #include "lock0types.h"
 
 struct lock_queue_iterator_t {
@@ -46,7 +45,6 @@ record is stored. It can be undefined (ULINT_UNDEFINED) in two cases:
    bit_no is calculated in this function by using
    lock_rec_find_set_bit(). There is exactly one bit set in the bitmap
    of a wait lock. */
-UNIV_INTERN
 void
 lock_queue_iterator_reset(
 /*======================*/
@@ -59,8 +57,7 @@ lock_queue_iterator_reset(
 Gets the previous lock in the lock queue, returns NULL if there are no
 more locks (i.e. the current lock is the first one). The iterator is
 receded (if not-NULL is returned).
-@return	previous lock or NULL */
-
+@return previous lock or NULL */
 const lock_t*
 lock_queue_iterator_get_prev(
 /*=========================*/

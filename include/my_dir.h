@@ -11,7 +11,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #ifndef MY_DIR_H
 #define MY_DIR_H
@@ -35,9 +35,16 @@ extern "C" {
 #define MY_S_ISUID	S_ISUID /* set user id on execution */
 #define MY_S_ISGID	S_ISGID /* set group id on execution */
 #define MY_S_ISVTX	S_ISVTX /* save swapped text even after use */
-#define MY_S_IREAD	S_IREAD /* read permission, owner */
-#define MY_S_IWRITE	S_IWRITE	/* write permission, owner */
-#define MY_S_IEXEC	S_IEXEC /* execute/search permission, owner */
+
+#ifndef S_IREAD
+#define MY_S_IREAD      S_IRUSR /* read permission, owner */
+#define MY_S_IWRITE     S_IWUSR /* write permission, owner */
+#define MY_S_IEXEC      S_IXUSR /* execute/search permission, owner */
+#else
+#define MY_S_IREAD      S_IREAD /* read permission, owner */
+#define MY_S_IWRITE     S_IWRITE /* write permission, owner */
+#define MY_S_IEXEC      S_IEXEC /* execute/search permission, owner */
+#endif
 
 #define MY_S_ISDIR(m)	(((m) & MY_S_IFMT) == MY_S_IFDIR)
 #define MY_S_ISCHR(m)	(((m) & MY_S_IFMT) == MY_S_IFCHR)

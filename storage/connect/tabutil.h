@@ -18,7 +18,8 @@ TABLE_SHARE *GetTableShare(PGLOBAL g, THD *thd, const char *db,
 PQRYRES TabColumns(PGLOBAL g, THD *thd, const char *db, 
                                         const char *name, bool& info);
 
-void Remove_tshp(PCATLG cat);
+TABLE_SHARE *Remove_tshp(PCATLG cat);
+void Restore_tshp(PCATLG cat, TABLE_SHARE *s);
 
 /* -------------------------- PROXY classes -------------------------- */
 
@@ -67,11 +68,11 @@ class DllExport TDBPRX : public TDBASE {
                 {return (PTDB)new(g) TDBPRX(this);}
 
   // Methods
-  virtual PTDB  CopyOne(PTABS t);
+  virtual PTDB  Clone(PTABS t);
   virtual int   GetRecpos(void) {return Tdbp->GetRecpos();}
 	virtual void  ResetDB(void) {Tdbp->ResetDB();}
 	virtual int   RowNumber(PGLOBAL g, bool b = FALSE);
-  virtual PSZ   GetServer(void) {return (Tdbp) ? Tdbp->GetServer() : (PSZ)"?";}
+  virtual PCSZ  GetServer(void) {return (Tdbp) ? Tdbp->GetServer() : (PSZ)"?";}
 
   // Database routines
 	virtual PCOL  MakeCol(PGLOBAL g, PCOLDEF cdp, PCOL cprec, int n);
@@ -83,12 +84,12 @@ class DllExport TDBPRX : public TDBASE {
   virtual int   WriteDB(PGLOBAL g);
   virtual int   DeleteDB(PGLOBAL g, int irc);
   virtual void  CloseDB(PGLOBAL g) {if (Tdbp) Tdbp->CloseDB(g);}
-        PTDBASE GetSubTable(PGLOBAL g, PTABLE tabp, bool b = false);
+          PTDB  GetSubTable(PGLOBAL g, PTABLE tabp, bool b = false);
           void  RemoveNext(PTABLE tp);
 
  protected:
   // Members
-  PTDBASE Tdbp;                   // The object table
+  PTDB Tdbp;                      // The object table
   }; // end of class TDBPRX
 
 /***********************************************************************/
@@ -101,7 +102,7 @@ class DllExport PRXCOL : public COLBLK {
   friend class TDBOCCUR;
  public:
   // Constructors
-  PRXCOL(PCOLDEF cdp, PTDB tdbp, PCOL cprec, int i, PSZ am = "PRX");
+  PRXCOL(PCOLDEF cdp, PTDB tdbp, PCOL cprec, int i, PCSZ am = "PRX");
   PRXCOL(PRXCOL *colp, PTDB tdbp); // Constructor used in copy process
 
   // Implementation
@@ -115,7 +116,7 @@ class DllExport PRXCOL : public COLBLK {
                 {return false;}
   virtual void ReadColumn(PGLOBAL g);
   virtual void WriteColumn(PGLOBAL g);
-  virtual bool Init(PGLOBAL g, PTDBASE tp);
+  virtual bool Init(PGLOBAL g, PTDB tp);
 
  protected:
           char *Decode(PGLOBAL g, const char *cnm);

@@ -31,13 +31,13 @@ table7, table8, table9, table10, table11, table12, table13,
 table14, table15, table16, table17, table18, table19, table20,
 table21, table22, table23, table24, table25, table26, table27,
 table28;
-ERROR 42S02: Unknown table 'mysqltest.table1,mysqltest.table2,mysqltest.table3,mysqltest.table4,mysqltest.table5,mysqltest.table'
+ERROR 42S02: Unknown table 'mysqltest.table1,mysqltest.table2,mysqltest.table3,mysqltest.table4,mysqltest.table5,mysqltest.ta...'
 drop table table1, table2, table3, table4, table5, table6,
 table7, table8, table9, table10, table11, table12, table13,
 table14, table15, table16, table17, table18, table19, table20,
 table21, table22, table23, table24, table25, table26, table27,
 table28, table29, table30;
-ERROR 42S02: Unknown table 'mysqltest.table1,mysqltest.table2,mysqltest.table3,mysqltest.table4,mysqltest.table5,mysqltest.table'
+ERROR 42S02: Unknown table 'mysqltest.table1,mysqltest.table2,mysqltest.table3,mysqltest.table4,mysqltest.table5,mysqltest.ta...'
 use test;
 drop database mysqltest;
 flush tables with read lock;
@@ -82,13 +82,22 @@ drop table if exists t1;
 create table t1 (i int);
 create database mysqltest;
 lock tables t1 read;
+connect  addconroot1, localhost, root,,;
 drop table t1;
+connect  addconroot2, localhost, root,,;
 show open tables;
 drop database mysqltest;
+connection default;
 select 1;
 1
 1
 unlock tables;
+connection addconroot1;
+connection addconroot2;
+disconnect addconroot2;
+connection addconroot1;
+disconnect addconroot1;
+connection default;
 drop table if exists t1,t2;
 create table t1 (a int);
 create table t2 (a int);
@@ -99,14 +108,20 @@ drop table t1;
 ERROR HY000: Table 't1' was locked with a READ lock and can't be updated
 unlock tables;
 drop table t1,t2;
+connect  addconroot, localhost, root,,;
+connection default;
 create table t1 (i int);
 create table t2 (i int);
 lock tables t1 read;
+connection addconroot;
 lock tables t2 read;
 drop table t1;
 ERROR HY000: Table 't1' was not locked with LOCK TABLES
+connection default;
 drop table t1,t2;
 ERROR HY000: Table 't1' was locked with a READ lock and can't be updated
+disconnect addconroot;
+connection default;
 unlock tables;
 drop table t1,t2;
 End of 5.0 tests
@@ -209,3 +224,9 @@ INSERT INTO table1 VALUES (1);
 ERROR 42S02: Unknown table 't.notable'
 DROP TABLE table1,table2;
 # End BUG#34750
+#
+# MDEV-11105 Table named 'db' has weird side effect.
+#
+CREATE DATABASE mysqltest;
+CREATE TABLE mysqltest.db(id INT);
+DROP DATABASE mysqltest;

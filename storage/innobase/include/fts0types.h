@@ -1,6 +1,7 @@
 /*****************************************************************************
 
-Copyright (c) 2007, 2011, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2007, 2016, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2017, 2021, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -12,7 +13,7 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
-51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
 
 *****************************************************************************/
 
@@ -26,16 +27,16 @@ Created 2007-03-27 Sunny Bains
 #ifndef INNOBASE_FTS0TYPES_H
 #define INNOBASE_FTS0TYPES_H
 
+#include "fts0fts.h"
+#include "fut0fut.h"
+#include "pars0pars.h"
 #include "que0types.h"
 #include "ut0byte.h"
-#include "fut0fut.h"
 #include "ut0rbt.h"
-#include "fts0fts.h"
 
 /** Types used within FTS. */
 struct fts_que_t;
 struct fts_node_t;
-struct fts_utf8_str_t;
 
 /** Callbacks used within FTS. */
 typedef pars_user_func_cb_t fts_sql_callback;
@@ -79,20 +80,6 @@ struct fts_index_cache_t {
 	CHARSET_INFO*	charset;	/*!< charset */
 };
 
-/** For supporting the tracking of updates on multiple FTS indexes we need
-to track which FTS indexes need to be updated. For INSERT and DELETE we
-update all fts indexes. */
-struct fts_update_t {
-	doc_id_t	doc_id;		/*!< The doc id affected */
-
-	ib_vector_t*	fts_indexes;	/*!< The FTS indexes that need to be
-					updated. A NULL value means all
-					indexes need to be updated.  This
-					vector is not allocated on the heap
-					and so must be freed explicitly,
-					when we are done with it */
-};
-
 /** Stop word control infotmation. */
 struct fts_stopword_t {
 	ulint		status;		/*!< Status of the stopword tree */
@@ -122,7 +109,14 @@ struct fts_sync_t {
 	doc_id_t	max_doc_id;	/*!< The doc id at which the cache was
 					noted as being full, we use this to
 					set the upper_limit field */
-        ib_time_t	start_time;	/*!< SYNC start time */
+	time_t		start_time;	/*!< SYNC start time; only used if
+					fts_enable_diag_print */
+	bool		in_progress;	/*!< flag whether sync is in progress.*/
+	bool		unlock_cache;	/*!< flag whether unlock cache when
+					write fts node */
+	os_event_t	event;		/*!< sync finish event;
+					only os_event_set() and os_event_wait()
+					are used */
 };
 
 /** The cache for the FTS system. It is a memory-based inverted index
@@ -136,8 +130,6 @@ struct fts_cache_t {
 	rw_lock_t	init_lock;	/*!< lock used for the cache
 					intialization, it has different
 					SYNC level as above cache lock */
-
-	ib_mutex_t	optimize_lock;	/*!< Lock for OPTIMIZE */
 
 	ib_mutex_t	deleted_lock;	/*!< Lock covering deleted_doc_ids */
 
@@ -155,16 +147,18 @@ struct fts_cache_t {
 					the document from the table. Each
 					element is of type fts_doc_t */
 
-	ulint		total_size;	/*!< total size consumed by the ilist
+	size_t		total_size;	/*!< total size consumed by the ilist
 					field of all nodes. SYNC is run
 					whenever this gets too big */
+	/** total_size at the time of the previous SYNC request */
+	size_t		total_size_at_sync;
+
 	fts_sync_t*	sync;		/*!< sync structure to sync data to
 					disk */
 	ib_alloc_t*	sync_heap;	/*!< The heap allocator, for indexes
 					and deleted_doc_ids, ie. transient
 					objects, they are recreated after
 					a SYNC is completed */
-
 
 	ib_alloc_t*	self_heap;	/*!< This heap is the heap out of
 					which an instance of the cache itself
@@ -212,6 +206,7 @@ struct fts_node_t {
 	ulint		ilist_size_alloc;
 					/*!< Allocated size of ilist in
 					bytes */
+	bool		synced;		/*!< flag whether the node is synced */
 };
 
 /** A tokenizer word. Contains information about one word. */
@@ -237,7 +232,7 @@ struct fts_fetch_t {
 	fts_sql_callback
 			read_record;	/*!< Callback for reading index
 					record */
-	ulint		total_memory;	/*!< Total memory used */
+	size_t		total_memory;	/*!< Total memory used */
 };
 
 /** For horizontally splitting an FTS auxiliary index */
@@ -266,6 +261,10 @@ struct fts_doc_t {
 					same lifespan, most notably
 					the vector of token positions */
 	CHARSET_INFO*	charset;	/*!< Document's charset info */
+
+	st_mysql_ftparser* parser;	/*!< fts plugin parser */
+
+	ib_rbt_t*	stopwords;	/*!< Stopwords */
 };
 
 /** A token and its positions within a document. */
@@ -279,33 +278,6 @@ struct fts_token_t {
 
 /** It's defined in fts/fts0fts.c */
 extern const fts_index_selector_t fts_index_selector[];
-
-/******************************************************************//**
-Compare two UTF-8 strings. */
-UNIV_INLINE
-int
-fts_utf8_string_cmp(
-/*================*/
-						/*!< out:
-						< 0 if n1 < n2,
-						0 if n1 == n2,
-						> 0 if n1 > n2 */
-	const void*	p1,			/*!< in: key */
-	const void*	p2);			/*!< in: node */
-
-/******************************************************************//**
-Compare two UTF-8 strings, and return match (0) if
-passed in "key" value equals or is the prefix of the "node" value. */
-UNIV_INLINE
-int
-fts_utf8_string_cmp_prefix(
-/*=======================*/
-						/*!< out:
-						< 0 if n1 < n2,
-						0 if n1 == n2,
-						> 0 if n1 > n2 */
-	const void*	p1,			/*!< in: key */
-	const void*	p2);			/*!< in: node */
 
 /******************************************************************//**
 Compare two fts_trx_row_t instances doc_ids. */
@@ -334,10 +306,9 @@ fts_ranking_doc_id_cmp(
 	const void*	p2);			/*!< in: id2 */
 
 /******************************************************************//**
-Compare two fts_update_t instances doc_ids. */
+Compare two doc_ids. */
 UNIV_INLINE
-int
-fts_update_doc_id_cmp(
+int fts_doc_id_cmp(
 /*==================*/
 						/*!< out:
 						< 0 if n1 < n2,
@@ -347,21 +318,11 @@ fts_update_doc_id_cmp(
 	const void*	p2);			/*!< in: id2 */
 
 /******************************************************************//**
-Decode and return the integer that was encoded using our VLC scheme.*/
-UNIV_INLINE
-ulint
-fts_decode_vlc(
-/*===========*/
-			/*!< out: value decoded */
-	byte**	ptr);	/*!< in: ptr to decode from, this ptr is
-			incremented by the number of bytes decoded */
-
-/******************************************************************//**
-Duplicate an UTF-8 string. */
+Duplicate a string. */
 UNIV_INLINE
 void
-fts_utf8_string_dup(
-/*================*/
+fts_string_dup(
+/*===========*/
 						/*!< out:
 						< 0 if n1 < n2,
 						0 if n1 == n2,
@@ -371,65 +332,6 @@ fts_utf8_string_dup(
 	mem_heap_t*		heap);		/*!< in: heap to use */
 
 /******************************************************************//**
-Return length of val if it were encoded using our VLC scheme. */
-UNIV_INLINE
-ulint
-fts_get_encoded_len(
-/*================*/
-						/*!< out: length of value
-						 encoded, in bytes */
-	ulint		val);			/*!< in: value to encode */
-
-/******************************************************************//**
-Encode an integer using our VLC scheme and return the length in bytes. */
-UNIV_INLINE
-ulint
-fts_encode_int(
-/*===========*/
-						/*!< out: length of value
-						encoded, in bytes */
-	ulint		val,			/*!< in: value to encode */
-	byte*		buf);			/*!< in: buffer, must have
-						enough space */
-
-/******************************************************************//**
-Decode a UTF-8 character.
-
-http://www.unicode.org/versions/Unicode4.0.0/ch03.pdf:
-
- Scalar Value              1st Byte 2nd Byte 3rd Byte 4th Byte
-00000000 0xxxxxxx          0xxxxxxx
-00000yyy yyxxxxxx          110yyyyy 10xxxxxx
-zzzzyyyy yyxxxxxx          1110zzzz 10yyyyyy 10xxxxxx
-000uuuzz zzzzyyyy yyxxxxxx 11110uuu 10zzzzzz 10yyyyyy 10xxxxxx
-
-This function decodes UTF-8 sequences up to 6 bytes (31 bits).
-
-On error *ptr will point to the first byte that was not correctly
-decoded. This will hopefully help in resyncing the input. */
-UNIV_INLINE
-ulint
-fts_utf8_decode(
-/*============*/
-						/*!< out: UTF8_ERROR if *ptr
-						did not point to a valid
-						UTF-8 sequence, or the
-						Unicode code point. */
-	const byte**	ptr);			/*!< in/out: pointer to
-						UTF-8 string. The
-						pointer is advanced to
-						the start of the next
-						character. */
-
-/******************************************************************//**
-Lowercase an UTF-8 string. */
-UNIV_INLINE
-void
-fts_utf8_tolower(
-/*=============*/
-	fts_string_t*	str);			/*!< in: string */
-
-/******************************************************************//**
 Get the selected FTS aux INDEX suffix. */
 UNIV_INLINE
 const char*
@@ -437,38 +339,18 @@ fts_get_suffix(
 /*===========*/
 	ulint		selected);		/*!< in: selected index */
 
-/********************************************************************
-Get the number of index selectors. */
-UNIV_INLINE
-ulint
-fts_get_n_selectors(void);
-/*=====================*/
-
-/******************************************************************//**
-Select the FTS auxiliary index for the given string.
+/** Select the FTS auxiliary index for the given character.
+@param[in]	cs	charset
+@param[in]	str	string
+@param[in]	len	string length in bytes
 @return the index to use for the string */
 UNIV_INLINE
 ulint
 fts_select_index(
-/*=============*/
-	const CHARSET_INFO*	cs,		/*!< Charset */
-	const byte*		str,		/*!< in: word string */
-	ulint			len);		/*!< in: string length */
+	const CHARSET_INFO*	cs,
+	const byte*		str,
+	ulint			len);
 
-/********************************************************************
-Select the next FTS auxiliary index for the given character.
-@return the next index to use for character */
-UNIV_INLINE
-ulint
-fts_select_next_index(
-/*==================*/
-	const CHARSET_INFO*	cs,		/*!< Charset */
-	const byte*		str,		/*!< in: string */
-	ulint			len);		/*!< in: string length */
-
-#ifndef UNIV_NONINL
-#include "fts0types.ic"
-#include "fts0vlc.ic"
-#endif
+#include "fts0types.inl"
 
 #endif /* INNOBASE_FTS0TYPES_H */

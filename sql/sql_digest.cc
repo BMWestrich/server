@@ -1,4 +1,5 @@
 /* Copyright (c) 2008, 2015, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2017, MariaDB Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -11,7 +12,7 @@
 
   You should have received a copy of the GNU General Public License
   along with this program; if not, write to the Free Software Foundation,
-  51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA */
+  51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA */
 
 /*
   This code needs extra visibility in the lexer structures
@@ -19,7 +20,7 @@
 
 #include "my_global.h"
 #include "my_md5.h"
-#include "mysqld_error.h"
+#include "unireg.h"
 
 #include "sql_string.h"
 #include "sql_class.h"
@@ -454,7 +455,8 @@ sql_digest_state* digest_add_token(sql_digest_state *state,
         }
       } while (found_unary);
     }
-    /* fall through, for case NULL_SYM below */
+    /* for case NULL_SYM below */
+    /* fall through */
     case LEX_HOSTNAME:
     case TEXT_STRING:
     case NCHAR_STRING:

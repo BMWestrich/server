@@ -1,5 +1,5 @@
 /* Copyright (c) 2000, 2016, Oracle and/or its affiliates.
-   Copyright (c) 2010, 2016, MariaDB
+   Copyright (c) 2010, 2018, MariaDB Corporation
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -12,7 +12,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 
 /**
@@ -229,7 +229,7 @@ static void do_skip(Copy_field *copy __attribute__((unused)))
 
   note: if the record we're copying from is NULL-complemetned (i.e. 
   from_field->table->null_row==1), it will also have all NULLable columns to be
-  set to NULLs, so we dont need to check table->null_row here.
+  set to NULLs, so we don't need to check table->null_row here.
 */
 
 static void do_copy_null(Copy_field *copy)
@@ -417,6 +417,13 @@ void Field::do_field_decimal(Copy_field *copy)
 }
 
 
+void Field::do_field_timestamp(Copy_field *copy)
+{
+  // XXX why couldn't we do it everywhere?
+  copy->from_field->save_in_field(copy->to_field);
+}
+
+
 void Field::do_field_temporal(Copy_field *copy)
 {
   MYSQL_TIME ltime;
@@ -467,20 +474,19 @@ static void do_cut_string(Copy_field *copy)
 
 static void do_cut_string_complex(Copy_field *copy)
 {						// Shorter string field
-  int well_formed_error;
   CHARSET_INFO *cs= copy->from_field->charset();
   const uchar *from_end= copy->from_ptr + copy->from_length;
-  uint copy_length= cs->cset->well_formed_len(cs,
-                                              (char*) copy->from_ptr,
-                                              (char*) from_end, 
-                                              copy->to_length / cs->mbmaxlen,
-                                              &well_formed_error);
+  Well_formed_prefix prefix(cs,
+                           (char*) copy->from_ptr,
+                           (char*) from_end,
+                           copy->to_length / cs->mbmaxlen);
+  uint copy_length= prefix.length();
   if (copy->to_length < copy_length)
     copy_length= copy->to_length;
   memcpy(copy->to_ptr, copy->from_ptr, copy_length);
 
   /* Check if we lost any important characters */
-  if (well_formed_error ||
+  if (prefix.well_formed_error_pos() ||
       cs->cset->scan(cs, (char*) copy->from_ptr + copy_length,
                      (char*) from_end,
                      MY_SEQ_SPACES) < (copy->from_length - copy_length))
@@ -534,22 +540,19 @@ static void do_varstring1(Copy_field *copy)
 
 static void do_varstring1_mb(Copy_field *copy)
 {
-  int well_formed_error;
   CHARSET_INFO *cs= copy->from_field->charset();
   uint from_length= (uint) *(uchar*) copy->from_ptr;
   const uchar *from_ptr= copy->from_ptr + 1;
   uint to_char_length= (copy->to_length - 1) / cs->mbmaxlen;
-  uint length= cs->cset->well_formed_len(cs, (char*) from_ptr,
-                                         (char*) from_ptr + from_length,
-                                         to_char_length, &well_formed_error);
-  if (length < from_length)
+  Well_formed_prefix prefix(cs, (char*) from_ptr, from_length, to_char_length);
+  if (prefix.length() < from_length)
   {
     if (current_thd->count_cuted_fields)
       copy->to_field->set_warning(Sql_condition::WARN_LEVEL_WARN,
                                   WARN_DATA_TRUNCATED, 1);
   }
-  *copy->to_ptr= (uchar) length;
-  memcpy(copy->to_ptr + 1, from_ptr, length);
+  *copy->to_ptr= (uchar) prefix.length();
+  memcpy(copy->to_ptr + 1, from_ptr, prefix.length());
 }
 
 
@@ -572,22 +575,19 @@ static void do_varstring2(Copy_field *copy)
 
 static void do_varstring2_mb(Copy_field *copy)
 {
-  int well_formed_error;
   CHARSET_INFO *cs= copy->from_field->charset();
   uint char_length= (copy->to_length - HA_KEY_BLOB_LENGTH) / cs->mbmaxlen;
   uint from_length= uint2korr(copy->from_ptr);
   const uchar *from_beg= copy->from_ptr + HA_KEY_BLOB_LENGTH;
-  uint length= cs->cset->well_formed_len(cs, (char*) from_beg,
-                                         (char*) from_beg + from_length,
-                                         char_length, &well_formed_error);
-  if (length < from_length)
+  Well_formed_prefix prefix(cs, (char*) from_beg, from_length, char_length);
+  if (prefix.length() < from_length)
   {
     if (current_thd->count_cuted_fields)
       copy->to_field->set_warning(Sql_condition::WARN_LEVEL_WARN,
                                   WARN_DATA_TRUNCATED, 1);
   }  
-  int2store(copy->to_ptr, length);
-  memcpy(copy->to_ptr+HA_KEY_BLOB_LENGTH, from_beg, length);
+  int2store(copy->to_ptr, prefix.length());
+  memcpy(copy->to_ptr+HA_KEY_BLOB_LENGTH, from_beg, prefix.length());
 }
  
 
@@ -607,7 +607,7 @@ void Copy_field::set(uchar *to,Field *from)
 {
   from_ptr=from->ptr;
   to_ptr=to;
-  from_length=from->pack_length();
+  from_length=from->pack_length_in_rec();
   if (from->maybe_null())
   {
     from_null_ptr=from->null_ptr;
@@ -642,9 +642,6 @@ void Copy_field::set(uchar *to,Field *from)
     Field_blob::store. Is this in order to trigger the call to 
     well_formed_copy_nchars, by changing the pointer copy->tmp.ptr()?
     That call will take place anyway in all known cases.
-
-  - The above causes a truncation to MAX_FIELD_WIDTH. Is this the intended 
-    effect? Truncation is handled by well_formed_copy_nchars anyway.
  */
 void Copy_field::set(Field *to,Field *from,bool save)
 {
@@ -658,9 +655,9 @@ void Copy_field::set(Field *to,Field *from,bool save)
   from_field=from;
   to_field=to;
   from_ptr=from->ptr;
-  from_length=from->pack_length();
+  from_length=from->pack_length_in_rec();
   to_ptr=  to->ptr;
-  to_length=to_field->pack_length();
+  to_length=to_field->pack_length_in_rec();
 
   // set up null handling
   from_null_ptr=to_null_ptr=0;
@@ -713,6 +710,16 @@ void Copy_field::set(Field *to,Field *from,bool save)
     do_copy2= to->get_copy_func(from);
   if (!do_copy)					// Not null
     do_copy=do_copy2;
+}
+
+
+Field::Copy_func *Field_timestamp::get_copy_func(const Field *from) const
+{
+  Field::Copy_func *copy= Field_temporal::get_copy_func(from);
+  if (copy == do_field_temporal && from->type() == MYSQL_TYPE_TIMESTAMP)
+    return do_field_timestamp;
+  else
+    return copy;
 }
 
 

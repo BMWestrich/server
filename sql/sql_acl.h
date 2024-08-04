@@ -2,6 +2,7 @@
 #define SQL_ACL_INCLUDED
 
 /* Copyright (c) 2000, 2010, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2017, MariaDB Corporation.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -14,41 +15,41 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #include "my_global.h"                          /* NO_EMBEDDED_ACCESS_CHECKS */
 #include "violite.h"                            /* SSL_type */
 #include "sql_class.h"                          /* LEX_COLUMN */
 
-#define SELECT_ACL      (1L << 0)
-#define INSERT_ACL      (1L << 1)
-#define UPDATE_ACL      (1L << 2)
-#define DELETE_ACL      (1L << 3)
-#define CREATE_ACL      (1L << 4)
-#define DROP_ACL        (1L << 5)
-#define RELOAD_ACL      (1L << 6)
-#define SHUTDOWN_ACL    (1L << 7)
-#define PROCESS_ACL     (1L << 8)
-#define FILE_ACL        (1L << 9)
-#define GRANT_ACL       (1L << 10)
-#define REFERENCES_ACL  (1L << 11)
-#define INDEX_ACL       (1L << 12)
-#define ALTER_ACL       (1L << 13)
-#define SHOW_DB_ACL     (1L << 14)
-#define SUPER_ACL       (1L << 15)
-#define CREATE_TMP_ACL  (1L << 16)
-#define LOCK_TABLES_ACL (1L << 17)
-#define EXECUTE_ACL     (1L << 18)
-#define REPL_SLAVE_ACL  (1L << 19)
-#define REPL_CLIENT_ACL (1L << 20)
-#define CREATE_VIEW_ACL (1L << 21)
-#define SHOW_VIEW_ACL   (1L << 22)
-#define CREATE_PROC_ACL (1L << 23)
-#define ALTER_PROC_ACL  (1L << 24)
-#define CREATE_USER_ACL (1L << 25)
-#define EVENT_ACL       (1L << 26)
-#define TRIGGER_ACL     (1L << 27)
-#define CREATE_TABLESPACE_ACL (1L << 28)
+#define SELECT_ACL      (1UL << 0)
+#define INSERT_ACL      (1UL << 1)
+#define UPDATE_ACL      (1UL << 2)
+#define DELETE_ACL      (1UL << 3)
+#define CREATE_ACL      (1UL << 4)
+#define DROP_ACL        (1UL << 5)
+#define RELOAD_ACL      (1UL << 6)
+#define SHUTDOWN_ACL    (1UL << 7)
+#define PROCESS_ACL     (1UL << 8)
+#define FILE_ACL        (1UL << 9)
+#define GRANT_ACL       (1UL << 10)
+#define REFERENCES_ACL  (1UL << 11)
+#define INDEX_ACL       (1UL << 12)
+#define ALTER_ACL       (1UL << 13)
+#define SHOW_DB_ACL     (1UL << 14)
+#define SUPER_ACL       (1UL << 15)
+#define CREATE_TMP_ACL  (1UL << 16)
+#define LOCK_TABLES_ACL (1UL << 17)
+#define EXECUTE_ACL     (1UL << 18)
+#define REPL_SLAVE_ACL  (1UL << 19)
+#define REPL_CLIENT_ACL (1UL << 20)
+#define CREATE_VIEW_ACL (1UL << 21)
+#define SHOW_VIEW_ACL   (1UL << 22)
+#define CREATE_PROC_ACL (1UL << 23)
+#define ALTER_PROC_ACL  (1UL << 24)
+#define CREATE_USER_ACL (1UL << 25)
+#define EVENT_ACL       (1UL << 26)
+#define TRIGGER_ACL     (1UL << 27)
+#define CREATE_TABLESPACE_ACL (1UL << 28)
 /*
   don't forget to update
   1. static struct show_privileges_st sys_privileges[]
@@ -57,7 +58,7 @@
   4. acl_init() or whatever - to define behaviour for old privilege tables
   5. sql_yacc.yy - for GRANT/REVOKE to work
 */
-#define NO_ACCESS       (1L << 30)
+#define NO_ACCESS       (1UL << 30)
 #define DB_ACLS \
 (UPDATE_ACL | SELECT_ACL | INSERT_ACL | DELETE_ACL | CREATE_ACL | DROP_ACL | \
  GRANT_ACL | REFERENCES_ACL | INDEX_ACL | ALTER_ACL | CREATE_TMP_ACL | \
@@ -189,8 +190,12 @@ extern LEX_STRING current_user_and_current_role;
 
 static inline int access_denied_error_code(int passwd_used)
 {
+#ifdef mysqld_error_find_printf_error_used
+  return 0;
+#else
   return passwd_used == 2 ? ER_ACCESS_DENIED_NO_PASSWORD_ERROR
                           : ER_ACCESS_DENIED_ERROR;
+#endif
 }
 
 
@@ -241,6 +246,8 @@ ulong get_table_grant(THD *thd, TABLE_LIST *table);
 ulong get_column_grant(THD *thd, GRANT_INFO *grant,
                        const char *db_name, const char *table_name,
                        const char *field_name);
+bool get_show_user(THD *thd, LEX_USER *lex_user, const char **username,
+                   const char **hostname, const char **rolename);
 void mysql_show_grants_get_fields(THD *thd, List<Item> *fields,
                                   const char *name);
 bool mysql_show_grants(THD *thd, LEX_USER *user);
@@ -402,11 +409,19 @@ bool acl_check_proxy_grant_access (THD *thd, const char *host, const char *user,
                                    bool with_grant);
 int acl_setrole(THD *thd, char *rolename, ulonglong access);
 int acl_check_setrole(THD *thd, char *rolename, ulonglong *access);
-int acl_check_set_default_role(THD *thd, const char *host, const char *user);
+int acl_check_set_default_role(THD *thd, const char *host, const char *user, const char *role);
 int acl_set_default_role(THD *thd, const char *host, const char *user,
                          const char *rolename);
 
 extern SHOW_VAR acl_statistics[];
+
+/* Check if a role is granted to a user/role.
+
+   If hostname == NULL, search for a role as the starting grantee.
+*/
+bool check_role_is_granted(const char *username,
+                           const char *hostname,
+                           const char *rolename);
 
 #ifndef DBUG_OFF
 extern ulong role_global_merges, role_db_merges, role_table_merges,

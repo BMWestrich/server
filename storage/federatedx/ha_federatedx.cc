@@ -337,7 +337,6 @@ static const int bulk_padding= 64;              // bytes "overhead" in packet
 
 /* Variables used when chopping off trailing characters */
 static const uint sizeof_trailing_comma= sizeof(", ") - 1;
-static const uint sizeof_trailing_closeparen= sizeof(") ") - 1;
 static const uint sizeof_trailing_and= sizeof(" AND ") - 1;
 static const uint sizeof_trailing_where= sizeof(" WHERE ") - 1;
 
@@ -500,8 +499,7 @@ bool append_ident(String *string, const char *name, uint length,
     for (name_end= name+length; name < name_end; name+= clen)
     {
       uchar c= *(uchar *) name;
-      if (!(clen= my_mbcharlen(system_charset_info, c)))
-        clen= 1;
+      clen= my_charlen_fix(system_charset_info, name, name_end);
       if (clen == 1 && c == (uchar) quote_char &&
           (result= string->append(&quote_char, 1, system_charset_info)))
         goto err;
@@ -555,8 +553,8 @@ int get_connection(MEM_ROOT *mem_root, FEDERATEDX_SHARE *share)
     error_num=1;
     goto error;
   }
-  DBUG_PRINT("info", ("get_server_by_name returned server at %lx",
-                      (long unsigned int) server));
+  DBUG_PRINT("info", ("get_server_by_name returned server at %p",
+                      server));
 
   /*
     Most of these should never be empty strings, error handling will
@@ -657,15 +655,15 @@ static int parse_url(MEM_ROOT *mem_root, FEDERATEDX_SHARE *share,
 
   share->port= 0;
   share->socket= 0;
-  DBUG_PRINT("info", ("share at %lx", (long unsigned int) share));
+  DBUG_PRINT("info", ("share at %p", share));
   DBUG_PRINT("info", ("Length: %u", (uint) table_s->connect_string.length));
   DBUG_PRINT("info", ("String: '%.*s'", (int) table_s->connect_string.length,
                       table_s->connect_string.str));
   share->connection_string= strmake_root(mem_root, table_s->connect_string.str,
                                        table_s->connect_string.length);
 
-  DBUG_PRINT("info",("parse_url alloced share->connection_string %lx",
-                     (long unsigned int) share->connection_string));
+  DBUG_PRINT("info",("parse_url alloced share->connection_string %p",
+                     share->connection_string));
 
   DBUG_PRINT("info",("share->connection_string: %s",share->connection_string));
   /*
@@ -678,9 +676,9 @@ static int parse_url(MEM_ROOT *mem_root, FEDERATEDX_SHARE *share,
 
     DBUG_PRINT("info",
                ("share->connection_string: %s  internal format "
-                "share->connection_string: %lx",
+                "share->connection_string: %p",
                 share->connection_string,
-                (ulong) share->connection_string));
+                share->connection_string));
 
     /* ok, so we do a little parsing, but not completely! */
     share->parsed= FALSE;
@@ -733,8 +731,8 @@ static int parse_url(MEM_ROOT *mem_root, FEDERATEDX_SHARE *share,
     // Add a null for later termination of table name
     share->connection_string[table_s->connect_string.length]= 0;
     share->scheme= share->connection_string;
-    DBUG_PRINT("info",("parse_url alloced share->scheme: %lx",
-                       (ulong) share->scheme));
+    DBUG_PRINT("info",("parse_url alloced share->scheme: %p",
+                       share->scheme));
 
     /*
       Remove addition of null terminator and store length
@@ -861,7 +859,7 @@ uint ha_federatedx::convert_row_to_internal_format(uchar *record,
   ulong *lengths;
   Field **field;
   int column= 0;
-  my_bitmap_map *old_map= dbug_tmp_use_all_columns(table, table->write_set);
+  MY_BITMAP *old_map= dbug_tmp_use_all_columns(table, &table->write_set);
   DBUG_ENTER("ha_federatedx::convert_row_to_internal_format");
 
   lengths= io->fetch_lengths(result);
@@ -887,7 +885,7 @@ uint ha_federatedx::convert_row_to_internal_format(uchar *record,
     }
     (*field)->move_field_offset(-old_ptr);
   }
-  dbug_tmp_restore_column_map(table->write_set, old_map);
+  dbug_tmp_restore_column_map(&table->write_set, old_map);
   DBUG_RETURN(0);
 }
 
@@ -1215,14 +1213,13 @@ bool ha_federatedx::create_where_from_key(String *to,
   char tmpbuff[FEDERATEDX_QUERY_BUFFER_SIZE];
   String tmp(tmpbuff, sizeof(tmpbuff), system_charset_info);
   const key_range *ranges[2]= { start_key, end_key };
-  my_bitmap_map *old_map;
   DBUG_ENTER("ha_federatedx::create_where_from_key");
 
   tmp.length(0); 
   if (start_key == NULL && end_key == NULL)
     DBUG_RETURN(1);
 
-  old_map= dbug_tmp_use_all_columns(table, table->write_set);
+  MY_BITMAP *old_map= dbug_tmp_use_all_columns(table, &table->write_set);
   for (uint i= 0; i <= 1; i++)
   {
     bool needs_quotes;
@@ -1319,7 +1316,7 @@ bool ha_federatedx::create_where_from_key(String *to,
           break;
         }
         DBUG_PRINT("info", ("federatedx HA_READ_AFTER_KEY %d", i));
-        if (store_length >= length) /* end key */
+        if (store_length >= length || i > 0) /* end key */
         {
           if (emit_key_part_name(&tmp, key_part))
             goto err;
@@ -1342,6 +1339,7 @@ bool ha_federatedx::create_where_from_key(String *to,
           }
           break;
         }
+        /* fall through */
       case HA_READ_KEY_OR_NEXT:
         DBUG_PRINT("info", ("federatedx HA_READ_KEY_OR_NEXT %d", i));
         if (emit_key_part_name(&tmp, key_part) ||
@@ -1361,6 +1359,7 @@ bool ha_federatedx::create_where_from_key(String *to,
             goto err;
           break;
         }
+        /* fall through */
       case HA_READ_KEY_OR_PREV:
         DBUG_PRINT("info", ("federatedx HA_READ_KEY_OR_PREV %d", i));
         if (emit_key_part_name(&tmp, key_part) ||
@@ -1396,7 +1395,7 @@ prepare_for_next_key_part:
                   tmp.c_ptr_quick()));
     }
   }
-  dbug_tmp_restore_column_map(table->write_set, old_map);
+  dbug_tmp_restore_column_map(&table->write_set, old_map);
 
   if (both_not_null)
     if (tmp.append(STRING_WITH_LEN(") ")))
@@ -1411,7 +1410,7 @@ prepare_for_next_key_part:
   DBUG_RETURN(0);
 
 err:
-  dbug_tmp_restore_column_map(table->write_set, old_map);
+  dbug_tmp_restore_column_map(&table->write_set, old_map);
   DBUG_RETURN(1);
 }
 
@@ -1721,7 +1720,7 @@ ha_rows ha_federatedx::records_in_range(uint inx, key_range *start_key,
 
 federatedx_txn *ha_federatedx::get_txn(THD *thd, bool no_create)
 {
-  federatedx_txn **txnp= (federatedx_txn **) ha_data(thd);
+  federatedx_txn **txnp= (federatedx_txn **) thd_ha_data(thd, ht);
   if (!*txnp && !no_create)
     *txnp= new federatedx_txn();
   return *txnp;
@@ -1762,7 +1761,7 @@ int ha_federatedx::open(const char *name, int mode, uint test_if_locked)
 
   txn= get_txn(thd);
 
-  if ((error= txn->acquire(share, TRUE, &io)))
+  if ((error= txn->acquire(share, thd, TRUE, &io)))
   {
     free_share(txn, share);
     DBUG_RETURN(error);
@@ -1788,7 +1787,7 @@ public:
 
 public:
   bool handle_condition(THD *thd, uint sql_errno, const char* sqlstate,
-                        Sql_condition::enum_warning_level level,
+                        Sql_condition::enum_warning_level *level,
                         const char* msg, Sql_condition ** cond_hdl)
   {
     return sql_errno >= ER_ABORTING_CONNECTION &&
@@ -1978,7 +1977,7 @@ int ha_federatedx::write_row(uchar *buf)
   String insert_field_value_string(insert_field_value_buffer,
                                    sizeof(insert_field_value_buffer),
                                    &my_charset_bin);
-  my_bitmap_map *old_map= dbug_tmp_use_all_columns(table, table->read_set);
+  MY_BITMAP *old_map= dbug_tmp_use_all_columns(table, &table->read_set);
   DBUG_ENTER("ha_federatedx::write_row");
 
   values_string.length(0);
@@ -2032,7 +2031,7 @@ int ha_federatedx::write_row(uchar *buf)
       values_string.append(STRING_WITH_LEN(", "));
     }
   }
-  dbug_tmp_restore_column_map(table->read_set, old_map);
+  dbug_tmp_restore_column_map(&table->read_set, old_map);
 
   /*
     if there were no fields, we don't want to add a closing paren
@@ -2047,7 +2046,7 @@ int ha_federatedx::write_row(uchar *buf)
   /* we always want to append this, even if there aren't any fields */
   values_string.append(STRING_WITH_LEN(") "));
 
-  if ((error= txn->acquire(share, FALSE, &io)))
+  if ((error= txn->acquire(share, ha_thd(), FALSE, &io)))
     DBUG_RETURN(error);
 
   if (use_bulk_insert)
@@ -2136,7 +2135,7 @@ void ha_federatedx::start_bulk_insert(ha_rows rows, uint flags)
     Make sure we have an open connection so that we know the 
     maximum packet size.
   */
-  if (txn->acquire(share, FALSE, &io))
+  if (txn->acquire(share, ha_thd(), FALSE, &io))
     DBUG_VOID_RETURN;
 
   page_size= (uint) my_getpagesize();
@@ -2157,7 +2156,7 @@ void ha_federatedx::start_bulk_insert(ha_rows rows, uint flags)
   
   @return Operation status
   @retval       0       No error
-  @retval       != 0    Error occured at remote server. Also sets my_errno.
+  @retval       != 0    Error occurred at remote server. Also sets my_errno.
 */
 
 int ha_federatedx::end_bulk_insert()
@@ -2167,7 +2166,7 @@ int ha_federatedx::end_bulk_insert()
   
   if (bulk_insert.str && bulk_insert.length && !table_will_be_deleted)
   {
-    if ((error= txn->acquire(share, FALSE, &io)))
+    if ((error= txn->acquire(share, ha_thd(), FALSE, &io)))
       DBUG_RETURN(error);
     if (io->query(bulk_insert.str, bulk_insert.length))
       error= stash_remote_error();
@@ -2219,7 +2218,7 @@ int ha_federatedx::optimize(THD* thd, HA_CHECK_OPT* check_opt)
 
   DBUG_ASSERT(txn == get_txn(thd));
 
-  if ((error= txn->acquire(share, FALSE, &io)))
+  if ((error= txn->acquire(share, thd, FALSE, &io)))
     DBUG_RETURN(error);
 
   if (io->query(query.ptr(), query.length()))
@@ -2251,7 +2250,7 @@ int ha_federatedx::repair(THD* thd, HA_CHECK_OPT* check_opt)
 
   DBUG_ASSERT(txn == get_txn(thd));
 
-  if ((error= txn->acquire(share, FALSE, &io)))
+  if ((error= txn->acquire(share, thd, FALSE, &io)))
     DBUG_RETURN(error);
 
   if (io->query(query.ptr(), query.length()))
@@ -2354,7 +2353,7 @@ int ha_federatedx::update_row(const uchar *old_data, uchar *new_data)
       else
       {
         /* otherwise = */
-        my_bitmap_map *old_map= tmp_use_all_columns(table, table->read_set);
+        MY_BITMAP *old_map= tmp_use_all_columns(table, &table->read_set);
         bool needs_quote= (*field)->str_needs_quotes();
 	(*field)->val_str(&field_value);
         if (needs_quote)
@@ -2363,7 +2362,7 @@ int ha_federatedx::update_row(const uchar *old_data, uchar *new_data)
         if (needs_quote)
           update_string.append(value_quote_char);
         field_value.length(0);
-        tmp_restore_column_map(table->read_set, old_map);
+        tmp_restore_column_map(&table->read_set, old_map);
       }
       update_string.append(STRING_WITH_LEN(", "));
     }
@@ -2410,7 +2409,7 @@ int ha_federatedx::update_row(const uchar *old_data, uchar *new_data)
   if (!has_a_primary_key)
     update_string.append(STRING_WITH_LEN(" LIMIT 1"));
 
-  if ((error= txn->acquire(share, FALSE, &io)))
+  if ((error= txn->acquire(share, ha_thd(), FALSE, &io)))
     DBUG_RETURN(error);
 
   if (io->query(update_string.ptr(), update_string.length()))
@@ -2488,7 +2487,7 @@ int ha_federatedx::delete_row(const uchar *buf)
   DBUG_PRINT("info",
              ("Delete sql: %s", delete_string.c_ptr_quick()));
 
-  if ((error= txn->acquire(share, FALSE, &io)))
+  if ((error= txn->acquire(share, ha_thd(), FALSE, &io)))
     DBUG_RETURN(error);
 
   if (io->query(delete_string.ptr(), delete_string.length()))
@@ -2597,7 +2596,7 @@ int ha_federatedx::index_read_idx_with_result_set(uchar *buf, uint index,
                         NULL, 0, 0);
   sql_query.append(index_string);
 
-  if ((retval= txn->acquire(share, TRUE, &io)))
+  if ((retval= txn->acquire(share, ha_thd(), TRUE, &io)))
     DBUG_RETURN(retval);
 
   if (io->query(sql_query.ptr(), sql_query.length()))
@@ -2677,7 +2676,7 @@ int ha_federatedx::read_range_first(const key_range *start_key,
                         &table->key_info[active_index],
                         start_key, end_key, 0, eq_range_arg);
 
-  if ((retval= txn->acquire(share, TRUE, &io)))
+  if ((retval= txn->acquire(share, ha_thd(), TRUE, &io)))
     DBUG_RETURN(retval);
 
   if (stored_result)
@@ -2777,7 +2776,7 @@ int ha_federatedx::rnd_init(bool scan)
   {
     int error;
 
-    if ((error= txn->acquire(share, TRUE, &io)))
+    if ((error= txn->acquire(share, ha_thd(), TRUE, &io)))
       DBUG_RETURN(error);
 
     if (stored_result)
@@ -2824,7 +2823,7 @@ int ha_federatedx::free_result()
   else
   {
     federatedx_io *tmp_io= 0, **iop;
-    if (!*(iop= &io) && (error= txn->acquire(share, TRUE, (iop= &tmp_io))))
+    if (!*(iop= &io) && (error= txn->acquire(share, ha_thd(), TRUE, (iop= &tmp_io))))
     {
       DBUG_ASSERT(0);                             // Fail when testing
       insert_dynamic(&results, (uchar*) &stored_result);
@@ -2904,11 +2903,11 @@ int ha_federatedx::read_next(uchar *buf, FEDERATEDX_IO_RESULT *result)
   FEDERATEDX_IO_ROW *row;
   DBUG_ENTER("ha_federatedx::read_next");
 
-  if ((retval= txn->acquire(share, TRUE, &io)))
+  if ((retval= txn->acquire(share, ha_thd(), TRUE, &io)))
     DBUG_RETURN(retval);
 
   /* Fetch a row, insert it back in a row format. */
-  if (!(row= io->fetch_row(result)))
+  if (!(row= io->fetch_row(result, &current)))
     DBUG_RETURN(HA_ERR_END_OF_FILE);
 
   if (!(retval= convert_row_to_internal_format(buf, row, result)))
@@ -2949,10 +2948,10 @@ void ha_federatedx::position(const uchar *record __attribute__ ((unused)))
     DBUG_VOID_RETURN;
   }
 
-  if (txn->acquire(share, TRUE, &io))
+  if (txn->acquire(share, ha_thd(), TRUE, &io))
     DBUG_VOID_RETURN;
 
-  io->mark_position(stored_result, ref);
+  io->mark_position(stored_result, ref, current);
 
   position_called= TRUE;
 
@@ -2978,7 +2977,7 @@ int ha_federatedx::rnd_pos(uchar *buf, uchar *pos)
   /* We have to move this to 'ref' to get things aligned */
   bmove(ref, pos, ref_length);
 
-  if ((retval= txn->acquire(share, TRUE, &io)))
+  if ((retval= txn->acquire(share, ha_thd(), TRUE, &io)))
     goto error;
 
   if ((retval= io->seek_position(&result, ref)))
@@ -3052,7 +3051,7 @@ int ha_federatedx::info(uint flag)
   /* we want not to show table status if not needed to do so */
   if (flag & (HA_STATUS_VARIABLE | HA_STATUS_CONST | HA_STATUS_AUTO))
   {
-    if (!*(iop= &io) && (error_code= tmp_txn->acquire(share, TRUE, (iop= &tmp_io))))
+    if (!*(iop= &io) && (error_code= tmp_txn->acquire(share, thd, TRUE, (iop= &tmp_io))))
       goto fail;
   }
 
@@ -3153,6 +3152,7 @@ int ha_federatedx::extra(ha_extra_function operation)
 
 int ha_federatedx::reset(void)
 {
+  THD *thd= ha_thd();
   int error = 0;
 
   insert_dup_update= FALSE;
@@ -3170,9 +3170,9 @@ int ha_federatedx::reset(void)
     federatedx_io *tmp_io= 0, **iop;
 
     // external_lock may not have been called so txn may not be set
-    tmp_txn= get_txn(ha_thd());
+    tmp_txn= get_txn(thd);
 
-    if (!*(iop= &io) && (error= tmp_txn->acquire(share, TRUE, (iop= &tmp_io))))
+    if (!*(iop= &io) && (error= tmp_txn->acquire(share, thd, TRUE, (iop= &tmp_io))))
     {
       DBUG_ASSERT(0);                             // Fail when testing
       return error;
@@ -3206,6 +3206,7 @@ int ha_federatedx::reset(void)
 
 int ha_federatedx::delete_all_rows()
 {
+  THD *thd= ha_thd();
   char query_buffer[FEDERATEDX_QUERY_BUFFER_SIZE];
   String query(query_buffer, sizeof(query_buffer), &my_charset_bin);
   int error;
@@ -3219,14 +3220,14 @@ int ha_federatedx::delete_all_rows()
                ident_quote_char);
 
   /* no need for savepoint in autocommit mode */
-  if (!(ha_thd()->variables.option_bits & (OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN)))
+  if (!(thd->variables.option_bits & (OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN)))
     txn->stmt_autocommit();
 
   /*
     TRUNCATE won't return anything in mysql_affected_rows
   */
 
-  if ((error= txn->acquire(share, FALSE, &io)))
+  if ((error= txn->acquire(share, thd, FALSE, &io)))
     DBUG_RETURN(error);
 
   if (io->query(query.ptr(), query.length()))
@@ -3371,7 +3372,7 @@ int ha_federatedx::create(const char *name, TABLE *table_arg,
   if (tmp_share.s)
   {
     tmp_txn= get_txn(thd);
-    if (!(retval= tmp_txn->acquire(&tmp_share, TRUE, &tmp_io)))
+    if (!(retval= tmp_txn->acquire(&tmp_share, thd, TRUE, &tmp_io)))
     {
       retval= test_connection(thd, tmp_io, &tmp_share);
       tmp_txn->release(&tmp_io);
@@ -3468,7 +3469,7 @@ int ha_federatedx::external_lock(MYSQL_THD thd, int lock_type)
   {
     table_will_be_deleted = FALSE;
     txn= get_txn(thd);  
-    if (!(error= txn->acquire(share, lock_type == F_RDLCK, &io)) &&
+    if (!(error= txn->acquire(share, ha_thd(), lock_type == F_RDLCK, &io)) &&
         (lock_type == F_WRLCK || !io->is_autocommit()))
     {
       if (!thd_test_options(thd, (OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN)))
@@ -3643,7 +3644,7 @@ maria_declare_plugin(federatedx)
   &federatedx_storage_engine,
   "FEDERATED",
   "Patrick Galbraith",
-  "FederatedX pluggable storage engine",
+  "Allows to access tables on other MariaDB servers, supports transactions and more",
   PLUGIN_LICENSE_GPL,
   federatedx_db_init, /* Plugin Init */
   federatedx_done, /* Plugin Deinit */
